@@ -1,0 +1,34 @@
+{
+  "repository": "BibleNLP/ebible",
+  "branch": "main",
+  "verified_commit": "c531ff2da02843ded6d09afbe29a197ab844981f",
+  "commit_date_utc": "2025-05-09T10:48:28Z",
+  "verified_on": "2026-09-21",
+  "runtime_policy": "The importer reads the current main branch and records SHA-256 for every downloaded edition.",
+  "verified_examples": [
+    {
+      "language": "rus",
+      "translation_id": "russyn",
+      "title": "Синодальный перевод",
+      "license": "Public Domain"
+    },
+    {
+      "language": "ukr",
+      "translation_id": "ukr1871",
+      "title": "Новий Завіт. Переклад П. Куліша",
+      "license": "Public Domain"
+    },
+    {
+      "language": "eng",
+      "translation_id": "eng-web",
+      "title": "World English Bible",
+      "license": "Public Domain"
+    },
+    {
+      "language": "spa",
+      "translation_id": "spaRV1909",
+      "title": "Santa Biblia — Reina Valera 1909",
+      "license": "Public Domain"
+    }
+  ]
+}

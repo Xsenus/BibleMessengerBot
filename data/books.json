@@ -1,0 +1,862 @@
+[
+  {
+    "code": "GEN",
+    "canonical_order": 1,
+    "testament": "OT",
+    "default_name": "Genesis",
+    "names": {
+      "en": "Genesis",
+      "ru": "Бытие"
+    }
+  },
+  {
+    "code": "EXO",
+    "canonical_order": 2,
+    "testament": "OT",
+    "default_name": "Exodus",
+    "names": {
+      "en": "Exodus",
+      "ru": "Исход"
+    }
+  },
+  {
+    "code": "LEV",
+    "canonical_order": 3,
+    "testament": "OT",
+    "default_name": "Leviticus",
+    "names": {
+      "en": "Leviticus",
+      "ru": "Левит"
+    }
+  },
+  {
+    "code": "NUM",
+    "canonical_order": 4,
+    "testament": "OT",
+    "default_name": "Numbers",
+    "names": {
+      "en": "Numbers",
+      "ru": "Числа"
+    }
+  },
+  {
+    "code": "DEU",
+    "canonical_order": 5,
+    "testament": "OT",
+    "default_name": "Deuteronomy",
+    "names": {
+      "en": "Deuteronomy",
+      "ru": "Второзаконие"
+    }
+  },
+  {
+    "code": "JOS",
+    "canonical_order": 6,
+    "testament": "OT",
+    "default_name": "Joshua",
+    "names": {
+      "en": "Joshua",
+      "ru": "Иисус Навин"
+    }
+  },
+  {
+    "code": "JDG",
+    "canonical_order": 7,
+    "testament": "OT",
+    "default_name": "Judges",
+    "names": {
+      "en": "Judges",
+      "ru": "Судьи"
+    }
+  },
+  {
+    "code": "RUT",
+    "canonical_order": 8,
+    "testament": "OT",
+    "default_name": "Ruth",
+    "names": {
+      "en": "Ruth",
+      "ru": "Руфь"
+    }
+  },
+  {
+    "code": "1SA",
+    "canonical_order": 9,
+    "testament": "OT",
+    "default_name": "1 Samuel",
+    "names": {
+      "en": "1 Samuel",
+      "ru": "1 Царств"
+    }
+  },
+  {
+    "code": "2SA",
+    "canonical_order": 10,
+    "testament": "OT",
+    "default_name": "2 Samuel",
+    "names": {
+      "en": "2 Samuel",
+      "ru": "2 Царств"
+    }
+  },
+  {
+    "code": "1KI",
+    "canonical_order": 11,
+    "testament": "OT",
+    "default_name": "1 Kings",
+    "names": {
+      "en": "1 Kings",
+      "ru": "3 Царств"
+    }
+  },
+  {
+    "code": "2KI",
+    "canonical_order": 12,
+    "testament": "OT",
+    "default_name": "2 Kings",
+    "names": {
+      "en": "2 Kings",
+      "ru": "4 Царств"
+    }
+  },
+  {
+    "code": "1CH",
+    "canonical_order": 13,
+    "testament": "OT",
+    "default_name": "1 Chronicles",
+    "names": {
+      "en": "1 Chronicles",
+      "ru": "1 Паралипоменон"
+    }
+  },
+  {
+    "code": "2CH",
+    "canonical_order": 14,
+    "testament": "OT",
+    "default_name": "2 Chronicles",
+    "names": {
+      "en": "2 Chronicles",
+      "ru": "2 Паралипоменон"
+    }
+  },
+  {
+    "code": "EZR",
+    "canonical_order": 15,
+    "testament": "OT",
+    "default_name": "Ezra",
+    "names": {
+      "en": "Ezra",
+      "ru": "Ездра"
+    }
+  },
+  {
+    "code": "NEH",
+    "canonical_order": 16,
+    "testament": "OT",
+    "default_name": "Nehemiah",
+    "names": {
+      "en": "Nehemiah",
+      "ru": "Неемия"
+    }
+  },
+  {
+    "code": "EST",
+    "canonical_order": 17,
+    "testament": "OT",
+    "default_name": "Esther",
+    "names": {
+      "en": "Esther",
+      "ru": "Есфирь"
+    }
+  },
+  {
+    "code": "JOB",
+    "canonical_order": 18,
+    "testament": "OT",
+    "default_name": "Job",
+    "names": {
+      "en": "Job",
+      "ru": "Иов"
+    }
+  },
+  {
+    "code": "PSA",
+    "canonical_order": 19,
+    "testament": "OT",
+    "default_name": "Psalms",
+    "names": {
+      "en": "Psalms",
+      "ru": "Псалтирь"
+    }
+  },
+  {
+    "code": "PRO",
+    "canonical_order": 20,
+    "testament": "OT",
+    "default_name": "Proverbs",
+    "names": {
+      "en": "Proverbs",
+      "ru": "Притчи"
+    }
+  },
+  {
+    "code": "ECC",
+    "canonical_order": 21,
+    "testament": "OT",
+    "default_name": "Ecclesiastes",
+    "names": {
+      "en": "Ecclesiastes",
+      "ru": "Екклесиаст"
+    }
+  },
+  {
+    "code": "SNG",
+    "canonical_order": 22,
+    "testament": "OT",
+    "default_name": "Song of Songs",
+    "names": {
+      "en": "Song of Songs",
+      "ru": "Песнь Песней"
+    }
+  },
+  {
+    "code": "ISA",
+    "canonical_order": 23,
+    "testament": "OT",
+    "default_name": "Isaiah",
+    "names": {
+      "en": "Isaiah",
+      "ru": "Исаия"
+    }
+  },
+  {
+    "code": "JER",
+    "canonical_order": 24,
+    "testament": "OT",
+    "default_name": "Jeremiah",
+    "names": {
+      "en": "Jeremiah",
+      "ru": "Иеремия"
+    }
+  },
+  {
+    "code": "LAM",
+    "canonical_order": 25,
+    "testament": "OT",
+    "default_name": "Lamentations",
+    "names": {
+      "en": "Lamentations",
+      "ru": "Плач Иеремии"
+    }
+  },
+  {
+    "code": "EZK",
+    "canonical_order": 26,
+    "testament": "OT",
+    "default_name": "Ezekiel",
+    "names": {
+      "en": "Ezekiel",
+      "ru": "Иезекииль"
+    }
+  },
+  {
+    "code": "DAN",
+    "canonical_order": 27,
+    "testament": "OT",
+    "default_name": "Daniel",
+    "names": {
+      "en": "Daniel",
+      "ru": "Даниил"
+    }
+  },
+  {
+    "code": "HOS",
+    "canonical_order": 28,
+    "testament": "OT",
+    "default_name": "Hosea",
+    "names": {
+      "en": "Hosea",
+      "ru": "Осия"
+    }
+  },
+  {
+    "code": "JOL",
+    "canonical_order": 29,
+    "testament": "OT",
+    "default_name": "Joel",
+    "names": {
+      "en": "Joel",
+      "ru": "Иоиль"
+    }
+  },
+  {
+    "code": "AMO",
+    "canonical_order": 30,
+    "testament": "OT",
+    "default_name": "Amos",
+    "names": {
+      "en": "Amos",
+      "ru": "Амос"
+    }
+  },
+  {
+    "code": "OBA",
+    "canonical_order": 31,
+    "testament": "OT",
+    "default_name": "Obadiah",
+    "names": {
+      "en": "Obadiah",
+      "ru": "Авдий"
+    }
+  },
+  {
+    "code": "JON",
+    "canonical_order": 32,
+    "testament": "OT",
+    "default_name": "Jonah",
+    "names": {
+      "en": "Jonah",
+      "ru": "Иона"
+    }
+  },
+  {
+    "code": "MIC",
+    "canonical_order": 33,
+    "testament": "OT",
+    "default_name": "Micah",
+    "names": {
+      "en": "Micah",
+      "ru": "Михей"
+    }
+  },
+  {
+    "code": "NAM",
+    "canonical_order": 34,
+    "testament": "OT",
+    "default_name": "Nahum",
+    "names": {
+      "en": "Nahum",
+      "ru": "Наум"
+    }
+  },
+  {
+    "code": "HAB",
+    "canonical_order": 35,
+    "testament": "OT",
+    "default_name": "Habakkuk",
+    "names": {
+      "en": "Habakkuk",
+      "ru": "Аввакум"
+    }
+  },
+  {
+    "code": "ZEP",
+    "canonical_order": 36,
+    "testament": "OT",
+    "default_name": "Zephaniah",
+    "names": {
+      "en": "Zephaniah",
+      "ru": "Софония"
+    }
+  },
+  {
+    "code": "HAG",
+    "canonical_order": 37,
+    "testament": "OT",
+    "default_name": "Haggai",
+    "names": {
+      "en": "Haggai",
+      "ru": "Аггей"
+    }
+  },
+  {
+    "code": "ZEC",
+    "canonical_order": 38,
+    "testament": "OT",
+    "default_name": "Zechariah",
+    "names": {
+      "en": "Zechariah",
+      "ru": "Захария"
+    }
+  },
+  {
+    "code": "MAL",
+    "canonical_order": 39,
+    "testament": "OT",
+    "default_name": "Malachi",
+    "names": {
+      "en": "Malachi",
+      "ru": "Малахия"
+    }
+  },
+  {
+    "code": "TOB",
+    "canonical_order": 40,
+    "testament": "DC",
+    "default_name": "Tobit",
+    "names": {
+      "en": "Tobit",
+      "ru": "Товит"
+    }
+  },
+  {
+    "code": "JDT",
+    "canonical_order": 41,
+    "testament": "DC",
+    "default_name": "Judith",
+    "names": {
+      "en": "Judith",
+      "ru": "Иудифь"
+    }
+  },
+  {
+    "code": "ESG",
+    "canonical_order": 42,
+    "testament": "DC",
+    "default_name": "Greek Esther",
+    "names": {
+      "en": "Greek Esther",
+      "ru": "Есфирь (греческая)"
+    }
+  },
+  {
+    "code": "WIS",
+    "canonical_order": 43,
+    "testament": "DC",
+    "default_name": "Wisdom",
+    "names": {
+      "en": "Wisdom",
+      "ru": "Премудрость Соломона"
+    }
+  },
+  {
+    "code": "SIR",
+    "canonical_order": 44,
+    "testament": "DC",
+    "default_name": "Sirach",
+    "names": {
+      "en": "Sirach",
+      "ru": "Премудрость Иисуса, сына Сирахова"
+    }
+  },
+  {
+    "code": "BAR",
+    "canonical_order": 45,
+    "testament": "DC",
+    "default_name": "Baruch",
+    "names": {
+      "en": "Baruch",
+      "ru": "Варух"
+    }
+  },
+  {
+    "code": "LJE",
+    "canonical_order": 46,
+    "testament": "DC",
+    "default_name": "Letter of Jeremiah",
+    "names": {
+      "en": "Letter of Jeremiah",
+      "ru": "Послание Иеремии"
+    }
+  },
+  {
+    "code": "S3Y",
+    "canonical_order": 47,
+    "testament": "DC",
+    "default_name": "Song of the Three Youths",
+    "names": {
+      "en": "Song of the Three Youths",
+      "ru": "Песнь трёх отроков"
+    }
+  },
+  {
+    "code": "SUS",
+    "canonical_order": 48,
+    "testament": "DC",
+    "default_name": "Susanna",
+    "names": {
+      "en": "Susanna",
+      "ru": "Сусанна"
+    }
+  },
+  {
+    "code": "BEL",
+    "canonical_order": 49,
+    "testament": "DC",
+    "default_name": "Bel and the Dragon",
+    "names": {
+      "en": "Bel and the Dragon",
+      "ru": "Бел и Дракон"
+    }
+  },
+  {
+    "code": "1MA",
+    "canonical_order": 50,
+    "testament": "DC",
+    "default_name": "1 Maccabees",
+    "names": {
+      "en": "1 Maccabees",
+      "ru": "1 Маккавейская"
+    }
+  },
+  {
+    "code": "2MA",
+    "canonical_order": 51,
+    "testament": "DC",
+    "default_name": "2 Maccabees",
+    "names": {
+      "en": "2 Maccabees",
+      "ru": "2 Маккавейская"
+    }
+  },
+  {
+    "code": "3MA",
+    "canonical_order": 52,
+    "testament": "DC",
+    "default_name": "3 Maccabees",
+    "names": {
+      "en": "3 Maccabees",
+      "ru": "3 Маккавейская"
+    }
+  },
+  {
+    "code": "4MA",
+    "canonical_order": 53,
+    "testament": "DC",
+    "default_name": "4 Maccabees",
+    "names": {
+      "en": "4 Maccabees",
+      "ru": "4 Маккавейская"
+    }
+  },
+  {
+    "code": "1ES",
+    "canonical_order": 54,
+    "testament": "DC",
+    "default_name": "1 Esdras",
+    "names": {
+      "en": "1 Esdras",
+      "ru": "1 Ездры"
+    }
+  },
+  {
+    "code": "2ES",
+    "canonical_order": 55,
+    "testament": "DC",
+    "default_name": "2 Esdras",
+    "names": {
+      "en": "2 Esdras",
+      "ru": "2 Ездры"
+    }
+  },
+  {
+    "code": "MAN",
+    "canonical_order": 56,
+    "testament": "DC",
+    "default_name": "Prayer of Manasseh",
+    "names": {
+      "en": "Prayer of Manasseh",
+      "ru": "Молитва Манассии"
+    }
+  },
+  {
+    "code": "PS2",
+    "canonical_order": 57,
+    "testament": "DC",
+    "default_name": "Psalm 151",
+    "names": {
+      "en": "Psalm 151",
+      "ru": "Псалом 151"
+    }
+  },
+  {
+    "code": "ODA",
+    "canonical_order": 58,
+    "testament": "DC",
+    "default_name": "Odes",
+    "names": {
+      "en": "Odes",
+      "ru": "Оды"
+    }
+  },
+  {
+    "code": "PSS",
+    "canonical_order": 59,
+    "testament": "DC",
+    "default_name": "Psalms of Solomon",
+    "names": {
+      "en": "Psalms of Solomon",
+      "ru": "Псалмы Соломона"
+    }
+  },
+  {
+    "code": "MAT",
+    "canonical_order": 60,
+    "testament": "NT",
+    "default_name": "Matthew",
+    "names": {
+      "en": "Matthew",
+      "ru": "Матфея"
+    }
+  },
+  {
+    "code": "MRK",
+    "canonical_order": 61,
+    "testament": "NT",
+    "default_name": "Mark",
+    "names": {
+      "en": "Mark",
+      "ru": "Марка"
+    }
+  },
+  {
+    "code": "LUK",
+    "canonical_order": 62,
+    "testament": "NT",
+    "default_name": "Luke",
+    "names": {
+      "en": "Luke",
+      "ru": "Луки"
+    }
+  },
+  {
+    "code": "JHN",
+    "canonical_order": 63,
+    "testament": "NT",
+    "default_name": "John",
+    "names": {
+      "en": "John",
+      "ru": "Иоанна"
+    }
+  },
+  {
+    "code": "ACT",
+    "canonical_order": 64,
+    "testament": "NT",
+    "default_name": "Acts",
+    "names": {
+      "en": "Acts",
+      "ru": "Деяния"
+    }
+  },
+  {
+    "code": "ROM",
+    "canonical_order": 65,
+    "testament": "NT",
+    "default_name": "Romans",
+    "names": {
+      "en": "Romans",
+      "ru": "Римлянам"
+    }
+  },
+  {
+    "code": "1CO",
+    "canonical_order": 66,
+    "testament": "NT",
+    "default_name": "1 Corinthians",
+    "names": {
+      "en": "1 Corinthians",
+      "ru": "1 Коринфянам"
+    }
+  },
+  {
+    "code": "2CO",
+    "canonical_order": 67,
+    "testament": "NT",
+    "default_name": "2 Corinthians",
+    "names": {
+      "en": "2 Corinthians",
+      "ru": "2 Коринфянам"
+    }
+  },
+  {
+    "code": "GAL",
+    "canonical_order": 68,
+    "testament": "NT",
+    "default_name": "Galatians",
+    "names": {
+      "en": "Galatians",
+      "ru": "Галатам"
+    }
+  },
+  {
+    "code": "EPH",
+    "canonical_order": 69,
+    "testament": "NT",
+    "default_name": "Ephesians",
+    "names": {
+      "en": "Ephesians",
+      "ru": "Ефесянам"
+    }
+  },
+  {
+    "code": "PHP",
+    "canonical_order": 70,
+    "testament": "NT",
+    "default_name": "Philippians",
+    "names": {
+      "en": "Philippians",
+      "ru": "Филиппийцам"
+    }
+  },
+  {
+    "code": "COL",
+    "canonical_order": 71,
+    "testament": "NT",
+    "default_name": "Colossians",
+    "names": {
+      "en": "Colossians",
+      "ru": "Колоссянам"
+    }
+  },
+  {
+    "code": "1TH",
+    "canonical_order": 72,
+    "testament": "NT",
+    "default_name": "1 Thessalonians",
+    "names": {
+      "en": "1 Thessalonians",
+      "ru": "1 Фессалоникийцам"
+    }
+  },
+  {
+    "code": "2TH",
+    "canonical_order": 73,
+    "testament": "NT",
+    "default_name": "2 Thessalonians",
+    "names": {
+      "en": "2 Thessalonians",
+      "ru": "2 Фессалоникийцам"
+    }
+  },
+  {
+    "code": "1TI",
+    "canonical_order": 74,
+    "testament": "NT",
+    "default_name": "1 Timothy",
+    "names": {
+      "en": "1 Timothy",
+      "ru": "1 Тимофею"
+    }
+  },
+  {
+    "code": "2TI",
+    "canonical_order": 75,
+    "testament": "NT",
+    "default_name": "2 Timothy",
+    "names": {
+      "en": "2 Timothy",
+      "ru": "2 Тимофею"
+    }
+  },
+  {
+    "code": "TIT",
+    "canonical_order": 76,
+    "testament": "NT",
+    "default_name": "Titus",
+    "names": {
+      "en": "Titus",
+      "ru": "Титу"
+    }
+  },
+  {
+    "code": "PHM",
+    "canonical_order": 77,
+    "testament": "NT",
+    "default_name": "Philemon",
+    "names": {
+      "en": "Philemon",
+      "ru": "Филимону"
+    }
+  },
+  {
+    "code": "HEB",
+    "canonical_order": 78,
+    "testament": "NT",
+    "default_name": "Hebrews",
+    "names": {
+      "en": "Hebrews",
+      "ru": "Евреям"
+    }
+  },
+  {
+    "code": "JAS",
+    "canonical_order": 79,
+    "testament": "NT",
+    "default_name": "James",
+    "names": {
+      "en": "James",
+      "ru": "Иакова"
+    }
+  },
+  {
+    "code": "1PE",
+    "canonical_order": 80,
+    "testament": "NT",
+    "default_name": "1 Peter",
+    "names": {
+      "en": "1 Peter",
+      "ru": "1 Петра"
+    }
+  },
+  {
+    "code": "2PE",
+    "canonical_order": 81,
+    "testament": "NT",
+    "default_name": "2 Peter",
+    "names": {
+      "en": "2 Peter",
+      "ru": "2 Петра"
+    }
+  },
+  {
+    "code": "1JN",
+    "canonical_order": 82,
+    "testament": "NT",
+    "default_name": "1 John",
+    "names": {
+      "en": "1 John",
+      "ru": "1 Иоанна"
+    }
+  },
+  {
+    "code": "2JN",
+    "canonical_order": 83,
+    "testament": "NT",
+    "default_name": "2 John",
+    "names": {
+      "en": "2 John",
+      "ru": "2 Иоанна"
+    }
+  },
+  {
+    "code": "3JN",
+    "canonical_order": 84,
+    "testament": "NT",
+    "default_name": "3 John",
+    "names": {
+      "en": "3 John",
+      "ru": "3 Иоанна"
+    }
+  },
+  {
+    "code": "JUD",
+    "canonical_order": 85,
+    "testament": "NT",
+    "default_name": "Jude",
+    "names": {
+      "en": "Jude",
+      "ru": "Иуды"
+    }
+  },
+  {
+    "code": "REV",
+    "canonical_order": 86,
+    "testament": "NT",
+    "default_name": "Revelation",
+    "names": {
+      "en": "Revelation",
+      "ru": "Откровение"
+    }
+  }
+]

@@ -1,0 +1,551 @@
+{
+  "core": [
+    "eng",
+    "rus",
+    "ukr",
+    "spa",
+    "fra",
+    "deu",
+    "por",
+    "ita",
+    "nld",
+    "pol",
+    "ron",
+    "hbo",
+    "arb",
+    "tur",
+    "hin",
+    "ben",
+    "urd",
+    "tam",
+    "tel",
+    "vie",
+    "ind",
+    "cmn",
+    "jpn",
+    "kor",
+    "swh"
+  ],
+  "extended": [
+    "eng",
+    "rus",
+    "ukr",
+    "spa",
+    "fra",
+    "deu",
+    "por",
+    "ita",
+    "nld",
+    "pol",
+    "ces",
+    "slk",
+    "hun",
+    "ron",
+    "bul",
+    "srp",
+    "hrv",
+    "slv",
+    "swe",
+    "nob",
+    "dan",
+    "fin",
+    "ell",
+    "grc",
+    "hbo",
+    "arb",
+    "pes",
+    "tur",
+    "hin",
+    "ben",
+    "urd",
+    "pan",
+    "guj",
+    "mar",
+    "tam",
+    "tel",
+    "mal",
+    "kan",
+    "tha",
+    "vie",
+    "ind",
+    "zlm",
+    "cmn",
+    "yue",
+    "jpn",
+    "kor",
+    "swh",
+    "amh",
+    "som",
+    "hau",
+    "yor",
+    "ibo",
+    "zul",
+    "afr",
+    "tgl",
+    "lat"
+  ],
+  "languages": {
+    "eng": {
+      "native_name": "English",
+      "name_ru": "Английский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "eng-web",
+        "engwebu",
+        "engwebp",
+        "engweb",
+        "web",
+        "kjv",
+        "asv"
+      ]
+    },
+    "rus": {
+      "native_name": "Русский",
+      "name_ru": "Русский",
+      "script": "Cyrillic",
+      "direction": "ltr",
+      "preferred_ids": [
+        "russyn",
+        "rus_synodal",
+        "synodal"
+      ]
+    },
+    "ukr": {
+      "native_name": "Українська",
+      "name_ru": "Украинский",
+      "script": "Cyrillic",
+      "direction": "ltr",
+      "preferred_ids": [
+        "ukr1871",
+        "kulish"
+      ]
+    },
+    "spa": {
+      "native_name": "Español",
+      "name_ru": "Испанский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "spaRV1909",
+        "rv1909",
+        "spablm"
+      ]
+    },
+    "fra": {
+      "native_name": "Français",
+      "name_ru": "Французский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "frasbl",
+        "ostervald",
+        "lsg"
+      ]
+    },
+    "deu": {
+      "native_name": "Deutsch",
+      "name_ru": "Немецкий",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "deu1912",
+        "deu1951",
+        "luther"
+      ]
+    },
+    "por": {
+      "native_name": "Português",
+      "name_ru": "Португальский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "porbrbsl",
+        "almeida"
+      ]
+    },
+    "ita": {
+      "native_name": "Italiano",
+      "name_ru": "Итальянский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "ita1927",
+        "diodati"
+      ]
+    },
+    "nld": {
+      "native_name": "Nederlands",
+      "name_ru": "Нидерландский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "statenvertaling"
+      ]
+    },
+    "pol": {
+      "native_name": "Polski",
+      "name_ru": "Польский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "polubg",
+        "gdansk"
+      ]
+    },
+    "ces": {
+      "native_name": "Čeština",
+      "name_ru": "Чешский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "bkr",
+        "kral"
+      ]
+    },
+    "slk": {
+      "native_name": "Slovenčina",
+      "name_ru": "Словацкий",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "hun": {
+      "native_name": "Magyar",
+      "name_ru": "Венгерский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "karoli"
+      ]
+    },
+    "ron": {
+      "native_name": "Română",
+      "name_ru": "Румынский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "cornilescu"
+      ]
+    },
+    "bul": {
+      "native_name": "Български",
+      "name_ru": "Болгарский",
+      "script": "Cyrillic",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "srp": {
+      "native_name": "Српски",
+      "name_ru": "Сербский",
+      "script": "Cyrillic",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "hrv": {
+      "native_name": "Hrvatski",
+      "name_ru": "Хорватский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "slv": {
+      "native_name": "Slovenščina",
+      "name_ru": "Словенский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "swe": {
+      "native_name": "Svenska",
+      "name_ru": "Шведский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "nob": {
+      "native_name": "Norsk bokmål",
+      "name_ru": "Норвежский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "dan": {
+      "native_name": "Dansk",
+      "name_ru": "Датский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "fin": {
+      "native_name": "Suomi",
+      "name_ru": "Финский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "ell": {
+      "native_name": "Ελληνικά",
+      "name_ru": "Греческий",
+      "script": "Greek",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "grc": {
+      "native_name": "Koine Greek",
+      "name_ru": "Древнегреческий",
+      "script": "Greek",
+      "direction": "ltr",
+      "preferred_ids": [
+        "sbl",
+        "byz",
+        "tisch"
+      ]
+    },
+    "hbo": {
+      "native_name": "עברית מקראית",
+      "name_ru": "Библейский иврит",
+      "script": "Hebrew",
+      "direction": "rtl",
+      "preferred_ids": [
+        "hboWLC",
+        "wlc"
+      ]
+    },
+    "arb": {
+      "native_name": "العربية",
+      "name_ru": "Арабский",
+      "script": "Arabic",
+      "direction": "rtl",
+      "preferred_ids": [
+        "arb-vd",
+        "vandyk"
+      ]
+    },
+    "pes": {
+      "native_name": "فارسی",
+      "name_ru": "Персидский",
+      "script": "Arabic",
+      "direction": "rtl",
+      "preferred_ids": []
+    },
+    "tur": {
+      "native_name": "Türkçe",
+      "name_ru": "Турецкий",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "hin": {
+      "native_name": "हिन्दी",
+      "name_ru": "Хинди",
+      "script": "Devanagari",
+      "direction": "ltr",
+      "preferred_ids": [
+        "hin2017"
+      ]
+    },
+    "ben": {
+      "native_name": "বাংলা",
+      "name_ru": "Бенгальский",
+      "script": "Bengali",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "urd": {
+      "native_name": "اردو",
+      "name_ru": "Урду",
+      "script": "Arabic",
+      "direction": "rtl",
+      "preferred_ids": []
+    },
+    "pan": {
+      "native_name": "ਪੰਜਾਬੀ",
+      "name_ru": "Панджаби",
+      "script": "Gurmukhi",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "guj": {
+      "native_name": "ગુજરાતી",
+      "name_ru": "Гуджарати",
+      "script": "Gujarati",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "mar": {
+      "native_name": "मराठी",
+      "name_ru": "Маратхи",
+      "script": "Devanagari",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "tam": {
+      "native_name": "தமிழ்",
+      "name_ru": "Тамильский",
+      "script": "Tamil",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "tel": {
+      "native_name": "తెలుగు",
+      "name_ru": "Телугу",
+      "script": "Telugu",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "mal": {
+      "native_name": "മലയാളം",
+      "name_ru": "Малаялам",
+      "script": "Malayalam",
+      "direction": "ltr",
+      "preferred_ids": [
+        "mal"
+      ]
+    },
+    "kan": {
+      "native_name": "ಕನ್ನಡ",
+      "name_ru": "Каннада",
+      "script": "Kannada",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "tha": {
+      "native_name": "ไทย",
+      "name_ru": "Тайский",
+      "script": "Thai",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "vie": {
+      "native_name": "Tiếng Việt",
+      "name_ru": "Вьетнамский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "ind": {
+      "native_name": "Bahasa Indonesia",
+      "name_ru": "Индонезийский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "zlm": {
+      "native_name": "Bahasa Melayu",
+      "name_ru": "Малайский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "cmn": {
+      "native_name": "中文（普通话）",
+      "name_ru": "Китайский мандарин",
+      "script": "Han",
+      "direction": "ltr",
+      "preferred_ids": [
+        "cmn-cu89s",
+        "cu89s",
+        "cuv"
+      ]
+    },
+    "yue": {
+      "native_name": "粵語",
+      "name_ru": "Кантонский",
+      "script": "Han",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "jpn": {
+      "native_name": "日本語",
+      "name_ru": "Японский",
+      "script": "Japanese",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "kor": {
+      "native_name": "한국어",
+      "name_ru": "Корейский",
+      "script": "Hangul",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "swh": {
+      "native_name": "Kiswahili",
+      "name_ru": "Суахили",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "swhulb"
+      ]
+    },
+    "amh": {
+      "native_name": "አማርኛ",
+      "name_ru": "Амхарский",
+      "script": "Ethiopic",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "som": {
+      "native_name": "Soomaali",
+      "name_ru": "Сомали",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "som"
+      ]
+    },
+    "hau": {
+      "native_name": "Hausa",
+      "name_ru": "Хауса",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "yor": {
+      "native_name": "Yorùbá",
+      "name_ru": "Йоруба",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "ibo": {
+      "native_name": "Igbo",
+      "name_ru": "Игбо",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "zul": {
+      "native_name": "isiZulu",
+      "name_ru": "Зулу",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "afr": {
+      "native_name": "Afrikaans",
+      "name_ru": "Африкаанс",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "tgl": {
+      "native_name": "Tagalog",
+      "name_ru": "Тагальский",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": []
+    },
+    "lat": {
+      "native_name": "Latina",
+      "name_ru": "Латынь",
+      "script": "Latin",
+      "direction": "ltr",
+      "preferred_ids": [
+        "vulgate",
+        "vul"
+      ]
+    }
+  }
+}

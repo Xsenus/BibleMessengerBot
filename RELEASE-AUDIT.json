@@ -1,0 +1,74 @@
+{
+  "project": "BibleMessengerBot",
+  "version": "1.1.0",
+  "generated_at": "2026-09-21T05:08:53.145209+00:00",
+  "status": "PASS",
+  "files": 73,
+  "bytes": 251138,
+  "checks": [
+    {
+      "name": "json_yaml_parse",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "secret_scan",
+      "passed": true,
+      "token_hits": [],
+      "unsafe_files": []
+    },
+    {
+      "name": "compileall",
+      "command": [
+        "/opt/pyvenv/bin/python",
+        "-m",
+        "compileall",
+        "-q",
+        "app",
+        "tests"
+      ],
+      "returncode": 0,
+      "passed": true,
+      "output": ""
+    },
+    {
+      "name": "pytest",
+      "command": [
+        "/opt/pyvenv/bin/python",
+        "-m",
+        "pytest",
+        "-q"
+      ],
+      "returncode": 0,
+      "passed": true,
+      "output": "...............................                                          [100%]\n"
+    },
+    {
+      "name": "bash_syntax",
+      "command": [
+        "bash",
+        "-n",
+        "install.sh",
+        "update.sh",
+        "backup.sh",
+        "restore.sh",
+        "diagnose.sh"
+      ],
+      "returncode": 0,
+      "passed": true,
+      "output": ""
+    },
+    {
+      "name": "required_files",
+      "passed": true,
+      "missing": []
+    }
+  ],
+  "not_executed": [
+    "Docker image build (Docker is unavailable in the audit environment)",
+    "PostgreSQL schema execution against a live server",
+    "Live Bible corpus download and full first-run import",
+    "Telegram Bot API send/receive operations",
+    "Deployment on the target VPS"
+  ]
+}

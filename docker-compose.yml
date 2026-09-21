@@ -1,0 +1,65 @@
+name: bible-messenger-bot
+
+x-app: &app
+  image: bible-messenger-bot:1.1.0
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file: .env
+  restart: unless-stopped
+  init: true
+  depends_on:
+    postgres:
+      condition: service_healthy
+  networks: [internal]
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-biblebot}
+      POSTGRES_USER: ${POSTGRES_USER:-biblebot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-biblebot} -d ${POSTGRES_DB:-biblebot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [internal]
+
+  bootstrap:
+    <<: *app
+    restart: "no"
+    command: ["python", "-m", "app.bootstrap"]
+    volumes:
+      - source_cache:/app/cache
+
+  bot:
+    <<: *app
+    command: ["python", "-m", "app.bot.main"]
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "app.worker.main"]
+
+  admin:
+    <<: *app
+    command: ["uvicorn", "app.web.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]
+    ports:
+      - "${ADMIN_LISTEN_IP:-127.0.0.1}:${ADMIN_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  source_cache:
+
+networks:
+  internal:
+    driver: bridge

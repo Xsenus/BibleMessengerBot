@@ -1,0 +1,877 @@
+[
+  {
+    "code": "anxiety",
+    "title_ru": "Тревога",
+    "title_en": "Anxiety",
+    "references": [
+      {
+        "book_code": "PHP",
+        "chapter": 4,
+        "verse_from": 6,
+        "verse_to": 7,
+        "weight": 100
+      },
+      {
+        "book_code": "1PE",
+        "chapter": 5,
+        "verse_from": 7,
+        "verse_to": 7,
+        "weight": 100
+      },
+      {
+        "book_code": "MAT",
+        "chapter": 6,
+        "verse_from": 25,
+        "verse_to": 34,
+        "weight": 100
+      },
+      {
+        "book_code": "PSA",
+        "chapter": 55,
+        "verse_from": 23,
+        "verse_to": 23,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "fear",
+    "title_ru": "Страх",
+    "title_en": "Fear",
+    "references": [
+      {
+        "book_code": "ISA",
+        "chapter": 41,
+        "verse_from": 10,
+        "verse_to": 10,
+        "weight": 100
+      },
+      {
+        "book_code": "PSA",
+        "chapter": 23,
+        "verse_from": 4,
+        "verse_to": 4,
+        "weight": 100
+      },
+      {
+        "book_code": "2TI",
+        "chapter": 1,
+        "verse_from": 7,
+        "verse_to": 7,
+        "weight": 100
+      },
+      {
+        "book_code": "JOS",
+        "chapter": 1,
+        "verse_from": 9,
+        "verse_to": 9,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "hope",
+    "title_ru": "Надежда",
+    "title_en": "Hope",
+    "references": [
+      {
+        "book_code": "ROM",
+        "chapter": 15,
+        "verse_from": 13,
+        "verse_to": 13,
+        "weight": 100
+      },
+      {
+        "book_code": "JER",
+        "chapter": 29,
+        "verse_from": 11,
+        "verse_to": 11,
+        "weight": 100
+      },
+      {
+        "book_code": "PSA",
+        "chapter": 42,
+        "verse_from": 12,
+        "verse_to": 12,
+        "weight": 100
+      },
+      {
+        "book_code": "HEB",
+        "chapter": 10,
+        "verse_from": 23,
+        "verse_to": 23,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "love",
+    "title_ru": "Любовь",
+    "title_en": "Love",
+    "references": [
+      {
+        "book_code": "1CO",
+        "chapter": 13,
+        "verse_from": 4,
+        "verse_to": 8,
+        "weight": 100
+      },
+      {
+        "book_code": "JHN",
+        "chapter": 3,
+        "verse_from": 16,
+        "verse_to": 16,
+        "weight": 100
+      },
+      {
+        "book_code": "1JN",
+        "chapter": 4,
+        "verse_from": 7,
+        "verse_to": 12,
+        "weight": 100
+      },
+      {
+        "book_code": "COL",
+        "chapter": 3,
+        "verse_from": 14,
+        "verse_to": 14,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "family",
+    "title_ru": "Семья",
+    "title_en": "Family",
+    "references": [
+      {
+        "book_code": "JOS",
+        "chapter": 24,
+        "verse_from": 15,
+        "verse_to": 15,
+        "weight": 100
+      },
+      {
+        "book_code": "EPH",
+        "chapter": 6,
+        "verse_from": 1,
+        "verse_to": 4,
+        "weight": 100
+      },
+      {
+        "book_code": "COL",
+        "chapter": 3,
+        "verse_from": 18,
+        "verse_to": 21,
+        "weight": 100
+      },
+      {
+        "book_code": "PRO",
+        "chapter": 22,
+        "verse_from": 6,
+        "verse_to": 6,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "forgiveness",
+    "title_ru": "Прощение",
+    "title_en": "Forgiveness",
+    "references": [
+      {
+        "book_code": "EPH",
+        "chapter": 4,
+        "verse_from": 32,
+        "verse_to": 32,
+        "weight": 100
+      },
+      {
+        "book_code": "COL",
+        "chapter": 3,
+        "verse_from": 13,
+        "verse_to": 13,
+        "weight": 100
+      },
+      {
+        "book_code": "MAT",
+        "chapter": 6,
+        "verse_from": 14,
+        "verse_to": 15,
+        "weight": 100
+      },
+      {
+        "book_code": "LUK",
+        "chapter": 6,
+        "verse_from": 37,
+        "verse_to": 37,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "gratitude",
+    "title_ru": "Благодарность",
+    "title_en": "Gratitude",
+    "references": [
+      {
+        "book_code": "1TH",
+        "chapter": 5,
+        "verse_from": 16,
+        "verse_to": 18,
+        "weight": 100
+      },
+      {
+        "book_code": "PSA",
+        "chapter": 107,
+        "verse_from": 1,
+        "verse_to": 1,
+        "weight": 100
+      },
+      {
+        "book_code": "COL",
+        "chapter": 3,
+        "verse_from": 15,
+        "verse_to": 17,
+        "weight": 100
+      },
+      {
+        "book_code": "PHP",
+        "chapter": 4,
+        "verse_from": 6,
+        "verse_to": 6,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "wisdom",
+    "title_ru": "Мудрость",
+    "title_en": "Wisdom",
+    "references": [
+      {
+        "book_code": "JAS",
+        "chapter": 1,
+        "verse_from": 5,
+        "verse_to": 5,
+        "weight": 100
+      },
+      {
+        "book_code": "PRO",
+        "chapter": 3,
+        "verse_from": 5,
+        "verse_to": 7,
+        "weight": 100
+      },
+      {
+        "book_code": "PRO",
+        "chapter": 4,
+        "verse_from": 7,
+        "verse_to": 7,
+        "weight": 100
+      },
+      {
+        "book_code": "ECC",
+        "chapter": 7,
+        "verse_from": 12,
+        "verse_to": 12,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "work",
+    "title_ru": "Работа",
+    "title_en": "Work",
+    "references": [
+      {
+        "book_code": "COL",
+        "chapter": 3,
+        "verse_from": 23,
+        "verse_to": 24,
+        "weight": 100
+      },
+      {
+        "book_code": "PRO",
+        "chapter": 16,
+        "verse_from": 3,
+        "verse_to": 3,
+        "weight": 100
+      },
+      {
+        "book_code": "2TH",
+        "chapter": 3,
+        "verse_from": 10,
+        "verse_to": 13,
+        "weight": 100
+      },
+      {
+        "book_code": "ECC",
+        "chapter": 9,
+        "verse_from": 10,
+        "verse_to": 10,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "health",
+    "title_ru": "Здоровье",
+    "title_en": "Health",
+    "references": [
+      {
+        "book_code": "3JN",
+        "chapter": 1,
+        "verse_from": 2,
+        "verse_to": 2,
+        "weight": 100
+      },
+      {
+        "book_code": "PRO",
+        "chapter": 17,
+        "verse_from": 22,
+        "verse_to": 22,
+        "weight": 100
+      },
+      {
+        "book_code": "PSA",
+        "chapter": 103,
+        "verse_from": 2,
+        "verse_to": 5,
+        "weight": 100
+      },
+      {
+        "book_code": "JER",
+        "chapter": 17,
+        "verse_from": 14,
+        "verse_to": 14,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "loss",
+    "title_ru": "Утрата",
+    "title_en": "Loss",
+    "references": [
+      {
+        "book_code": "PSA",
+        "chapter": 34,
+        "verse_from": 19,
+        "verse_to": 19,
+        "weight": 100
+      },
+      {
+        "book_code": "MAT",
+        "chapter": 5,
+        "verse_from": 4,
+        "verse_to": 4,
+        "weight": 100
+      },
+      {
+        "book_code": "REV",
+        "chapter": 21,
+        "verse_from": 4,
+        "verse_to": 4,
+        "weight": 100
+      },
+      {
+        "book_code": "1TH",
+        "chapter": 4,
+        "verse_from": 13,
+        "verse_to": 18,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "choice",
+    "title_ru": "Сложный выбор",
+    "title_en": "Difficult choice",
+    "references": [
+      {
+        "book_code": "JAS",
+        "chapter": 1,
+        "verse_from": 5,
+        "verse_to": 8,
+        "weight": 100
+      },
+      {
+        "book_code": "PRO",
+        "chapter": 16,
+        "verse_from": 9,
+        "verse_to": 9,
+        "weight": 100
+      },
+      {
+        "book_code": "PSA",
+        "chapter": 32,
+        "verse_from": 8,
+        "verse_to": 8,
+        "weight": 100
+      },
+      {
+        "book_code": "ROM",
+        "chapter": 12,
+        "verse_from": 2,
+        "verse_to": 2,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "peace",
+    "title_ru": "Мир",
+    "title_en": "Peace",
+    "references": [
+      {
+        "book_code": "JHN",
+        "chapter": 14,
+        "verse_from": 27,
+        "verse_to": 27,
+        "weight": 100
+      },
+      {
+        "book_code": "PHP",
+        "chapter": 4,
+        "verse_from": 7,
+        "verse_to": 9,
+        "weight": 100
+      },
+      {
+        "book_code": "ISA",
+        "chapter": 26,
+        "verse_from": 3,
+        "verse_to": 3,
+        "weight": 100
+      },
+      {
+        "book_code": "COL",
+        "chapter": 3,
+        "verse_from": 15,
+        "verse_to": 15,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "faith",
+    "title_ru": "Вера",
+    "title_en": "Faith",
+    "references": [
+      {
+        "book_code": "HEB",
+        "chapter": 11,
+        "verse_from": 1,
+        "verse_to": 6,
+        "weight": 100
+      },
+      {
+        "book_code": "MRK",
+        "chapter": 11,
+        "verse_from": 22,
+        "verse_to": 24,
+        "weight": 100
+      },
+      {
+        "book_code": "ROM",
+        "chapter": 10,
+        "verse_from": 17,
+        "verse_to": 17,
+        "weight": 100
+      },
+      {
+        "book_code": "JAS",
+        "chapter": 2,
+        "verse_from": 17,
+        "verse_to": 18,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "prayer",
+    "title_ru": "Молитва",
+    "title_en": "Prayer",
+    "references": [
+      {
+        "book_code": "MAT",
+        "chapter": 6,
+        "verse_from": 6,
+        "verse_to": 13,
+        "weight": 100
+      },
+      {
+        "book_code": "1TH",
+        "chapter": 5,
+        "verse_from": 17,
+        "verse_to": 17,
+        "weight": 100
+      },
+      {
+        "book_code": "PHP",
+        "chapter": 4,
+        "verse_from": 6,
+        "verse_to": 7,
+        "weight": 100
+      },
+      {
+        "book_code": "JAS",
+        "chapter": 5,
+        "verse_from": 16,
+        "verse_to": 16,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "patience",
+    "title_ru": "Терпение",
+    "title_en": "Patience",
+    "references": [
+      {
+        "book_code": "ROM",
+        "chapter": 12,
+        "verse_from": 12,
+        "verse_to": 12,
+        "weight": 100
+      },
+      {
+        "book_code": "JAS",
+        "chapter": 1,
+        "verse_from": 2,
+        "verse_to": 4,
+        "weight": 100
+      },
+      {
+        "book_code": "GAL",
+        "chapter": 6,
+        "verse_from": 9,
+        "verse_to": 9,
+        "weight": 100
+      },
+      {
+        "book_code": "PSA",
+        "chapter": 37,
+        "verse_from": 7,
+        "verse_to": 7,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "loneliness",
+    "title_ru": "Одиночество",
+    "title_en": "Loneliness",
+    "references": [
+      {
+        "book_code": "DEU",
+        "chapter": 31,
+        "verse_from": 8,
+        "verse_to": 8,
+        "weight": 100
+      },
+      {
+        "book_code": "PSA",
+        "chapter": 27,
+        "verse_from": 10,
+        "verse_to": 10,
+        "weight": 100
+      },
+      {
+        "book_code": "HEB",
+        "chapter": 13,
+        "verse_from": 5,
+        "verse_to": 5,
+        "weight": 100
+      },
+      {
+        "book_code": "MAT",
+        "chapter": 28,
+        "verse_from": 20,
+        "verse_to": 20,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "guidance",
+    "title_ru": "Водительство",
+    "title_en": "Guidance",
+    "references": [
+      {
+        "book_code": "PRO",
+        "chapter": 3,
+        "verse_from": 5,
+        "verse_to": 6,
+        "weight": 100
+      },
+      {
+        "book_code": "PSA",
+        "chapter": 119,
+        "verse_from": 105,
+        "verse_to": 105,
+        "weight": 100
+      },
+      {
+        "book_code": "ISA",
+        "chapter": 30,
+        "verse_from": 21,
+        "verse_to": 21,
+        "weight": 100
+      },
+      {
+        "book_code": "JHN",
+        "chapter": 16,
+        "verse_from": 13,
+        "verse_to": 13,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "courage",
+    "title_ru": "Мужество",
+    "title_en": "Courage",
+    "references": [
+      {
+        "book_code": "JOS",
+        "chapter": 1,
+        "verse_from": 9,
+        "verse_to": 9,
+        "weight": 100
+      },
+      {
+        "book_code": "PSA",
+        "chapter": 31,
+        "verse_from": 25,
+        "verse_to": 25,
+        "weight": 100
+      },
+      {
+        "book_code": "1CO",
+        "chapter": 16,
+        "verse_from": 13,
+        "verse_to": 14,
+        "weight": 100
+      },
+      {
+        "book_code": "DEU",
+        "chapter": 31,
+        "verse_from": 6,
+        "verse_to": 6,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "humility",
+    "title_ru": "Смирение",
+    "title_en": "Humility",
+    "references": [
+      {
+        "book_code": "PHP",
+        "chapter": 2,
+        "verse_from": 3,
+        "verse_to": 8,
+        "weight": 100
+      },
+      {
+        "book_code": "JAS",
+        "chapter": 4,
+        "verse_from": 6,
+        "verse_to": 10,
+        "weight": 100
+      },
+      {
+        "book_code": "1PE",
+        "chapter": 5,
+        "verse_from": 5,
+        "verse_to": 6,
+        "weight": 100
+      },
+      {
+        "book_code": "PRO",
+        "chapter": 11,
+        "verse_from": 2,
+        "verse_to": 2,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "joy",
+    "title_ru": "Радость",
+    "title_en": "Joy",
+    "references": [
+      {
+        "book_code": "PHP",
+        "chapter": 4,
+        "verse_from": 4,
+        "verse_to": 4,
+        "weight": 100
+      },
+      {
+        "book_code": "PSA",
+        "chapter": 118,
+        "verse_from": 24,
+        "verse_to": 24,
+        "weight": 100
+      },
+      {
+        "book_code": "JHN",
+        "chapter": 15,
+        "verse_from": 11,
+        "verse_to": 11,
+        "weight": 100
+      },
+      {
+        "book_code": "ROM",
+        "chapter": 12,
+        "verse_from": 12,
+        "verse_to": 12,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "protection",
+    "title_ru": "Защита",
+    "title_en": "Protection",
+    "references": [
+      {
+        "book_code": "PSA",
+        "chapter": 91,
+        "verse_from": 1,
+        "verse_to": 16,
+        "weight": 100
+      },
+      {
+        "book_code": "PSA",
+        "chapter": 121,
+        "verse_from": 1,
+        "verse_to": 8,
+        "weight": 100
+      },
+      {
+        "book_code": "2TH",
+        "chapter": 3,
+        "verse_from": 3,
+        "verse_to": 3,
+        "weight": 100
+      },
+      {
+        "book_code": "PRO",
+        "chapter": 18,
+        "verse_from": 10,
+        "verse_to": 10,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "purpose",
+    "title_ru": "Предназначение",
+    "title_en": "Purpose",
+    "references": [
+      {
+        "book_code": "EPH",
+        "chapter": 2,
+        "verse_from": 10,
+        "verse_to": 10,
+        "weight": 100
+      },
+      {
+        "book_code": "ROM",
+        "chapter": 8,
+        "verse_from": 28,
+        "verse_to": 28,
+        "weight": 100
+      },
+      {
+        "book_code": "JER",
+        "chapter": 29,
+        "verse_from": 11,
+        "verse_to": 11,
+        "weight": 100
+      },
+      {
+        "book_code": "PRO",
+        "chapter": 19,
+        "verse_from": 21,
+        "verse_to": 21,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "kindness",
+    "title_ru": "Доброта",
+    "title_en": "Kindness",
+    "references": [
+      {
+        "book_code": "EPH",
+        "chapter": 4,
+        "verse_from": 32,
+        "verse_to": 32,
+        "weight": 100
+      },
+      {
+        "book_code": "GAL",
+        "chapter": 5,
+        "verse_from": 22,
+        "verse_to": 23,
+        "weight": 100
+      },
+      {
+        "book_code": "LUK",
+        "chapter": 6,
+        "verse_from": 31,
+        "verse_to": 35,
+        "weight": 100
+      },
+      {
+        "book_code": "PRO",
+        "chapter": 19,
+        "verse_from": 17,
+        "verse_to": 17,
+        "weight": 100
+      }
+    ]
+  },
+  {
+    "code": "justice",
+    "title_ru": "Справедливость",
+    "title_en": "Justice",
+    "references": [
+      {
+        "book_code": "MIC",
+        "chapter": 6,
+        "verse_from": 8,
+        "verse_to": 8,
+        "weight": 100
+      },
+      {
+        "book_code": "ISA",
+        "chapter": 1,
+        "verse_from": 17,
+        "verse_to": 17,
+        "weight": 100
+      },
+      {
+        "book_code": "AMO",
+        "chapter": 5,
+        "verse_from": 24,
+        "verse_to": 24,
+        "weight": 100
+      },
+      {
+        "book_code": "PRO",
+        "chapter": 31,
+        "verse_from": 8,
+        "verse_to": 9,
+        "weight": 100
+      }
+    ]
+  }
+]
