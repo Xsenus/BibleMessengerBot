@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import math
+import re
+from app.services.scheduling import parse_hhmm, validate_timezone
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,11 +67,19 @@ class Settings:
             raise ValueError("BIBLE_PROFILE must be core, extended, all-open, or none")
 
         send_time = os.getenv("DEFAULT_SEND_TIME", "09:00").strip()
-        hour, separator, minute = send_time.partition(":")
-        if separator != ":" or not hour.isdigit() or not minute.isdigit():
-            raise ValueError("DEFAULT_SEND_TIME must be HH:MM")
-        if not (0 <= int(hour) <= 23 and 0 <= int(minute) <= 59):
-            raise ValueError("DEFAULT_SEND_TIME is outside 00:00..23:59")
+        parse_hhmm(send_time)
+        validate_timezone(os.getenv("DEFAULT_TIMEZONE","Europe/Amsterdam"))
+        if require_bot_token and not re.fullmatch(r"[0-9]+:[A-Za-z0-9_-]{30,}",bot_token):
+            raise ValueError("Invalid BOT_TOKEN format")
+        for name,default,maximum in (("TELEGRAM_GLOBAL_RATE_PER_SECOND",20,20),
+                                     ("TELEGRAM_CHAT_RATE_PER_SECOND",1,1)):
+            value = _float(name,default,0.01)
+            if not math.isfinite(value) or value>maximum:
+                raise ValueError(f"{name} exceeds the safe ceiling")
+        if _int("MAX_MESSAGE_LENGTH",3900,100)>4096:
+            raise ValueError("MAX_MESSAGE_LENGTH exceeds 4096")
+        if _bool("ALLOW_RESTRICTED_LICENSES",False) or _bool("ALLOW_UNKNOWN_LICENSES",False):
+            raise ValueError("This release imports only explicitly open licensed editions")
 
         return cls(
             bot_token=bot_token,

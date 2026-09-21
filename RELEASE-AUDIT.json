@@ -1,74 +1,208 @@
 {
   "project": "BibleMessengerBot",
-  "version": "1.1.0",
-  "generated_at": "2026-09-21T05:08:53.145209+00:00",
-  "status": "PASS",
-  "files": 73,
-  "bytes": 251138,
+  "version": "1.2.0",
+  "generated_at_machine_clock": "2026-09-21T08:53:51.976819+00:00",
+  "release_context_date": "2026-09-21",
+  "status": "OFFLINE_PASS_LIVE_UNVERIFIED",
+  "tests": {
+    "passed": 184,
+    "failed": 0,
+    "skipped_collection_units_or_cases": 2,
+    "skipped": [
+      {
+        "name": "tests.test_aiogram_contracts",
+        "reason": "collection skipped",
+        "detail": "('/mnt/data/bible_audit/repo/tests/test_aiogram_contracts.py', 8, 'Skipped: aiogram is unavailable in this audit environment')"
+      },
+      {
+        "name": "tests.test_postgres_integration",
+        "reason": "collection skipped",
+        "detail": "('/mnt/data/bible_audit/repo/tests/test_postgres_integration.py', 18, 'Skipped: Real PostgreSQL integration requires asyncpg')"
+      }
+    ]
+  },
   "checks": [
     {
-      "name": "json_yaml_parse",
-      "passed": true,
-      "errors": []
-    },
-    {
-      "name": "secret_scan",
-      "passed": true,
-      "token_hits": [],
-      "unsafe_files": []
-    },
-    {
-      "name": "compileall",
+      "name": "COMPILE",
+      "status": "passed",
       "command": [
         "/opt/pyvenv/bin/python",
         "-m",
         "compileall",
         "-q",
         "app",
-        "tests"
+        "tests",
+        "scripts"
       ],
       "returncode": 0,
-      "passed": true,
-      "output": ""
+      "log": "evidence/COMPILE.txt"
     },
     {
-      "name": "pytest",
+      "name": "TESTS",
+      "status": "passed",
       "command": [
         "/opt/pyvenv/bin/python",
         "-m",
         "pytest",
-        "-q"
+        "-o",
+        "addopts=",
+        "-q",
+        "-rs",
+        "--junitxml=evidence/TESTS.xml",
+        "-p",
+        "no:cacheprovider"
       ],
       "returncode": 0,
-      "passed": true,
-      "output": "...............................                                          [100%]\n"
+      "log": "evidence/TESTS.txt"
     },
     {
-      "name": "bash_syntax",
+      "name": "SHELL-backup",
+      "status": "passed",
       "command": [
         "bash",
         "-n",
-        "install.sh",
-        "update.sh",
-        "backup.sh",
-        "restore.sh",
+        "backup.sh"
+      ],
+      "returncode": 0,
+      "log": "evidence/SHELL-backup.txt"
+    },
+    {
+      "name": "SHELL-diagnose",
+      "status": "passed",
+      "command": [
+        "bash",
+        "-n",
         "diagnose.sh"
       ],
       "returncode": 0,
-      "passed": true,
-      "output": ""
+      "log": "evidence/SHELL-diagnose.txt"
     },
     {
-      "name": "required_files",
-      "passed": true,
+      "name": "SHELL-install",
+      "status": "passed",
+      "command": [
+        "bash",
+        "-n",
+        "install.sh"
+      ],
+      "returncode": 0,
+      "log": "evidence/SHELL-install.txt"
+    },
+    {
+      "name": "SHELL-restore",
+      "status": "passed",
+      "command": [
+        "bash",
+        "-n",
+        "restore.sh"
+      ],
+      "returncode": 0,
+      "log": "evidence/SHELL-restore.txt"
+    },
+    {
+      "name": "SHELL-update",
+      "status": "passed",
+      "command": [
+        "bash",
+        "-n",
+        "update.sh"
+      ],
+      "returncode": 0,
+      "log": "evidence/SHELL-update.txt"
+    },
+    {
+      "name": "SHELL-verify",
+      "status": "passed",
+      "command": [
+        "bash",
+        "-n",
+        "verify.sh"
+      ],
+      "returncode": 0,
+      "log": "evidence/SHELL-verify.txt"
+    },
+    {
+      "name": "JSON_YAML_PARSE_ONLY",
+      "status": "passed",
+      "files": [
+        "data/books.json",
+        "data/language_profiles.json",
+        "data/source_snapshot.json",
+        "data/topics.json",
+        "docker-compose.yml",
+        "evidence/BASELINE-ARCHIVE.json",
+        "evidence/ENVIRONMENT.json",
+        "locales/ar.json",
+        "locales/bn.json",
+        "locales/de.json",
+        "locales/en.json",
+        "locales/es.json",
+        "locales/fa.json",
+        "locales/fr.json",
+        "locales/he.json",
+        "locales/hi.json",
+        "locales/id.json",
+        "locales/it.json",
+        "locales/ja.json",
+        "locales/ko.json",
+        "locales/nl.json",
+        "locales/pl.json",
+        "locales/pt.json",
+        "locales/ru.json",
+        "locales/sw.json",
+        "locales/ta.json",
+        "locales/tr.json",
+        "locales/uk.json",
+        "locales/ur.json",
+        "locales/vi.json",
+        "locales/zh.json"
+      ],
+      "errors": [],
+      "limitation": "This is not docker compose config/build or execution of SQL."
+    },
+    {
+      "name": "BASIC_SECRET_AND_PATH_SCAN",
+      "status": "passed",
+      "matches": [],
+      "limitation": "A basic pattern scan, not a full security audit."
+    },
+    {
+      "name": "REQUIRED_FILES",
+      "status": "passed",
       "missing": []
     }
   ],
+  "environment": {
+    "python": "3.13.5 (main, Jul 15 2026, 20:25:40) [GCC 14.2.0]",
+    "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+    "modules": {
+      "pytest": true,
+      "aiogram": false,
+      "asyncpg": false,
+      "yaml": true,
+      "httpx": true
+    },
+    "executables": {
+      "docker": null,
+      "postgres": null,
+      "initdb": null,
+      "ruff": null,
+      "git": "/usr/bin/git",
+      "bash": "/usr/bin/bash"
+    }
+  },
+  "ui_catalogs": 24,
+  "target_import_languages": 56,
+  "bundled_authentic_complete_editions": 0,
+  "prebuilt_database_dump_included": false,
   "not_executed": [
-    "Docker image build (Docker is unavailable in the audit environment)",
-    "PostgreSQL schema execution against a live server",
-    "Live Bible corpus download and full first-run import",
-    "Telegram Bot API send/receive operations",
-    "Deployment on the target VPS"
-  ]
+    "Actual PostgreSQL/asyncpg integration: missing asyncpg or RUN_DB_TESTS is not enabled.",
+    "Actual aiogram model/authorization integration suite: missing library.",
+    "Docker image build and docker compose config/runtime on target VPS.",
+    "Full authentic Bible download/import; no complete edition is physically bundled.",
+    "Real Telegram Bot API requests, channel/group/private delivery and scheduled live acceptance.",
+    "Real backup/restore, sustained load/soak tests, independent textual/native-language review.",
+    "Ruff, dependency vulnerability audit and fully hash-locked reproducible image build."
+  ],
+  "runtime_gate": "install.sh executes installed-library and disposable PostgreSQL tests, then real import+database audit before starting services; not run here."
 }

@@ -17,9 +17,10 @@ from app.catalog.report import selection_summary
 from app.catalog.selector import select_translations
 from app.catalog.source import BibleNlpSource
 from app.config import Settings
-from app.db import apply_schema, normalize_asyncpg_dsn, wait_for_database
+from app.db import apply_schema, normalize_asyncpg_dsn, wait_for_database, maintenance
 from app.logging import configure_logging
 from app.services.seed import seed_static_content
+from app.services.verification import verify_database
 
 
 async def catalog_preview(settings: Settings, refresh: bool) -> dict[str, Any]:
@@ -73,18 +74,16 @@ async def db_stats(settings: Settings) -> dict[str, Any]:
 
 async def seed_only(settings: Settings) -> dict[str, str]:
     await wait_for_database(settings)
-    await apply_schema(settings)
-    connection = await asyncpg.connect(normalize_asyncpg_dsn(settings.database_url), timeout=30)
-    try:
-        await seed_static_content(connection)
-    finally:
-        await connection.close()
+    async with maintenance(settings) as connection:
+        await apply_schema(settings)
+        async with connection.transaction():
+            await seed_static_content(connection)
     return {"schema": "applied", "static_data": "seeded"}
 
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description="BibleMessengerBot operations")
-    result.add_argument("command", choices=("bootstrap", "import", "preview", "stats", "seed"))
+    result.add_argument("command", choices=("bootstrap", "import", "preview", "stats", "seed", "audit"))
     result.add_argument("--profile", choices=("core", "extended", "all-open", "none"))
     result.add_argument("--max-editions", type=int)
     result.add_argument("--refresh", action="store_true")
@@ -113,6 +112,12 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         )
     if args.command == "preview":
         return await catalog_preview(settings, args.refresh)
+    if args.command == "audit":
+        connection = await asyncpg.connect(normalize_asyncpg_dsn(settings.database_url),timeout=30)
+        try:
+            return await verify_database(connection,profile=settings.bible_profile,full=True)
+        finally:
+            await connection.close()
     if args.command == "stats":
         return await db_stats(settings)
     if args.command == "seed":
@@ -128,6 +133,8 @@ def main() -> None:
     if args.output:
         args.output.write_text(payload + "\n", encoding="utf-8")
     print(payload)
+    if result.get("status") == "failed":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

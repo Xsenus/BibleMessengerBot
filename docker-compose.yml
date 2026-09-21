@@ -1,17 +1,26 @@
 name: bible-messenger-bot
-
 x-app: &app
-  image: bible-messenger-bot:1.1.0
+  image: bible-messenger-bot:1.2.0
   build:
     context: .
     dockerfile: Dockerfile
   env_file: .env
   restart: unless-stopped
   init: true
-  depends_on:
-    postgres:
-      condition: service_healthy
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
   networks: [internal]
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-ready: &ready
+  postgres:
+    condition: service_healthy
+  bootstrap:
+    condition: service_completed_successfully
 
 services:
   postgres:
@@ -21,45 +30,63 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-biblebot}
       POSTGRES_USER: ${POSTGRES_USER:-biblebot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+    volumes: [postgres_data:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-biblebot} -d ${POSTGRES_DB:-biblebot}"]
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 5s
       timeout: 5s
       retries: 30
     networks: [internal]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
 
   bootstrap:
     <<: *app
     restart: "no"
-    command: ["python", "-m", "app.bootstrap"]
-    volumes:
-      - source_cache:/app/cache
+    command: [python, -m, app.bootstrap]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: [source_cache:/app/cache]
 
   bot:
     <<: *app
-    command: ["python", "-m", "app.bot.main"]
+    command: [python, -m, app.bot.main]
+    depends_on: *ready
+    healthcheck:
+      test: [CMD, python, -m, app.healthcheck, bot]
+      start_period: 90s
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   worker:
     <<: *app
-    command: ["python", "-m", "app.worker.main"]
+    command: [python, -m, app.worker.main]
+    depends_on: *ready
+    healthcheck:
+      test: [CMD, python, -m, app.healthcheck, worker]
+      start_period: 60s
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   admin:
     <<: *app
-    command: ["uvicorn", "app.web.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]
-    ports:
-      - "${ADMIN_LISTEN_IP:-127.0.0.1}:${ADMIN_HOST_PORT:-8080}:8080"
+    command: [uvicorn, app.web.main:app, --host, 0.0.0.0, --port, '8080', --no-proxy-headers]
+    depends_on: *ready
+    ports: ['127.0.0.1:${ADMIN_HOST_PORT:-8080}:8080']
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      test: [CMD, curl, -fsS, 'http://127.0.0.1:8080/ready']
+      start_period: 30s
       interval: 15s
-      timeout: 5s
+      timeout: 10s
       retries: 10
 
 volumes:
   postgres_data:
   source_cache:
-
 networks:
   internal:
     driver: bridge

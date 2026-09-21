@@ -21,7 +21,8 @@ from app.catalog.models import DownloadedTranslation, LicenseInfo, TranslationMe
 LOGGER = logging.getLogger(__name__)
 
 REPOSITORY = "BibleNLP/ebible"
-BRANCH = "main"
+BRANCH = "c531ff2da02843ded6d09afbe29a197ab844981f"
+SOURCE_REVISION = BRANCH
 RAW_BASE = f"https://raw.githubusercontent.com/{REPOSITORY}/{BRANCH}"
 API_TREE_URL = f"https://api.github.com/repos/{REPOSITORY}/git/trees/{BRANCH}?recursive=1"
 TRANSLATIONS_URL = f"{RAW_BASE}/metadata/translations.csv"
@@ -72,14 +73,14 @@ class BibleNlpSource:
         timeout_seconds: int = 180,
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.cache_dir = cache_dir
+        self.cache_dir = cache_dir / SOURCE_REVISION
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._owns_client = client is None
         self.client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(timeout_seconds, connect=30),
             follow_redirects=True,
             headers={
-                "User-Agent": "BibleMessengerBot/1.1.0 (+https://github.com/BibleNLP/ebible)",
+                "User-Agent": "BibleMessengerBot/1.2.0 (+https://github.com/BibleNLP/ebible)",
                 "Accept": "text/plain, application/json;q=0.9, */*;q=0.1",
             },
         )
@@ -117,8 +118,8 @@ class BibleNlpSource:
                 return True
             if response.status_code not in {405, 501}:
                 return False
-            response = await self.client.get(url, headers={"Range": "bytes=0-0"})
-            return response.status_code in {200, 206}
+            async with self.client.stream("GET",url,headers={"Range":"bytes=0-0"}) as response:
+                return response.status_code in {200,206}
         except (httpx.TimeoutException, httpx.NetworkError):
             return False
 
@@ -131,22 +132,48 @@ class BibleNlpSource:
         max_bytes: int = 128 * 1024 * 1024,
     ) -> Path:
         target = self.cache_dir / _safe_name(cache_name)
+        sidecar = target.with_suffix(target.suffix + '.sha256')
         if target.exists() and target.stat().st_size > 0 and not refresh:
-            return target
+            if sidecar.exists() and sidecar.read_text().strip() == _sha256(target):
+                return target
+            if sidecar.exists():
+                raise ValueError(f'Cached source checksum mismatch: {target.name}')
+            # Legacy cache is not trusted; obtain the pinned file again.
 
-        response = await self._request(url)
-        if response.status_code != 200:
-            raise FileNotFoundError(f"{url} returned HTTP {response.status_code}")
-        payload = response.content
-        if len(payload) > max_bytes:
-            raise ValueError(f"Remote file is larger than {max_bytes} bytes: {url}")
-
-        with tempfile.NamedTemporaryFile(dir=self.cache_dir, delete=False) as temporary:
-            temporary.write(payload)
-            temporary.flush()
-            temp_path = Path(temporary.name)
-        temp_path.replace(target)
-        return target
+        error: Exception | None = None
+        for attempt in range(4):
+            temp_path: Path | None = None
+            try:
+                async with self.client.stream("GET",url) as response:
+                    if response.status_code in {429,500,502,503,504}:
+                        raise httpx.ReadError(f'Retryable HTTP {response.status_code}')
+                    if response.status_code != 200:
+                        raise FileNotFoundError(f'{url} returned HTTP {response.status_code}')
+                    length = response.headers.get('Content-Length','')
+                    if length.isdigit() and int(length)>max_bytes:
+                        raise ValueError('Source exceeds configured download size')
+                    with tempfile.NamedTemporaryFile(dir=self.cache_dir,delete=False) as temporary:
+                        temp_path = Path(temporary.name)
+                        size = 0
+                        async for chunk in response.aiter_bytes(65536):
+                            size += len(chunk)
+                            if size>max_bytes:
+                                raise ValueError('Source exceeds configured download size')
+                            temporary.write(chunk)
+                        temporary.flush()
+                    if size==0:
+                        raise ValueError('Empty source file')
+                temp_path.replace(target)
+                sidecar.write_text(_sha256(target)+'\n',encoding='ascii')
+                return target
+            except (httpx.TimeoutException,httpx.NetworkError) as exc:
+                error = exc
+                if attempt<3:
+                    await asyncio.sleep(min(2**(attempt+1),20))
+            finally:
+                if temp_path is not None:
+                    temp_path.unlink(missing_ok=True)
+        raise RuntimeError(f'Could not fetch pinned source: {type(error).__name__}')
 
     async def fetch_catalog(self, *, refresh: bool = True) -> list[TranslationMeta]:
         translations_path, licenses_path = await asyncio.gather(
@@ -164,9 +191,11 @@ class BibleNlpSource:
             ),
         )
         licenses = self._parse_licenses(licenses_path.read_text(encoding="utf-8-sig"))
-        return self._parse_translations(
-            translations_path.read_text(encoding="utf-8-sig"), licenses
-        )
+        catalog = self._parse_translations(translations_path.read_text(encoding="utf-8-sig"), licenses)
+        ids = [item.translation_id.lower() for item in catalog]
+        if not catalog or len(ids) != len(set(ids)):
+            raise ValueError('Empty catalog or duplicate edition identifiers')
+        return catalog
 
     async def fetch_references(self, *, refresh: bool = False) -> Path:
         return await self.fetch_bytes_cached(
@@ -215,6 +244,8 @@ class BibleNlpSource:
             language_code = (row.get("languageCode") or "").strip()
             if not translation_id or not language_code:
                 continue
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}", translation_id) or not re.fullmatch(r"[a-z]{2,3}", language_code):
+                raise ValueError("Unsafe source identifier in catalog")
             variants = [
                 translation_id.lower(),
                 translation_id.replace("-", "_").lower(),
@@ -312,20 +343,6 @@ class BibleNlpSource:
             if found:
                 return found
 
-        language_prefix = f"corpus/{metadata.language_code.lower()}-"
-        translation_tokens = {
-            metadata.translation_id.lower(),
-            metadata.translation_id.replace("-", "_").lower(),
-            metadata.translation_id.replace("_", "-").lower(),
-        }
-        matches = [
-            path
-            for key, path in index.items()
-            if key.startswith(language_prefix)
-            and any(token in Path(path).stem.lower() for token in translation_tokens)
-        ]
-        if matches:
-            return sorted(set(matches), key=len)[0]
         raise FileNotFoundError(
             f"No corpus file found for {metadata.language_code}/{metadata.translation_id}"
         )

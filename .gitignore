@@ -12,3 +12,7 @@ cache/
 .DS_Store
 .idea/
 .vscode/
+
+runtime-evidence/
+MANIFEST.sha256
+BUILD-DEPENDENCIES.txt

@@ -4,8 +4,10 @@
   "verified_commit": "c531ff2da02843ded6d09afbe29a197ab844981f",
   "commit_date_utc": "2025-05-09T10:48:28Z",
   "verified_on": "2026-09-21",
-  "runtime_policy": "The importer reads the current main branch and records SHA-256 for every downloaded edition.",
-  "verified_examples": [
+  "runtime_policy": "All metadata, references and corpus files are read from the immutable verified_commit. Cache is namespaced by revision and checked by SHA-256.",
+  "corpus_fully_downloaded_in_this_release": false,
+  "runtime_source_verified_live": false,
+  "historical_examples_from_1_1_0_not_reimported": [
     {
       "language": "rus",
       "translation_id": "russyn",
@@ -30,5 +32,6 @@
       "title": "Santa Biblia — Reina Valera 1909",
       "license": "Public Domain"
     }
-  ]
+  ],
+  "verification_scope": "Metadata headers and reference excerpts read via GitHub; no complete corpus downloaded; no physical import verified in build environment."
 }

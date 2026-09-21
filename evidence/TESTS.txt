@@ -1,0 +1,7 @@
+........................................................................ [ 39%]
+........................................................................ [ 78%]
+........................................                                 [100%]
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_aiogram_contracts.py:8: aiogram is unavailable in this audit environment
+SKIPPED [1] tests/test_postgres_integration.py:18: Real PostgreSQL integration requires asyncpg
+184 passed, 2 skipped in 1.04s

@@ -1,142 +1,116 @@
 #!/usr/bin/env bash
+# Safe fresh install or upgrade. Existing .env/database passwords are never regenerated.
 set -Eeuo pipefail
 umask 077
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$ROOT_DIR"
-
-log() { printf '\n[%s] %s\n' "$(date '+%F %T')" "$*"; }
+cd "$(dirname "$(readlink -f "$0")")"
+log() { printf '\n%s\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
-
-if [[ "${EUID}" -ne 0 ]]; then
-  command -v sudo >/dev/null 2>&1 || die "Run as root or install sudo"
-  exec sudo --preserve-env=BOT_TOKEN,BIBLE_PROFILE,MAX_EDITIONS_PER_LANGUAGE,ADMIN_LISTEN_IP,ADMIN_HOST_PORT bash "$0" "$@"
+trap 'printf "\nInstallation stopped. No success is claimed. Inspect the last error and runtime-evidence/. Existing data was not deleted.\n" >&2' ERR
+if [[ $EUID -ne 0 ]]; then
+  exec sudo --preserve-env=BOT_TOKEN,BIBLE_PROFILE,MAX_EDITIONS_PER_LANGUAGE,REQUIRED_LANGUAGES bash "$0" "$@"
 fi
-
-[[ -f /etc/os-release ]] || die "Unsupported operating system"
+[[ -f /etc/os-release ]] || die "Unsupported OS"
+# shellcheck disable=SC1091
 . /etc/os-release
-case "${ID:-}" in
-  ubuntu|debian) ;;
-  *) die "Automatic installer supports Ubuntu/Debian. Use Docker Compose manually on ${ID:-unknown}." ;;
-esac
-
-install_docker() {
-  log "Installing Docker Engine and Compose plugin"
+case "${ID:-}" in ubuntu|debian) ;; *) die "Use Docker Compose manually on this OS" ;; esac
+if [[ -f MANIFEST.sha256 ]]; then sha256sum --quiet -c MANIFEST.sha256; fi
+if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
   apt-get update
   apt-get install -y ca-certificates curl gnupg openssl
-  install -m 0755 -d /etc/apt/keyrings
+  install -m0755 -d /etc/apt/keyrings
   curl -fsSL "https://download.docker.com/linux/${ID}/gpg" -o /etc/apt/keyrings/docker.asc
   chmod a+r /etc/apt/keyrings/docker.asc
-  local codename="${VERSION_CODENAME:-}"
-  [[ -n "$codename" ]] || codename="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-bookworm}")"
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${ID} ${codename} stable" \
-    > /etc/apt/sources.list.d/docker.list
+  printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
+    "$(dpkg --print-architecture)" "$ID" "${VERSION_CODENAME:?OS codename missing}" >/etc/apt/sources.list.d/docker.list
   apt-get update
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   systemctl enable --now docker
-}
-
-if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
-  install_docker
 fi
-
-TOKEN="${BOT_TOKEN:-}"
-if [[ -z "$TOKEN" ]]; then
-  read -r -s -p "Telegram Bot Token from @BotFather: " TOKEN
-  printf '\n'
-fi
-[[ "$TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]{30,}$ ]] || die "BOT_TOKEN format looks invalid"
-
-PROFILE="${BIBLE_PROFILE:-extended}"
-case "$PROFILE" in core|extended|all-open|none) ;; *) die "Invalid BIBLE_PROFILE: $PROFILE" ;; esac
-MAX_EDITIONS="${MAX_EDITIONS_PER_LANGUAGE:-2}"
-[[ "$MAX_EDITIONS" =~ ^[0-9]+$ ]] || die "MAX_EDITIONS_PER_LANGUAGE must be an integer"
-(( MAX_EDITIONS >= 1 && MAX_EDITIONS <= 20 )) || die "MAX_EDITIONS_PER_LANGUAGE must be between 1 and 20"
-TZ_NAME="$(cat /etc/timezone 2>/dev/null || true)"
-[[ -n "$TZ_NAME" ]] || TZ_NAME="Europe/Amsterdam"
-POSTGRES_PASSWORD="$(openssl rand -hex 24)"
-ADMIN_API_KEY="$(openssl rand -hex 32)"
-OWNER_CLAIM_CODE="$(openssl rand -hex 16)"
-ADMIN_LISTEN="${ADMIN_LISTEN_IP:-127.0.0.1}"
-ADMIN_PORT="${ADMIN_HOST_PORT:-8080}"
-
-cat > .env <<ENV
+command -v openssl >/dev/null || { apt-get update; apt-get install -y openssl; }
+mkdir -p runtime-evidence backups
+if [[ -f .env ]]; then
+  log "Keeping existing .env and all database credentials."
+  chmod 600 .env
+else
+  if [[ -n "$(docker volume ls -q --filter name='^bible-messenger-bot_postgres_data$')" ]]; then
+    die "Existing database volume found but .env is missing. Restore the original .env; do not generate a different password."
+  fi
+  TOKEN="${BOT_TOKEN:-}"
+  if [[ -z "$TOKEN" ]]; then read -r -s -p 'Telegram bot token: ' TOKEN; printf '\n'; fi
+  [[ "$TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]{30,}$ ]] || die "Invalid token format"
+  PROFILE="${BIBLE_PROFILE:-extended}"
+  case "$PROFILE" in core|extended|all-open|none) ;; *) die "Invalid profile" ;; esac
+  MAX_EDITIONS="${MAX_EDITIONS_PER_LANGUAGE:-2}"
+  [[ "$MAX_EDITIONS" =~ ^[0-9]+$ ]] && (( MAX_EDITIONS>=1 && MAX_EDITIONS<=20 )) || die "Invalid edition limit"
+  REQUIRED="${REQUIRED_LANGUAGES:-rus,eng}"
+  [[ "$REQUIRED" =~ ^[a-z,]*$ ]] || die "Invalid required language list"
+  PG_PASS="$(openssl rand -hex 24)"
+  ADMIN_KEY="$(openssl rand -hex 32)"
+  CLAIM="$(openssl rand -hex 16)"
+  cat >.env <<ENV
 BOT_TOKEN=${TOKEN}
-OWNER_CLAIM_CODE=${OWNER_CLAIM_CODE}
+OWNER_CLAIM_CODE=${CLAIM}
 POSTGRES_DB=biblebot
 POSTGRES_USER=biblebot
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-DATABASE_URL=postgresql://biblebot:${POSTGRES_PASSWORD}@postgres:5432/biblebot
-ADMIN_API_KEY=${ADMIN_API_KEY}
-ADMIN_BIND=0.0.0.0
-ADMIN_PORT=8080
-ADMIN_LISTEN_IP=${ADMIN_LISTEN}
-ADMIN_HOST_PORT=${ADMIN_PORT}
+POSTGRES_PASSWORD=${PG_PASS}
+DATABASE_URL=postgresql://biblebot:${PG_PASS}@postgres:5432/biblebot
+ADMIN_API_KEY=${ADMIN_KEY}
+ADMIN_HOST_PORT=8080
 BIBLE_PROFILE=${PROFILE}
 MAX_EDITIONS_PER_LANGUAGE=${MAX_EDITIONS}
+REQUIRED_LANGUAGES=${REQUIRED}
 IMPORT_ON_START=true
 ALLOW_RESTRICTED_LICENSES=false
 ALLOW_UNKNOWN_LICENSES=false
-IMPORT_BATCH_SIZE=2000
-DOWNLOAD_TIMEOUT_SECONDS=180
 SOURCE_CACHE_DIR=/app/cache
-DEFAULT_TIMEZONE=${TZ_NAME}
+DEFAULT_TIMEZONE=Europe/Amsterdam
 DEFAULT_SEND_TIME=09:00
-WORKER_POLL_SECONDS=15
+WORKER_POLL_SECONDS=3
 TELEGRAM_GLOBAL_RATE_PER_SECOND=20
 TELEGRAM_CHAT_RATE_PER_SECOND=1
 MAX_MESSAGE_LENGTH=3900
 LOG_LEVEL=INFO
-PUBLIC_BASE_URL=
 ENV
-chmod 600 .env
-
-log "Building application image"
-docker compose build --pull
-
-log "Starting PostgreSQL"
+  chmod 600 .env
+fi
+# Validate silently: a rendered Compose configuration can contain secrets.
+docker compose config --quiet
+log 'Building image and checking installed dependencies.'
+docker compose build --pull bootstrap
+# Back up a running existing database before stopping any application service.
+if docker compose exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; then
+  bash backup.sh
+fi
+docker compose stop bot worker admin || true
 docker compose up -d postgres
-for _ in $(seq 1 60); do
-  if docker compose exec -T postgres pg_isready -U biblebot -d biblebot >/dev/null 2>&1; then break; fi
+for _ in $(seq 1 90); do
+  if docker compose exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; then break; fi
   sleep 2
 done
-docker compose exec -T postgres pg_isready -U biblebot -d biblebot >/dev/null 2>&1 \
-  || die "PostgreSQL did not become ready"
-
-log "Creating schema and importing Bible editions (profile: ${PROFILE})"
-docker compose run --rm bootstrap | tee bootstrap-result.json
-
-log "Starting bot, scheduler, and admin panel"
-docker compose up -d bot worker admin
-
-log "Checking services"
-sleep 3
+docker compose exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null
+log 'Running tests against installed libraries and an isolated temporary PostgreSQL database.'
+docker compose run --rm --no-deps -e RUN_DB_TESTS=1 bootstrap \
+  python -m pytest -o addopts= -q -p no:cacheprovider | tee runtime-evidence/tests.txt
+log 'Applying migrations, downloading licensed editions and checking actual database rows.'
+docker compose up --no-deps --force-recreate --abort-on-container-exit --exit-code-from bootstrap bootstrap \
+  | tee runtime-evidence/bootstrap.txt
+docker compose run --rm --no-deps bootstrap python -m app.cli audit \
+  >runtime-evidence/database-audit.json
+docker compose run --rm --no-deps bootstrap python -m pip freeze >runtime-evidence/dependencies.txt
+log 'Starting only after successful tests and corpus audit.'
+docker compose up -d --no-deps bot worker admin
+ready=false
+for _ in $(seq 1 90); do
+  if docker compose exec -T admin curl -fsS http://127.0.0.1:8080/ready >/dev/null 2>&1 \
+    && docker compose exec -T bot python -m app.healthcheck bot \
+    && docker compose exec -T worker python -m app.healthcheck worker; then ready=true; break; fi
+  sleep 2
+done
+[[ "$ready" == true ]] || die "Runtime health checks failed; inspect docker compose logs bot worker admin"
 docker compose ps
-if command -v curl >/dev/null 2>&1; then
-  curl -fsS "http://127.0.0.1:${ADMIN_PORT}/health" >/dev/null \
-    || log "Admin health endpoint is not ready yet; inspect with: docker compose logs admin"
-fi
-
-cat <<INFO
-
-Installation completed.
-
-1. Open the Telegram bot and send:
-   /claim ${OWNER_CLAIM_CODE}
-
-2. Admin panel (bound locally for security):
-   http://127.0.0.1:${ADMIN_PORT}/admin
-   username: admin
-   password: ${ADMIN_API_KEY}
-
-   From your computer use an SSH tunnel:
-   ssh -L ${ADMIN_PORT}:127.0.0.1:${ADMIN_PORT} USER@SERVER_IP
-
-3. Useful commands:
-   cd ${ROOT_DIR}
-   docker compose ps
-   docker compose logs -f bot worker
-   python is not required on the VPS; all services run in Docker.
-
-Secrets are stored in ${ROOT_DIR}/.env with mode 600.
-INFO
+log 'Local installation checks passed. Start the bot in Telegram and use /settings.'
+# Display local secrets only on the controlling terminal, never in evidence logs.
+CLAIM="$(sed -n 's/^OWNER_CLAIM_CODE=//p' .env)"
+printf '\nOwner claim (send privately to your bot): /claim %s\n' "$CLAIM"
+printf 'Admin: SSH tunnel to 127.0.0.1:8080, /admin, login admin; password is ADMIN_API_KEY in .env.\n'
+printf 'Actual editions, missing languages and structural results: runtime-evidence/database-audit.json\n'

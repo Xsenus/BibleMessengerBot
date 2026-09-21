@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
+# Transaction-consistent PostgreSQL custom archive. Contains private user/chat data.
 set -Eeuo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")"
+umask 077
+cd "$(dirname "$(readlink -f "$0")")"
 mkdir -p backups
-stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-archive="backups/biblebot-${stamp}.sql.gz"
-docker compose exec -T postgres pg_dump -U "${POSTGRES_USER:-biblebot}" -d "${POSTGRES_DB:-biblebot}" --clean --if-exists | gzip -9 > "$archive"
-sha256sum "$archive" > "${archive}.sha256"
-chmod 600 "$archive" "${archive}.sha256"
-echo "$archive"
+name="backups/biblebot-$(date -u +%Y%m%dT%H%M%SZ)-$$.dump"
+tmp="${name}.part"
+trap 'rm -f "$tmp"' EXIT
+docker compose exec -T postgres sh -c 'exec pg_dump --format=custom --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >"$tmp"
+[[ -s "$tmp" ]]
+mv "$tmp" "$name"
+sha256sum "$name" >"${name}.sha256"
+printf 'Database backup: %s\n' "$name"

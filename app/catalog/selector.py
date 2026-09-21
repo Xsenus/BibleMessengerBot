@@ -46,8 +46,8 @@ def score_translation(metadata: TranslationMeta) -> tuple[int, int, int, int, st
     }[metadata.coverage]
     certified = 1 if str(metadata.extra.get("Certified", "")).lower() == "true" else 0
     return (
-        preference_score,
         coverage_score,
+        preference_score,
         metadata.total_verses,
         certified,
         metadata.translation_id.lower(),

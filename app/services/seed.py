@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import asyncpg
+from typing import Any
 
 from app.catalog.importer import seed_books
 
 
-async def seed_static_content(connection: asyncpg.Connection) -> None:
+async def seed_static_content(connection: Any) -> None:
     await seed_books(connection)
     root = Path(__file__).resolve().parents[2]
     topics = json.loads((root / "data" / "topics.json").read_text(encoding="utf-8"))

@@ -1,183 +1,101 @@
-"""FastAPI health endpoints and a compact operator dashboard."""
-
+"""Read-only, locally bound operational dashboard. Settings are changed in Telegram."""
 from __future__ import annotations
-
+import json
 import secrets
 from contextlib import asynccontextmanager
-from datetime import time
-from pathlib import Path
-from typing import Annotated, Any
-
-import asyncpg
-from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.templating import Jinja2Templates
-
+from html import escape
+from typing import Annotated,Any
+from fastapi import Depends,FastAPI,Header,HTTPException
+from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBasic,HTTPBasicCredentials
 from app.config import Settings
-from app.db import close_pool, create_pool, wait_for_database
-from app.logging import configure_logging
-from app.services.scheduling import parse_hhmm, validate_timezone
-from app.services.subscriptions import create_or_update_subscription
+from app.db import close_pool,create_pool,wait_for_database,acquire_runtime_guard
+from app.services.verification import verify_database
 
-configure_logging()
 settings = Settings.from_env(require_bot_token=False)
 security = HTTPBasic()
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """Connect at startup, close pooled sockets on graceful termination."""
     await wait_for_database(settings)
-    await create_pool(settings)
-    yield
-    await close_pool()
+    pool = await create_pool(settings)
+    try:
+        async with pool.acquire() as owner:
+            await acquire_runtime_guard(owner)
+            yield
+    finally:
+        await close_pool()
 
 
-app = FastAPI(title="BibleMessengerBot Admin", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title='BibleMessengerBot read-only operations',version='1.2.0',lifespan=lifespan,
+              docs_url=None,redoc_url=None,openapi_url=None)
 
 
-def _valid_key(candidate: str) -> bool:
-    return bool(settings.admin_api_key) and secrets.compare_digest(candidate, settings.admin_api_key)
+def valid_key(value: str) -> bool:
+    """An empty/default key cannot authenticate the operator."""
+    return len(settings.admin_api_key)>=24 and secrets.compare_digest(value,settings.admin_api_key)
 
 
-def require_basic(credentials: Annotated[HTTPBasicCredentials, Depends(security)]) -> None:
-    if credentials.username != "admin" or not _valid_key(credentials.password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid admin credentials",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+def require_basic(credentials: Annotated[HTTPBasicCredentials,Depends(security)]) -> None:
+    """Expose the dashboard only through a local listener or authenticated SSH tunnel."""
+    if credentials.username!='admin' or not valid_key(credentials.password):
+        raise HTTPException(401,'Authentication required',headers={'WWW-Authenticate':'Basic'})
 
 
-def require_api_key(x_admin_key: Annotated[str | None, Header()] = None) -> None:
-    if not x_admin_key or not _valid_key(x_admin_key):
-        raise HTTPException(status_code=401, detail="Invalid X-Admin-Key")
+def require_key(x_admin_key: Annotated[str | None,Header()] = None) -> None:
+    """JSON operator API uses a header, never a query-string secret."""
+    if not x_admin_key or not valid_key(x_admin_key):
+        raise HTTPException(401,'Authentication required')
 
 
-async def _pool() -> asyncpg.Pool:
-    return await create_pool(settings)
+@app.get('/health')
+async def health() -> dict[str,str]:
+    """Liveness does not claim that imported content is ready."""
+    return {'status':'alive','version':'1.2.0'}
 
 
-@app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "version": "1.1.0"}
+@app.get('/ready')
+async def ready() -> dict[str,Any]:
+    """Readiness is a real database query; empty/unaudited required content returns 503."""
+    try:
+        pool = await create_pool(settings)
+        async with pool.acquire() as connection:
+            report = await verify_database(connection,profile=settings.bible_profile,full=False)
+    except Exception:
+        raise HTTPException(503,'Database unavailable') from None
+    if report['status']!='passed':
+        raise HTTPException(503,{'status':'not_ready','errors':report['errors']})
+    return {'status':'ready','editions':report['edition_count'],'languages':report['language_count']}
 
 
-@app.get("/ready")
-async def ready() -> dict[str, Any]:
-    pool = await _pool()
+async def operator_data() -> dict[str,Any]:
+    """Bounded status output; message text, usernames and bot credentials are omitted."""
+    pool = await create_pool(settings)
     async with pool.acquire() as connection:
-        translations = await connection.fetchval(
-            "SELECT COUNT(*) FROM translations WHERE is_active=true AND verse_count>0"
-        )
-        verses = await connection.fetchval("SELECT COUNT(*) FROM verses")
-    status_value = "ready" if translations and verses else "initializing"
-    return {"status": status_value, "translations": translations, "verses": verses}
+        audit = await verify_database(connection,profile=settings.bible_profile,full=False)
+        chats = await connection.fetch('SELECT telegram_chat_id,chat_type,ui_language,bible_language_code,default_translation_id,timezone,is_active FROM telegram_chats ORDER BY updated_at DESC LIMIT 200')
+        subscriptions = await connection.fetch('SELECT id,telegram_chat_id,mode,send_time,timezone,is_enabled,plan_day,completed,next_run_at FROM subscriptions ORDER BY id DESC LIMIT 200')
+        deliveries = await connection.fetch('SELECT id,telegram_chat_id,subscription_id,status,next_chunk,jsonb_array_length(chunks) AS chunks,error_code,updated_at FROM delivery_log ORDER BY id DESC LIMIT 100')
+        heartbeats = await connection.fetch('SELECT service,last_seen FROM service_heartbeats')
+    return {'version':'1.2.0','database':audit,'chats':[dict(r) for r in chats],
+        'subscriptions':[dict(r) for r in subscriptions],'deliveries':[dict(r) for r in deliveries],
+        'heartbeats':[dict(r) for r in heartbeats]}
 
 
-async def _dashboard_data(connection: asyncpg.Connection) -> dict[str, Any]:
-    stats = {
-        "languages": await connection.fetchval("SELECT COUNT(*) FROM languages"),
-        "translations": await connection.fetchval(
-            "SELECT COUNT(*) FROM translations WHERE is_active=true"
-        ),
-        "verses": await connection.fetchval("SELECT COUNT(*) FROM verses"),
-        "chats": await connection.fetchval("SELECT COUNT(*) FROM telegram_chats"),
-        "subscriptions": await connection.fetchval("SELECT COUNT(*) FROM subscriptions"),
-        "sent": await connection.fetchval("SELECT COUNT(*) FROM delivery_log WHERE status='sent'"),
-    }
-    translations = await connection.fetch(
-        """
-        SELECT t.id, l.code AS language, t.source_translation_id, t.title,
-               t.coverage, t.book_count, t.verse_count, t.license_type,
-               left(t.source_sha256, 12) AS checksum
-        FROM translations t JOIN languages l ON l.id=t.language_id
-        WHERE t.is_active=true ORDER BY l.code, t.title LIMIT 500
-        """
-    )
-    subscriptions = await connection.fetch(
-        """
-        SELECT s.id, s.telegram_chat_id, c.title, s.mode, s.send_time,
-               s.timezone, s.is_enabled, s.next_run_at,
-               t.source_translation_id
-        FROM subscriptions s
-        JOIN telegram_chats c ON c.telegram_chat_id=s.telegram_chat_id
-        JOIN translations t ON t.id=s.translation_id
-        ORDER BY s.next_run_at NULLS LAST LIMIT 200
-        """
-    )
-    imports = await connection.fetch(
-        """
-        SELECT id, profile, status, selected_count, imported_count,
-               skipped_count, failed_count, started_at, finished_at
-        FROM import_runs ORDER BY id DESC LIMIT 20
-        """
-    )
-    chats = await connection.fetch(
-        """
-        SELECT telegram_chat_id, chat_type, title, username, is_active
-        FROM telegram_chats ORDER BY updated_at DESC LIMIT 200
-        """
-    )
-    return {
-        "stats": stats,
-        "translations": translations,
-        "subscriptions": subscriptions,
-        "imports": imports,
-        "chats": chats,
-    }
+@app.get('/api/stats',dependencies=[Depends(require_key)])
+async def api_stats() -> dict[str,Any]:
+    """Read-only API; no CSRF-capable form mutation endpoints are exposed."""
+    return await operator_data()
 
 
-@app.get("/admin", response_class=HTMLResponse, dependencies=[Depends(require_basic)])
-async def dashboard(request: Request) -> HTMLResponse:
-    pool = await _pool()
-    async with pool.acquire() as connection:
-        data = await _dashboard_data(connection)
-    return templates.TemplateResponse(
-        request=request,
-        name="index.html",
-        context={"version": "1.1.0", **data},
-    )
-
-
-@app.post("/admin/subscription", dependencies=[Depends(require_basic)])
-async def admin_subscription(
-    chat_id: Annotated[int, Form()],
-    translation_id: Annotated[int, Form()],
-    mode: Annotated[str, Form()],
-    send_time: Annotated[str, Form()],
-    timezone_name: Annotated[str, Form()],
-) -> RedirectResponse:
-    parsed_time: time = parse_hhmm(send_time)
-    validate_timezone(timezone_name)
-    pool = await _pool()
-    async with pool.acquire() as connection:
-        chat_exists = await connection.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM telegram_chats WHERE telegram_chat_id=$1)", chat_id
-        )
-        if not chat_exists:
-            raise HTTPException(400, "Chat is not registered in the bot")
-        await create_or_update_subscription(
-            connection,
-            chat_id=chat_id,
-            created_by=None,
-            translation_id=translation_id,
-            mode=mode,
-            send_time=parsed_time,
-            timezone_name=timezone_name,
-        )
-    return RedirectResponse("/admin", status_code=303)
-
-
-@app.get("/api/stats", dependencies=[Depends(require_api_key)])
-async def api_stats() -> dict[str, Any]:
-    pool = await _pool()
-    async with pool.acquire() as connection:
-        data = await _dashboard_data(connection)
-    return {
-        "stats": data["stats"],
-        "translations": [dict(row) for row in data["translations"]],
-        "subscriptions": [dict(row) for row in data["subscriptions"]],
-        "imports": [dict(row) for row in data["imports"]],
-    }
+@app.get('/admin',response_class=HTMLResponse,dependencies=[Depends(require_basic)])
+async def dashboard() -> HTMLResponse:
+    """Escaped preformatted diagnostic output, without scripts or external resources."""
+    data = json.dumps(await operator_data(),ensure_ascii=False,indent=2,default=str)
+    return HTMLResponse('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+        '<title>BibleMessengerBot · Operations</title><h1>BibleMessengerBot 1.2.0</h1>'
+        '<p>Read-only operations. Change destination settings through /settings in Telegram.</p><pre>'+
+        escape(data)+'</pre></html>',headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
+        'Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'; base-uri 'none'"})

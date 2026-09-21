@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
+# No rendered Compose/env output: diagnostics must not expose credentials.
 set -Eeuo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")"
-echo "== Compose =="
-docker compose version
-docker compose config --quiet
-echo "== Services =="
+cd "$(dirname "$(readlink -f "$0")")"
 docker compose ps
-echo "== Database =="
-docker compose exec -T postgres pg_isready -U biblebot -d biblebot
-echo "== Statistics =="
-docker compose run --rm --no-deps bot python -m app.cli stats
-echo "== Recent logs =="
 docker compose logs --tail=80 bot worker admin bootstrap
+docker compose run --rm --no-deps bootstrap python -m app.cli audit

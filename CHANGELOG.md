@@ -1,20 +1,9 @@
 # Changelog
 
-## 1.1.0 — 2026-09-21
+## 1.2.0 — 2026-09-21
 
-Rebuilt release because the previously referenced 1.0.0 artifact was not
-present in the working storage and therefore could not be safely patched.
+Последовательная доработка commit ac6045ed54c0aa814538dbaeeb3d12022b2eed94.24 интерфейса и отдельные языковые настройки каждого назначения; проверки фактического корпуса и диапазонов; закреплённый источник/лицензии/кеш; реальные планы чтения; неизменная пофрагментная очередь с ручным разрешением неопределённой доставки; DST; авторизация назначения; миграция002; shared maintenance guard; безопасный сценарий установки/обновления; read-only диагностика; расширенные офлайн и отдельные реальные integration-тесты. Детали: docs/CHANGES-1.2.0.md. Ограничения: docs/LIMITATIONS.md. Полные библейские тексты и дамп не включены.
 
-- Added an eBible/BibleNLP catalog importer with per-edition license checks.
-- Added `core`, `extended`, and `all-open` import profiles; core/extended import up to two open editions per language by default.
-- Added strict default policy: Public Domain, CC0, CC BY, and CC BY-SA only.
-- Added multilingual PostgreSQL schema with source provenance and SHA-256.
-- Added idempotent, transactional bulk import and resumable download cache.
-- Added Russian, English, Ukrainian, Spanish, French, German, Portuguese,
-  Italian, Polish, Romanian, Chinese, Arabic, Hebrew, Hindi and many other
-  language priorities.
-- Added Telegram private-chat, group, and channel registration workflows.
-- Added sequential reading, verse of the day, random verse, reading plans,
-  scheduling, delivery logs, rate limiting, and retries.
-- Added FastAPI health/admin endpoints, Docker Compose, one-command installer,
-  backup, restore, diagnostics, tests, and release audit tooling.
+## 1.1.0 — исходная переданная версия
+
+Сохранена в Git-истории и Git bundle. Старый отчёт и его ограничения перенесены в docs/history/. В исходном ZIP не было полного корпуса; повторный базовый офлайн-прогон дал31passed.

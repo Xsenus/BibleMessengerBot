@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
+# Reuse the idempotent installer, preserving .env. Run from the new release directory.
 set -Eeuo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")"
-[[ -f .env ]] || { echo ".env not found; run install.sh first" >&2; exit 1; }
-docker compose build --pull
-docker compose run --rm bootstrap
-docker compose up -d --remove-orphans bot worker admin
-docker image prune -f
-docker compose ps
+cd "$(dirname "$(readlink -f "$0")")"
+[[ -f .env ]] || { echo 'Copy the original private .env into this directory before upgrading.' >&2; exit 2; }
+exec bash install.sh "$@"

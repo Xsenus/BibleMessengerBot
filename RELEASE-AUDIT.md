@@ -1,24 +1,38 @@
-# Release audit
+# Проверка BibleMessengerBot 1.2.0
 
-- Project: `BibleMessengerBot`
-- Version: `1.1.0`
-- Status: **PASS**
-- Files: 73
-- Bytes: 251138
+**Статус: OFFLINE_PASS_LIVE_UNVERIFIED**. Это отчёт офлайн-проверок, а не приёмка production.
 
-## Checks
+Выполнено тестов успешно: **184**. Ошибок: **0**. Пропущено единиц сбора/тестов: **2**.
+Пропуски перечислены ниже и в XML/JSON; они не посчитаны как прошедшие. tests.test_aiogram_contracts; tests.test_postgres_integration
 
-- PASS — `json_yaml_parse`
-- PASS — `secret_scan`
-- PASS — `compileall`
-- PASS — `pytest`
-- PASS — `bash_syntax`
-- PASS — `required_files`
+## Выполненные проверки
 
-## Not executed in this environment
+- PASSED — COMPILE
+- PASSED — TESTS
+- PASSED — SHELL-backup
+- PASSED — SHELL-diagnose
+- PASSED — SHELL-install
+- PASSED — SHELL-restore
+- PASSED — SHELL-update
+- PASSED — SHELL-verify
+- PASSED — JSON_YAML_PARSE_ONLY
+- PASSED — BASIC_SECRET_AND_PATH_SCAN
+- PASSED — REQUIRED_FILES
 
-- Docker image build (Docker is unavailable in the audit environment)
-- PostgreSQL schema execution against a live server
-- Live Bible corpus download and full first-run import
-- Telegram Bot API send/receive operations
-- Deployment on the target VPS
+Полные команды, причины пропусков и результаты: RELEASE-AUDIT.json, evidence/TESTS.txt и TESTS.xml. Разбор YAML не является запуском Docker Compose. Компиляция Python не проверяет отсутствующие зависимости или SQL на сервере.
+
+## Не выполнено
+
+- Actual PostgreSQL/asyncpg integration: missing asyncpg or RUN_DB_TESTS is not enabled.
+- Actual aiogram model/authorization integration suite: missing library.
+- Docker image build and docker compose config/runtime on target VPS.
+- Full authentic Bible download/import; no complete edition is physically bundled.
+- Real Telegram Bot API requests, channel/group/private delivery and scheduled live acceptance.
+- Real backup/restore, sustained load/soak tests, independent textual/native-language review.
+- Ruff, dependency vulnerability audit and fully hash-locked reproducible image build.
+
+## Фактическое наполнение
+
+Каталогов UI: 24. Целевых языков импортёра: 56. Полностью скачанных изданий в ZIP: **0**. Готового дампа нет.
+
+Установщик должен выполнить реальные интеграционные тесты, импорт и аудит на VPS. До их успешного завершения публикации не запускаются. Это дополнительная проверка на сервере, а не уже выполненная здесь работа. Гарантии отсутствия всех ошибок нет.

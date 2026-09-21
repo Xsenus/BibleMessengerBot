@@ -6,17 +6,23 @@ import json
 import logging
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
+import hashlib
 
-import asyncpg
+if TYPE_CHECKING:
+    import asyncpg
 
 from app.catalog.models import DownloadedTranslation, TranslationMeta, VerseReference
-from app.catalog.references import pair_verses, parse_reference_lines
+from app.catalog.references import pair_verses, parse_reference_lines, with_ordinals
+from app.catalog.audit import audit_corpus
+from app.catalog.source import SOURCE_REVISION
+from app.catalog.policy import decide_license
+from app.services.locks import lock_key
 from app.catalog.report import selection_summary
 from app.catalog.selector import SelectionItem, SelectionResult, select_translations
 from app.catalog.source import BibleNlpSource
 from app.config import Settings
-from app.db import normalize_asyncpg_dsn
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -99,7 +105,7 @@ async def _is_up_to_date(
 ) -> bool:
     row = await connection.fetchrow(
         """
-        SELECT source_sha256, verse_count
+        SELECT id, source_sha256, verse_count, audit_status, source_revision
         FROM translations
         WHERE source_name = 'BibleNLP/eBible' AND source_translation_id = $1
         """,
@@ -108,7 +114,11 @@ async def _is_up_to_date(
     return bool(
         row
         and row["source_sha256"] == downloaded.sha256
+        and row["source_revision"] == SOURCE_REVISION
+        and row["audit_status"] in {"passed", "passed_with_warnings"}
         and int(row["verse_count"] or 0) > 0
+        and int(row["verse_count"]) == await connection.fetchval('SELECT COUNT(*) FROM verses WHERE translation_id=$1', row['id'])
+        and await connection.fetchval('SELECT COUNT(*) FROM translation_chapters WHERE translation_id=$1', row['id']) > 0
     )
 
 
@@ -125,11 +135,19 @@ async def import_translation(
     if not records:
         raise ValueError(f"Translation {metadata.translation_id} contains no nonblank verses")
 
-    actual_books = len({record[0] for record in records})
+    decision = decide_license(metadata)
+    if not decision.allowed:
+        raise ValueError(f'License rejected at import boundary: {decision.reason}')
+    if hashlib.sha256(downloaded.path.read_bytes()).hexdigest() != downloaded.sha256:
+        raise ValueError('Downloaded source checksum changed before import')
+    audit = audit_corpus(metadata, references, records)
+    reference_sha = hashlib.sha256('\n'.join(f'{r.book_code} {r.chapter}:{r.verse}' for r in references).encode()).hexdigest()
+    actual_books = audit.books
     actual_nonempty = sum(1 for record in records if record[3] and not record[4])
     license_info = metadata.license
 
     async with connection.transaction():
+        await connection.execute('SELECT pg_advisory_xact_lock($1)', lock_key('edition', metadata.translation_id))
         await ensure_reference_books(connection, references)
         language_id = await connection.fetchval(
             """
@@ -201,7 +219,7 @@ async def import_translation(
             metadata.title,
             metadata.short_title,
             metadata.description,
-            license_info.license_type if license_info else "unknown",
+            decision.normalized,
             license_info.license_version if license_info else "",
             license_info.license_url if license_info else "",
             metadata.copyright_notice,
@@ -214,10 +232,10 @@ async def import_translation(
             metadata.source_date,
             metadata.redistributable,
             metadata.downloadable,
-            metadata.coverage,
-            metadata.ot_books,
-            metadata.nt_books,
-            metadata.dc_books,
+            audit.coverage,
+            audit.ot_books,
+            audit.nt_books,
+            audit.dc_books,
             actual_books,
             len(records),
             actual_nonempty,
@@ -225,10 +243,7 @@ async def import_translation(
         )
 
         await connection.execute("DELETE FROM verses WHERE translation_id = $1", translation_id)
-        rows = [
-            (translation_id, book, chapter, verse, text, continuation, source_line)
-            for book, chapter, verse, text, continuation, source_line in records
-        ]
+        rows = [(translation_id, *row) for row in with_ordinals(records)]
         for index in range(0, len(rows), batch_size):
             await connection.copy_records_to_table(
                 "verses",
@@ -241,8 +256,26 @@ async def import_translation(
                     "text",
                     "is_range_continuation",
                     "source_line",
+                    "verse_end",
+                    "ordinal",
                 ),
             )
+
+        await connection.execute("DELETE FROM translation_chapters WHERE translation_id=$1", translation_id)
+        await connection.execute("""
+            INSERT INTO translation_chapters(translation_id,book_code,chapter,position,verse_count)
+            SELECT $1,v.book_code,v.chapter,
+                   row_number() OVER(ORDER BY b.canonical_order,v.chapter)::int,count(*)::int
+            FROM verses v JOIN books b ON b.code=v.book_code
+            WHERE v.translation_id=$1 AND v.text<>'' AND NOT v.is_range_continuation
+            GROUP BY v.book_code,v.chapter,b.canonical_order
+        """, translation_id)
+        await connection.execute("""
+            UPDATE translations SET audit_status=$2,source_revision=$3,reference_sha256=$4,
+                validation_report=$5::jsonb,canonical_66_complete=$6,nt_complete=$7 WHERE id=$1
+        """, translation_id, 'passed_with_warnings' if audit.warnings else 'passed',
+             SOURCE_REVISION, reference_sha, json.dumps(audit.as_dict(),ensure_ascii=False),
+             audit.canonical_66_complete, audit.nt_complete)
 
     return {
         "translation_id": metadata.translation_id,
@@ -253,6 +286,9 @@ async def import_translation(
         "nonempty_verses": actual_nonempty,
         "sha256": downloaded.sha256,
         "source_url": downloaded.source_url,
+        "audit": audit.as_dict(),
+        "reference_sha256_normalized": reference_sha,
+        "source_revision": SOURCE_REVISION,
     }
 
 
@@ -261,10 +297,17 @@ async def run_import(
     *,
     refresh_catalog: bool = True,
     refresh_translations: bool = False,
+    maintenance_owned: bool = False,
 ) -> dict[str, Any]:
     if settings.bible_profile == "none":
         return {"status": "skipped", "reason": "BIBLE_PROFILE=none"}
 
+    import asyncpg
+    from app.db import normalize_asyncpg_dsn, maintenance
+    if not maintenance_owned:
+        async with maintenance(settings):
+            return await run_import(settings,refresh_catalog=refresh_catalog,
+                refresh_translations=refresh_translations,maintenance_owned=True)
     connection = await asyncpg.connect(normalize_asyncpg_dsn(settings.database_url), timeout=30)
     source = BibleNlpSource(
         settings.source_cache_dir,
@@ -272,6 +315,9 @@ async def run_import(
     )
     run_id: int | None = None
     try:
+        acquired = await connection.fetchval("SELECT pg_try_advisory_lock($1)",lock_key("corpus-import",1))
+        if not acquired:
+            raise RuntimeError("Another corpus import is running")
         await seed_books(connection)
         run_id = await connection.fetchval(
             """
@@ -383,9 +429,14 @@ async def run_import(
                             failure["error"][:4000],
                         )
 
-            status = "succeeded" if not failures else ("partial" if imported or skipped else "failed")
+            actual_languages = {x['language_code'] for x in imported + skipped}
+            requested_languages = set(selection.candidates_by_language) | set(selection.missing_languages)
+            missing_languages = sorted(requested_languages - actual_languages)
+            status = ('failed' if not imported and not skipped else
+                      'partial' if failures or missing_languages else 'succeeded')
             details = {
                 "selection": report,
+                "missing_languages": missing_languages,
                 "imported": imported,
                 "skipped": skipped,
                 "failures": failures,
