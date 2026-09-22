@@ -94,7 +94,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         settings = replace(settings, **updates)
 
     if args.command == "bootstrap":
-        return await bootstrap()
+        return await bootstrap(settings)
     if args.command == "import":
         await seed_only(settings)
         return await run_import(

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Record reproducible OFFLINE checks, with unexecuted integration work kept explicit.
 
-Running this script updates evidence/reports. It does not sign the package, run
+Running this script writes runtime-evidence/offline/ and preserves published release reports. It does not sign the package, run
 Docker, silently install dependencies, or turn skipped tests into passed tests.
 """
 from __future__ import annotations
@@ -21,8 +21,8 @@ from xml.etree import ElementTree
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-EVIDENCE = ROOT / 'evidence'
-EXCLUDED = {'.git','__pycache__','.pytest_cache','.ruff_cache','.venv','venv','backups','cache','runtime-evidence'}
+EVIDENCE = ROOT / 'runtime-evidence' / 'offline'
+EXCLUDED = {'.git','__pycache__','.pytest_cache','.ruff_cache','.venv','venv','backups','cache','runtime-evidence','work','.serena'}
 TOKEN = re.compile(r'\b\d{6,14}:[A-Za-z0-9_-]{30,}\b')
 
 
@@ -48,10 +48,10 @@ def command(name: str, args: list[str]) -> dict[str,Any]:
 
 def main() -> int:
     """Run offline validation and explicitly report missing integration prerequisites."""
-    EVIDENCE.mkdir(exist_ok=True)
+    EVIDENCE.mkdir(parents=True,exist_ok=True)
     checks = [command('COMPILE',[sys.executable,'-m','compileall','-q','app','tests','scripts']),
               command('TESTS',[sys.executable,'-m','pytest','-o','addopts=','-q','-rs',
-                     '--junitxml=evidence/TESTS.xml','-p','no:cacheprovider'])]
+                     '--junitxml='+str(EVIDENCE/'TESTS.xml'),'-p','no:cacheprovider'])]
     tree = ElementTree.parse(EVIDENCE/'TESTS.xml')
     cases = tree.findall('.//testcase')
     skipped = [{'name':case.attrib.get('name'),'reason':case.find('skipped').attrib.get('message',''), 'detail':case.find('skipped').text}
@@ -122,7 +122,7 @@ def main() -> int:
             'bundled_authentic_complete_editions':0,'prebuilt_database_dump_included':False,
             'not_executed':not_executed,
             'runtime_gate':'install.sh executes installed-library and disposable PostgreSQL tests, then real import+database audit before starting services; not run here.'}
-    (ROOT/'RELEASE-AUDIT.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+    (EVIDENCE/'RELEASE-AUDIT.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
     lines=['# Проверка BibleMessengerBot '+report['version'],'',
            '**Статус: '+report['status']+'**. Это отчёт офлайн-проверок, а не приёмка production.',
            '',f"Выполнено тестов успешно: **{tests['passed']}**. Ошибок: **{tests['failed']}**. Пропущено единиц сбора/тестов: **{len(skipped)}**.",
@@ -134,8 +134,8 @@ def main() -> int:
     lines += ['', '## Фактическое наполнение', '',
               f"Каталогов UI: {report['ui_catalogs']}. Источников: 3. Профиль all-open не ограничен списком из 56 языков, но фильтрует лицензии и формат. Полностью скачанных изданий в ZIP: **0**. Готового дампа нет.",
               '', 'Установщик должен выполнить реальные интеграционные тесты, импорт и аудит на VPS. До их успешного завершения публикации не запускаются. Это дополнительная проверка на сервере, а не уже выполненная здесь работа. Гарантии отсутствия всех ошибок нет.']
-    (ROOT/'RELEASE-AUDIT.md').write_text('\n'.join(lines)+'\n')
-    print(json.dumps({'status':report['status'],'tests':tests,'report':'RELEASE-AUDIT.json'},ensure_ascii=False,indent=2))
+    (EVIDENCE/'RELEASE-AUDIT.md').write_text('\n'.join(lines)+'\n')
+    print(json.dumps({'status':report['status'],'tests':tests,'report':str((EVIDENCE/'RELEASE-AUDIT.json').relative_to(ROOT))},ensure_ascii=False,indent=2))
     return 0 if ok else 1
 
 if __name__=='__main__':

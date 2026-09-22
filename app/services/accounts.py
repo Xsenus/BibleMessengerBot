@@ -34,7 +34,7 @@ async def upsert_chat(connection: Any, *, chat_id: int, chat_type: str, title: s
 async def claim_owner(connection: Any, *, telegram_user_id: int, supplied_code: str,
                       expected_code: str) -> bool:
     """One owner, one claim, constant-time code comparison and a serialized transaction."""
-    if len(expected_code) < 16 or not secrets.compare_digest(supplied_code,expected_code):
+    if len(expected_code) < 16 or not secrets.compare_digest(supplied_code.encode('utf-8'),expected_code.encode('utf-8')):
         return False
     async with connection.transaction():
         await connection.execute('SELECT pg_advisory_xact_lock($1)',lock_key('owner',1))

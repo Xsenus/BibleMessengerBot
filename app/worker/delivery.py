@@ -11,7 +11,7 @@ from app.services.formatting import split_message
 from app.services.i18n import tr
 from app.services.locks import chat_lock
 from app.services.outbox import Envelope,dispatch_chunk
-from app.services.plans import PLANS,plan_window
+from app.services.plans import PLANS,plan_window,validate_plan
 from app.services.scheduling import next_occurrence
 
 
@@ -80,9 +80,8 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
                 text = tr(locale,'complete')
                 progress['completed'] = True
         elif mode=='reading_plan':
+            await validate_plan(connection,edition,sub['plan_code'])
             duration,scope = PLANS[sub['plan_code']]
-            if scope is None and not edition['canonical_66_complete'] or scope=='NT' and not edition['nt_complete']:
-                raise UserError('invalid')
             chapters = await connection.fetch('''SELECT c.book_code,c.chapter FROM translation_chapters c
                 JOIN books b ON b.code=c.book_code WHERE c.translation_id=$1
                 AND ($2::text IS NULL OR b.testament=$2 OR c.book_code=$2) ORDER BY c.position''',edition['id'],scope)

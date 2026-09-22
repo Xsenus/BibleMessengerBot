@@ -14,6 +14,7 @@ from aiogram.types import Message,CallbackQuery,InlineKeyboardMarkup,InlineKeybo
 from aiogram.exceptions import TelegramAPIError
 from app.bot.commands import parse_command,mode_name,encode_callback,decode_callback
 from app.bot.transport import TelegramSender
+from app.bot.ui import main_keyboard,keyboard_command,welcome_text,menu_hint,search_prompt,onboarding_help,send_welcome
 from app.catalog.profiles import normalize_language_code
 from app.services import bible
 from app.services.accounts import upsert_user,upsert_chat,claim_owner
@@ -73,7 +74,7 @@ async def destination(connection: Any, bot: Any, current_chat: Any, actor_id: in
     if target is not None and enum_value(current_chat.type)!='private' and str(target)!=str(current_chat.id):
         raise UserError('private_only')
     try:
-        chat = await bot.get_chat(int(target) if str(target).lstrip('-').isdigit() else target) if target is not None else current_chat
+        chat = current_chat if target is None or str(target)==str(current_chat.id) else await bot.get_chat(int(target) if str(target).lstrip('-').isdigit() else target)
     except TelegramAPIError:
         raise UserError('no_result') from None
     await authorize(bot,chat,actor_id)
@@ -118,8 +119,8 @@ async def settings_text(connection: Any, chat: Any) -> str:
     edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
     lines = [f"<b>{tr(locale,'settings')}</b>",f"{tr(locale,'destination')}: <code>{chat['telegram_chat_id']}</code>",
         f"{tr(locale,'ui_language')}: {escape(native_ui_name(locale))}",
-        f"{tr(locale,'language')}: {escape(edition['language_code'] if edition else '—')}",
-        f"{tr(locale,'edition')}: {escape(edition['title'] if edition else '—')}",
+        f"{tr(locale,'language')}: {escape(bible.display_language(edition['language_code'],locale) if edition else '—')}",
+        f"{tr(locale,'edition')}: {escape(bible.display_title(edition) if edition else '—')}",
         f"{tr(locale,'timezone')}: <code>{escape(chat['timezone'])}</code>"]
     if edition:
         coverage = edition['coverage'] if edition['coverage'] in {'full','nt','ot','partial'} else 'unverified'
@@ -137,7 +138,7 @@ async def status_text(connection: Any, chat: Any) -> str:
     for sub in subs:
         state = tr(locale,'complete') if sub['completed'] else tr(locale,'enabled' if sub['is_enabled'] else 'disabled')
         lines += [f"<b>{tr(locale,sub['mode'])}</b>: {state}",
-            f"{sub['send_time'].strftime('%H:%M')} {escape(sub['timezone'])} · {escape(sub['source_translation_id'])}",
+            f"{sub['send_time'].strftime('%H:%M')} {escape(sub['timezone'])} · {escape(bible.display_title({'title':sub['translation_title'],'source_translation_id':sub['source_translation_id'],'source_name':sub.get('translation_source_name')}))}",
             f"{tr(locale,'progress')}: {escape(sub['current_book_code'] or '—')} {sub['current_chapter'] or 0} · {sub['plan_day']}"]
     if not subs:
         lines.append(tr(locale,'no_subscriptions'))
@@ -148,14 +149,18 @@ async def status_text(connection: Any, chat: Any) -> str:
         # Machine state identifiers intentionally remain stable for diagnostics.
         lines.append(f"<code>#{job['id']} {job['status']} {job['next_chunk']}/{job['total']}</code>")
         if job['status'] in {'uncertain','failed'}:
-            lines += [tr(locale,'pending_review'),f"<code>/resolve {job['id']} sent {chat['telegram_chat_id']}</code>",
-                f"<code>/resolve {job['id']} retry-duplicate-risk {chat['telegram_chat_id']}</code>",
-                f"<code>/resolve {job['id']} cancel {chat['telegram_chat_id']}</code>"]
+            target = f" {chat['telegram_chat_id']}" if chat['telegram_chat_id'] < 0 else ''
+            lines += [tr(locale,'pending_review'),f"<code>/resolve {job['id']} sent{target}</code>",
+                f"<code>/resolve {job['id']} retry-duplicate-risk{target}</code>",
+                f"<code>/resolve {job['id']} cancel{target}</code>"]
     return '\n'.join(lines)
 
 
 def help_text(locale: str) -> str:
     """Localized descriptions plus stable copyable command syntax."""
+    friendly = onboarding_help(locale)
+    if friendly:
+        return friendly
     lines = [f"<b>{tr(locale,'help')}</b>"]
     for command,key in [('settings','settings'),('today','today'),('next','next'),('random','random'),('topics','topics'),
         ('translations','edition'),('status','status'),('pause','pause'),('resume','resume'),('unsubscribe','unsubscribe')]:
@@ -193,10 +198,17 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
     name = parsed.name
     chat = await destination(connection,bot,message.chat,user.id,parsed.target,settings)
     locale = chat['ui_language']
+    if name=='start' and enum_value(message.chat.type)=='private':
+        edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
+        return welcome_text(locale,bible.display_title(edition) if edition else None),main_keyboard(locale)
     if name in {'start','settings','register'}:
-        return ((tr(locale,'start')+'\n\n') if name=='start' else '')+await settings_text(connection,chat),settings_keyboard(chat)
+        return await settings_text(connection,chat),settings_keyboard(chat)
     if name=='help':
         return help_text(locale),None
+    if name=='menu':
+        return menu_hint(locale),None
+    if name=='search' and not args:
+        return search_prompt(locale),None
     if name=='claim':
         if enum_value(message.chat.type)!='private':
             raise UserError('private_only')
@@ -249,6 +261,9 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             message_thread_id=None if args[0]=='off' else int(args[0]))
         return tr(locale,'saved'),settings_keyboard(chat)
     if name=='time':
+        if not args:
+            target = f" {chat['telegram_chat_id']}" if chat['telegram_chat_id'] < 0 else ''
+            return f"{tr(locale,'time')}: <code>/time 09:00 {escape(chat['timezone'])}{target}</code>",None
         if not 1<=len(args)<=2:
             raise UserError('invalid')
         clock,tz = parse_hhmm(args[0]),args[1] if len(args)==2 else chat['timezone']
@@ -297,7 +312,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
     if not edition:
         raise UserError('not_ready')
     if name=='license':
-        return bible.attribution(edition,locale),None
+        return bible.license_details(edition,locale),None
     if name=='next':
         identifier = await enqueue_next(connection,chat,edition,f'{message.chat.id}:{message.message_id}',settings.max_message_length)
         return tr(locale,'queued')+f' <code>#{identifier}</code>',None
@@ -354,8 +369,8 @@ async def edition_menu(connection: Any, chat: Any, page: int, language: str | No
     rows = []
     for item in chosen:
         coverage = item.coverage if item.coverage in {'full','nt','ot','partial'} else 'unverified'
-        lines.append(f"<b>{escape(item.language_code)} · {escape(item.title)}</b>\n<code>{escape(item.source_id)}</code> · {tr(locale,coverage)} · {item.books}")
-        rows.append([button(f'{item.language_code} · {item.short_title}'[:50],'edition',identifier,str(item.id))])
+        lines.append(f"<b>{escape(item.title)}</b>\n{escape(bible.display_language(item.language_code,locale))} · {tr(locale,coverage)} · {tr(locale,'books')}: {item.books}\n<code>/translation {escape(item.source_id)}</code>")
+        rows.append([button(item.short_title[:50],'edition',identifier,str(item.id))])
     # Filter state is encoded explicitly, so next-page clicks cannot accidentally change language scope.
     nav = []
     for delta,key in [(-1,'previous_page'),(1,'next_page')]:
@@ -391,6 +406,9 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
             await register_context(connection,message.from_user,message.chat,settings)
             locale = await connection.fetchval('SELECT ui_language FROM telegram_chats WHERE telegram_chat_id=$1',message.chat.id)
             text,markup = await run_command(connection,bot,settings,message,parsed)
+            if parsed.name=='start' and enum_value(message.chat.type)=='private':
+                if await send_welcome(bot,connection,settings,message.chat.id,text,markup):
+                    return
         except UserError as error:
             text,markup = tr(locale,error.key),None
         except (ValueError,KeyError):
@@ -400,7 +418,18 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
         except Exception as error:
             LOGGER.error('Command failed: %s',type(error).__name__)
             text,markup = tr(locale,'not_ready'),None
+        if markup is None and enum_value(message.chat.type)=='private':
+            markup = main_keyboard(locale)
         await reply(bot,connection,settings,message.chat.id,text,markup,message.message_thread_id)
+
+
+@router.message(F.chat.type=='private',F.text,~F.text.startswith('/'))
+async def private_text_handler(message: Message,bot: Any,db_pool: Any,settings: Any) -> None:
+    """Route exact navigation labels through the usual authorization and error handling."""
+    if enum_value(message.chat.type)!='private':
+        return
+    command = keyboard_command(message.text or '') or '/menu'
+    await command_handler(message.model_copy(update={'text':command}),bot,db_pool,settings)
 
 
 @router.callback_query(F.data.startswith('v1:'))

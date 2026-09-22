@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import time
 from typing import Any
 from app.services.scheduling import next_occurrence, validate_timezone
-from app.services.plans import PLANS
+from app.services.plans import PLANS, validate_plan
 from app.services.errors import UserError
 from app.services.locks import chat_lock
 from app.services.destinations import ensure_resolved, configure_chat
@@ -38,9 +38,8 @@ async def create_or_update_subscription(connection: Any, *, chat_id: int, create
             raise UserError('not_ready')
         if mode=='topic_of_day' and not translation.get('numbering_system','BibleNLP Original versification').startswith('BibleNLP'):
             raise UserError('no_result','No verified thematic reference mapping for this numbering system')
-        if plan_code and ((plan_code.startswith('bible-') and not translation['canonical_66_complete'])
-                 or (plan_code == 'new-testament-90' and not translation['nt_complete'])):
-            raise UserError('invalid','The requested plan requires a structurally complete edition')
+        if plan_code:
+            await validate_plan(connection,translation,plan_code)
         chat = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1',chat_id)
         if not chat:
             raise UserError('no_result')
@@ -105,6 +104,6 @@ async def delete_subscriptions(connection: Any, chat_id: int, mode: str | None =
 
 async def list_subscriptions(connection: Any, chat_id: int) -> list[Any]:
     """List schedules for exactly one destination."""
-    return await connection.fetch('''SELECT s.*,t.title AS translation_title,t.source_translation_id
+    return await connection.fetch('''SELECT s.*,t.title AS translation_title,t.source_translation_id,t.source_name AS translation_source_name
         FROM subscriptions s JOIN translations t ON t.id=s.translation_id
         WHERE s.telegram_chat_id=$1 ORDER BY s.mode''',chat_id)

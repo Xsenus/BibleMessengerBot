@@ -1,39 +1,17 @@
-# Проверка BibleMessengerBot 1.3.0
+# Проверка выпуска 1.3.1
 
-**Статус: OFFLINE_PASS_LIVE_UNVERIFIED**. Это отчёт офлайн-проверок, а не приёмка production.
+Дата: 22 сентября 2026. Статус: **LIVE_VALIDATED** — выполнены реальные проверки на VPS.
 
-Выполнено тестов успешно: **317**. Ошибок: **0**. Пропущено единиц сбора/тестов: **2**.
-Пропуски перечислены ниже и в XML/JSON; они не посчитаны как прошедшие. tests.test_aiogram_contracts; tests.test_postgres_integration
+- Python 3.12.14, PostgreSQL 16.15, Docker 29.8.1.
+- Linux/PostgreSQL: **457 passed, 0 failed, 0 skipped**. Windows: 431 passed, 26 ожидаемых пропусков; эти сценарии выполнены на Linux.
+- Два настоящих издания: Синодальный перевод (78 книг, 37 098 стихов) и World English Bible (66 книг, 31 095 стихов). Всего **68 193 стиха**. Проверены хеши источников и данные PostgreSQL.
+- Проверены чтение глав, случайный стих, стих дня, поиск и пять планов на каждом издании.
+- Все четыре службы здоровы; административный API слушает только localhost, порт PostgreSQL не опубликован.
+- Резервная копия восстановлена в отдельную временную БД и прошла полный аудит. Включён ежедневный backup timer.
+- Реальный `/start` подтверждён пользователем; приветственная фотография принята Telegram, её file_id закэширован. Стих дня и случайный стих видны на присланном пользователем скриншоте.
+- Имя, оба описания, аватар и меню из 16 команд прочитаны обратно через Telegram API; клавиатура из шести кнопок работает в личном чате.
+- Проверен 41 пакет Linux, известных уязвимостей не найдено. Устранена CVE-2025-71176 обновлением pytest до 9.1.1; зависимости закреплены в `constraints-linux.txt`.
 
-## Выполненные проверки
+Машиночитаемые результаты: [RELEASE-AUDIT.json](RELEASE-AUDIT.json). Методика, источники и ограничения: [docs/VALIDATION.md](docs/VALIDATION.md). Исходные офлайн-отчёты архива находятся в [истории 1.3.0](docs/history/1.3.0/RELEASE-AUDIT.md).
 
-- PASSED — COMPILE
-- PASSED — TESTS
-- PASSED — SHELL-backup
-- PASSED — SHELL-diagnose
-- PASSED — SHELL-fill_database
-- PASSED — SHELL-install
-- PASSED — SHELL-restore
-- PASSED — SHELL-update
-- PASSED — SHELL-verify
-- PASSED — JSON_YAML_PARSE_ONLY
-- PASSED — BASIC_SECRET_AND_PATH_SCAN
-- PASSED — REQUIRED_FILES
-
-Полные команды, причины пропусков и результаты: RELEASE-AUDIT.json, evidence/TESTS.txt и TESTS.xml. Разбор YAML не является запуском Docker Compose. Компиляция Python не проверяет отсутствующие зависимости или SQL на сервере.
-
-## Не выполнено
-
-- Actual PostgreSQL/asyncpg integration: missing asyncpg or RUN_DB_TESTS is not enabled.
-- Actual aiogram model/authorization integration suite: missing library.
-- Docker image build and docker compose config/runtime on target VPS.
-- Full authentic Bible download/import; no complete edition is physically bundled.
-- Real Telegram Bot API requests, channel/group/private delivery and scheduled live acceptance.
-- Real backup/restore, sustained load/soak tests, independent textual/native-language review.
-- Ruff, dependency vulnerability audit and fully hash-locked reproducible image build.
-
-## Фактическое наполнение
-
-Каталогов UI: 24. Источников: 3. Профиль all-open не ограничен списком из 56 языков, но фильтрует лицензии и формат. Полностью скачанных изданий в ZIP: **0**. Готового дампа нет.
-
-Установщик должен выполнить реальные интеграционные тесты, импорт и аудит на VPS. До их успешного завершения публикации не запускаются. Это дополнительная проверка на сервере, а не уже выполненная здесь работа. Гарантии отсутствия всех ошибок нет.
+Доставка по настоящему расписанию в группы/каналы не выдаётся за проверенную: для неё нужно настроенное назначение. PostgreSQL-тесты очереди используют моделируемый Telegram. Тематические ссылки для native-нумерации отключены. Отдельная картинка описания перед первым запуском задаётся в BotFather; аватар и приветствие внутри чата настроены автоматически. Длительный нагрузочный прогон и независимая построчная вычитка всего корпуса не выполнялись.

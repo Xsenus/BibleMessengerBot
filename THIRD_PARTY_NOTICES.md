@@ -1,24 +1,31 @@
-# Third-party sources and rights — 1.3.0
+# Источники и права третьих лиц
 
-The MIT license for this application does not license Bible translations. No complete authentic Bible text or populated database is bundled. Synthetic fixtures are marked as test data and are not represented as Scripture.
+[MIT-лицензия](LICENSE) относится к коду приложения. Библейские переводы имеют собственные условия использования; наличие файла на GitHub или в бесплатном API не делает все тексты свободными. Полные тексты и наполненная пользовательская БД не входят в публичный репозиторий. Синтетические fixtures тестов не являются Писанием.
 
-## BibleNLP / eBible
+## Источники текстов
 
-https://github.com/BibleNLP/ebible and https://ebible.org/
-The corpus README specifies verse-per-line alignment, a reference list, and edition-specific rights. This application obtains metadata and individual files at a resolved immutable repository revision. Individual translation license declarations govern reuse, not a repository software license.
+| Адаптер | Первичные ресурсы | Что сохраняет приложение |
+|---|---|---|
+| BibleNLP/eBible | [BibleNLP/ebible](https://github.com/BibleNLP/ebible), [eBible](https://ebible.org/) | Закреплённый commit, метаданные издания, reference list, исходные файлы и сведения о лицензии конкретного текста. |
+| getBible/v2 | [Каталог getBible](https://api.getbible.net/v2/translations.json), [репозиторий v2](https://github.com/getbible/v2) | Лицензионные метаданные издания, исходный JSON, inventory книг, publisher SHA-1 и локальный SHA-256. |
+| HelloAO | [Документация simplified format](https://bible.helloao.org/docs/reference/translations/simplified.html) | Полный simplified JSON, отдельный список книг, URL, хеши и подтверждение прав для конкретного издания. |
 
-## getBible
+Для HelloAO проверяется точный eBible-ID; отдельное правило BSB относится только к соответствующему изданию и [первичному заявлению Berean](https://berean.bible/licensing.htm), а не ко всем материалам сайта.
 
-https://github.com/getbible/v2 and https://api.getbible.net/v2/translations.json
-The adapter reads complete-translation JSON and distribution-license metadata for each edition. It does not infer redistribution permission from the host's generic terms or the code repository license.
+## Издания проверенного начального корпуса
 
-## HelloAO / Free Use Bible API
+В проверенном импорте 2026-09-22 использованы `getbible:synodal` (русский Синодальный перевод) и `getbible:web` (World English Bible). Поле `distribution_license` их записей в [каталоге getBible](https://api.getbible.net/v2/translations.json) указывает Public Domain. Отдельная [страница прав World English Bible](https://ebible.org/engwebp/copyright.htm) описывает условия использования этого текста и названия. Это не утверждение, что getBible-файл совпадает байт в байт с любой текущей публикацией eBible; точные исходные хеши указаны в [VALIDATION.md](docs/VALIDATION.md).
 
-https://bible.helloao.org/docs/reference/translations/simplified.html
-The adapter reads complete.simple.json and an independent book inventory. Edition rights are checked against exact eBible identifiers or a narrowly scoped primary Berean declaration at https://berean.bible/licensing.htm. No blanket license is inferred for all hosted translations.
+Состав и нумерация конкретного файла сохраняются. Название перевода само по себе не доказывает совпадение редакции с другой библиотекой или печатным изданием. Проверенное соответствие дополнительных книг getBible основано на [конфигурации издателя](https://github.com/getbible/v2_builder/blob/master/conf/bookNumbers.json) и [справочнике кодов USFM](https://ubsicap.github.io/usfm/identification/books.html).
 
-## Policy and attribution
+## Политика приложения
 
-Recognized Public Domain, CC0, CC BY and CC BY-SA may pass the application's conservative policy when metadata is consistent and downloading/redistribution are allowed. Unknown, contradictory, NC and ND declarations do not pass. Passing a parser is not a jurisdiction-specific legal opinion. Raw license evidence, source URLs, hashes, notices and decisions are retained. The bot includes edition/source/license attribution with publications.
+Импорт разрешает распознанные Public Domain, CC0, CC BY и CC BY-SA при непротиворечивых метаданных. Неизвестные, конфликтующие, NC/ND и запрещающие условия отклоняются. Сохраняются исходные лицензионные доказательства, URL, хеши, уведомления и решение политики.
 
-Primary-source documentation consulted on 2026-09-22. Full live corpus acquisition was not executed in this preparation environment. Runtime dependencies retain their respective licenses; the installer records the installed package versions. No proprietary binaries, font files, private secrets or commercial Bible dumps are included.
+Для Public Domain/CC0 обычное чтение использует короткую подпись с понятным названием издания; противоречащая этому ссылка на лицензию CC блокирует сокращение. Команда `/license` показывает полные сведения об источнике, правах и нумерации. Для лицензий с обязательной атрибуцией, включая CC BY и CC BY-SA, необходимые сведения о правах, авторстве, источнике и лицензии сохраняются в публикациях. Сокращение подписи Public Domain/CC0 не удаляет исходные метаданные и не меняет лицензию текста.
+
+Автоматическая классификация описывает поведение программы, а не индивидуальное юридическое заключение для любой юрисдикции и любого способа распространения. При добавлении источника сохраняйте требуемые уведомления и проверяйте условия конкретного текста.
+
+## Программные зависимости
+
+aiogram, asyncpg, HTTPX, FastAPI, Uvicorn, Pydantic, tzdata, Python, PostgreSQL и компоненты Docker сохраняют собственные лицензии. Требования перечислены в `requirements*.txt`; контейнер использует `constraints-linux.txt` и сохраняет установленные версии в `/app/BUILD-DEPENDENCIES.txt`. Лицензию проекта нельзя считать заменой лицензий этих зависимостей. При распространении готовых образов сохраняйте их лицензионные уведомления.

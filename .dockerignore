@@ -17,3 +17,9 @@ database-audit.json
 TEST-RESULTS*
 
 runtime-evidence
+.serena
+work
+git
+*.dump
+*.dump.sha256
+*.tar.gz

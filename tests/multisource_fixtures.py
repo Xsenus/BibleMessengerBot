@@ -39,7 +39,7 @@ def hello_fixture(tmp_path:Path, identifier='sample', text='SYNTHETIC NOT SCRIPT
             {'type':'verse','number':1,'text':text},{'type':'verse','number':2,'text':'SYNTHETIC SECOND'}]}}]}]}
     m=make_meta(identifier,'eng','Synthetic fixture',license_type='Public Domain',notice='Public Domain')
     c=Candidate('helloao',m,f'https://bible.helloao.org/api/{identifier}/complete.simple.json','revision-one','native:HelloAO',raw=raw)
-    path=tmp_path/f'{identifier}.json';path.write_text(json.dumps(payload,ensure_ascii=False))
+    path=tmp_path/f'{identifier}.json';path.write_text(json.dumps(payload,ensure_ascii=False), encoding='utf-8')
     return c,path,payload,inventory
 
 def get_fixture(tmp_path,identifier='sample'):

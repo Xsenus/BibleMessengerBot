@@ -1,0 +1,14 @@
+{
+  "generator": "OpenAI built-in image_gen (imagegen skill)",
+  "generated_at": "2026-09-22",
+  "assets": [
+    {
+      "file": "avatar.png",
+      "prompt": "Create a premium minimalist raster avatar for a Telegram Bible reading bot. Square 1024 x 1024 composition, fully opaque midnight navy background with a subtle soft gradient. A single beautifully balanced open Bible in warm ivory and muted metallic gold, pages forming a calm symmetrical silhouette, with a small upright Christian cross rising from the center as a delicate ray of warm light. Elegant editorial brand mark, crisp clean edges, gentle depth, restrained soft lighting, respectful and welcoming. Highly legible as a tiny circular-cropped avatar: all important shapes centered within the central 65 percent, ample breathing room, no outer border. No lettering, no words, no watermark, no mockup, no extra objects. This is the final production profile image, not a sheet of variants."
+    },
+    {
+      "file": "welcome.png",
+      "prompt": "Generate a finished landscape welcome illustration for the Telegram bot «Библия каждый день» (Bible Every Day). Wide 16:9 composition. Calm sophisticated editorial digital illustration: an open ivory Bible on a simple stone ledge, a delicate golden cross and a ribbon of warm morning light above its center; layered distant hills and a clear dawn sky, deep midnight navy at the edges transitioning to warm muted gold near the horizon. Style: elegant, luminous, restrained detail, soft painterly depth, clean shapes that compress well for mobile. The book and cross are the main focus, balanced with generous quiet space, no people. No text or lettering anywhere, no watermark, no frames, no UI, no mockup. A companion to a midnight-navy and gold Bible avatar. Produce one final image ready to send as a welcome photo."
+    }
+  ]
+}

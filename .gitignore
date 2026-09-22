@@ -1,5 +1,7 @@
 .env
 .env.local
+.env.*
+!.env.example
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -16,3 +18,13 @@ cache/
 runtime-evidence/
 MANIFEST.sha256
 BUILD-DEPENDENCIES.txt
+.serena/
+work/
+*.dump
+*.dump.sha256
+git/
+*.tar.gz
+ARCHIVE-TESTS.txt
+ARCHIVE-VERIFICATION.json
+DELIVERY.json
+DELIVERY.md

@@ -210,6 +210,14 @@ def test_concurrent_cache_job_is_refused(tmp_path):
         with pytest.raises(RuntimeError):
             with process_lock(tmp_path):pass
 
+
+def test_cache_lock_is_released_after_failure(tmp_path):
+    with pytest.raises(ValueError):
+        with process_lock(tmp_path):
+            raise ValueError('synthetic failure')
+    with process_lock(tmp_path):
+        assert (tmp_path/'multisource.lock').exists()
+
 @pytest.mark.parametrize('status,expected',[('succeeded',0),('planned',0),('skipped',0),('partial',2),('failed',1),('interrupted',1)])
 def test_machine_readable_exit_codes(status,expected):assert exit_code({'status':status})==expected
 

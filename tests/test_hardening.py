@@ -320,7 +320,7 @@ def test_all_literal_sql_parameter_counts_match_call_arguments():
     """Static parameter-contract check; deliberately not labelled as PostgreSQL execution."""
     problems=[]
     for path in (ROOT/'app').rglob('*.py'):
-        for node in ast.walk(ast.parse(path.read_text())):
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
             if isinstance(node,ast.Call) and isinstance(node.func,ast.Attribute) and node.func.attr in {'execute','fetch','fetchval','fetchrow'} and node.args:
                 first=node.args[0]
                 if isinstance(first,ast.Constant) and isinstance(first.value,str):

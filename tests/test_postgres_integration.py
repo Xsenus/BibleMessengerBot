@@ -191,6 +191,47 @@ async def test_real_plan_day_contains_multiple_chapters_and_advances_once(db):
     assert progress['plan_day']==1 and progress['current_chapter']==4 and not progress['completed']
 
 
+async def test_unavailable_psalm_plan_is_rejected_without_changing_existing_schedule(db):
+    connection,_,path=db
+    edition,_,_=await load_fixture(connection,path)
+    await create_destination(connection)
+    sub=await create_or_update_subscription(connection,chat_id=101,created_by=101,translation_id=edition['id'],
+        mode='reading_plan',send_time=time(9),timezone_name='UTC',plan_code='bible-90')
+    with pytest.raises(UserError,match='invalid'):
+        await create_or_update_subscription(connection,chat_id=101,created_by=101,translation_id=edition['id'],
+            mode='reading_plan',send_time=time(10),timezone_name='UTC',plan_code='psalms-150')
+    saved=await connection.fetchrow('SELECT plan_code,send_time,is_enabled,revision FROM subscriptions WHERE id=$1',sub['id'])
+    assert saved['plan_code']=='bible-90' and saved['send_time']==time(9)
+    assert saved['is_enabled'] and saved['revision']==sub['revision']
+
+
+async def test_switching_edition_pauses_unavailable_psalm_plan(db):
+    connection,_,path=db
+    first,_,_=await load_fixture(connection,path,'eng')
+    second,_,_=await load_fixture(connection,path,'rus')
+    await create_destination(connection)
+    sub=await create_or_update_subscription(connection,chat_id=101,created_by=101,translation_id=first['id'],
+        mode='reading_plan',send_time=time(9),timezone_name='UTC',plan_code='bible-90')
+    # Model a pre-existing Psalm subscription from an earlier installation.
+    await connection.execute("UPDATE subscriptions SET plan_code='psalms-150' WHERE id=$1",sub['id'])
+    await configure_chat(connection,101,actor_id=101,translation_id=second['id'])
+    saved=await connection.fetchrow('SELECT is_enabled,next_run_at FROM subscriptions WHERE id=$1',sub['id'])
+    assert not saved['is_enabled'] and saved['next_run_at'] is None
+
+
+async def test_recent_heartbeat_from_previous_container_does_not_pass_health(db,monkeypatch):
+    from app import healthcheck
+    connection,settings,_=db
+    monkeypatch.setattr(healthcheck.Settings,'from_env',lambda **kwargs:settings)
+    await connection.execute("INSERT INTO service_heartbeats(service,last_seen) VALUES('bot',now()-interval '20 seconds')")
+    start=await connection.fetchval("SELECT now()-interval '10 seconds'")
+    monkeypatch.setattr(healthcheck,'container_started_at',lambda:start)
+    assert not await healthcheck.probe('bot')
+    await connection.execute("UPDATE service_heartbeats SET last_seen=now() WHERE service='bot'")
+    assert await healthcheck.probe('bot')
+    assert not await healthcheck.probe('worker')
+
+
 async def test_crashed_sending_is_not_treated_as_delivered(db):
     connection,_,path=db
     edition,_,_=await load_fixture(connection,path)

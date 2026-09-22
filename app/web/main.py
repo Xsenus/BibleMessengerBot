@@ -5,7 +5,7 @@ import secrets
 from contextlib import asynccontextmanager
 from html import escape
 from typing import Annotated,Any
-from fastapi import Depends,FastAPI,Header,HTTPException
+from fastapi import Depends,FastAPI,Header,HTTPException,Response
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic,HTTPBasicCredentials
 from app.config import Settings
@@ -29,13 +29,13 @@ async def lifespan(_: FastAPI):
         await close_pool()
 
 
-app = FastAPI(title='BibleMessengerBot read-only operations',version='1.3.0',lifespan=lifespan,
+app = FastAPI(title='BibleMessengerBot read-only operations',version='1.3.1',lifespan=lifespan,
               docs_url=None,redoc_url=None,openapi_url=None)
 
 
 def valid_key(value: str) -> bool:
     """An empty/default key cannot authenticate the operator."""
-    return len(settings.admin_api_key)>=24 and secrets.compare_digest(value,settings.admin_api_key)
+    return len(settings.admin_api_key)>=24 and secrets.compare_digest(value.encode('utf-8'),settings.admin_api_key.encode('utf-8'))
 
 
 def require_basic(credentials: Annotated[HTTPBasicCredentials,Depends(security)]) -> None:
@@ -53,7 +53,7 @@ def require_key(x_admin_key: Annotated[str | None,Header()] = None) -> None:
 @app.get('/health')
 async def health() -> dict[str,str]:
     """Liveness does not claim that imported content is ready."""
-    return {'status':'alive','version':'1.3.0'}
+    return {'status':'alive','version':'1.3.1'}
 
 
 @app.get('/ready')
@@ -79,14 +79,15 @@ async def operator_data() -> dict[str,Any]:
         subscriptions = await connection.fetch('SELECT id,telegram_chat_id,mode,send_time,timezone,is_enabled,plan_day,completed,next_run_at FROM subscriptions ORDER BY id DESC LIMIT 200')
         deliveries = await connection.fetch('SELECT id,telegram_chat_id,subscription_id,status,next_chunk,jsonb_array_length(chunks) AS chunks,error_code,updated_at FROM delivery_log ORDER BY id DESC LIMIT 100')
         heartbeats = await connection.fetch('SELECT service,last_seen FROM service_heartbeats')
-    return {'version':'1.3.0','database':audit,'chats':[dict(r) for r in chats],
+    return {'version':'1.3.1','database':audit,'chats':[dict(r) for r in chats],
         'subscriptions':[dict(r) for r in subscriptions],'deliveries':[dict(r) for r in deliveries],
         'heartbeats':[dict(r) for r in heartbeats]}
 
 
 @app.get('/api/stats',dependencies=[Depends(require_key)])
-async def api_stats() -> dict[str,Any]:
+async def api_stats(response: Response) -> dict[str,Any]:
     """Read-only API; no CSRF-capable form mutation endpoints are exposed."""
+    response.headers['Cache-Control'] = 'no-store'
     return await operator_data()
 
 
@@ -95,7 +96,7 @@ async def dashboard() -> HTMLResponse:
     """Escaped preformatted diagnostic output, without scripts or external resources."""
     data = json.dumps(await operator_data(),ensure_ascii=False,indent=2,default=str)
     return HTMLResponse('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
-        '<title>BibleMessengerBot · Operations</title><h1>BibleMessengerBot 1.3.0</h1>'
+        '<title>BibleMessengerBot · Operations</title><h1>BibleMessengerBot 1.3.1</h1>'
         '<p>Read-only operations. Change destination settings through /settings in Telegram.</p><pre>'+
         escape(data)+'</pre></html>',headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
         'Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'; base-uri 'none'"})

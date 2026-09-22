@@ -134,7 +134,7 @@ class GetBible(Source):
                 revision=str(row.get('sha') or row.get('distribution_version_date') or digest_file(path))
                 result.append(Candidate(self.slug,meta,f'{self.base}/{identifier}.json',revision,
                     'native:'+str(row.get('distribution_versification') or 'getBible-unspecified'),raw=row,
-                    evidence={'catalog_sha256':digest_file(path),'upstream_sha_kind':'source-provided semantic SHA; not assumed to be file SHA-256'}))
+                    evidence={'catalog_sha256':digest_file(path),'upstream_sha_kind':'publisher SHA-1 of the raw JSON file; local receipt also records SHA-256'}))
             except (ValueError,KeyError,TypeError,AttributeError) as exc:
                 self.notes.append(f'Catalog entry {str(key)[:100]} rejected: {type(exc).__name__}: {str(exc)[:200]}')
         if not result:raise ValueError('getBible has no structurally usable catalog entries')

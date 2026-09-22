@@ -98,7 +98,7 @@ class Downloader:
         self.owns_client = client is None
         self.client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(options.timeout, connect=30), follow_redirects=False,
-            headers={"User-Agent": "BibleMessengerBot/1.3.0", "Accept-Encoding": "identity"},
+            headers={"User-Agent": "BibleMessengerBot/1.3.1", "Accept-Encoding": "identity"},
             limits=httpx.Limits(max_connections=4, max_keepalive_connections=4))
         self._rate_lock = asyncio.Lock()
         self._last: dict[str, float] = {}

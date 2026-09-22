@@ -1,0 +1,12 @@
+[Unit]
+Description=BibleMessengerBot PostgreSQL backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/bible-messenger-bot
+ExecStart=/usr/bin/bash /opt/bible-messenger-bot/backup.sh
+UMask=0077
+Nice=10
+IOSchedulingClass=idle

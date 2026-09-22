@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
+import os
 import json
 import logging
 import time
@@ -28,11 +28,27 @@ GOOD={'imported','updated','already_present','exact_duplicate','downloaded'}
 @contextmanager
 def process_lock(root: Path):
     root.mkdir(parents=True,exist_ok=True)
-    with (root/'multisource.lock').open('a') as f:
-        try:fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        except BlockingIOError as exc:raise RuntimeError('Another multi-source job is running in this cache') from exc
-        try:yield
-        finally:fcntl.flock(f,fcntl.LOCK_UN)
+    # Lock the same persistent file on both platforms. Deleting a lock file after
+    # release permits a third process to open a new inode while a waiter owns the
+    # old one, so the harmless one-byte file is deliberately retained.
+    with (root/'multisource.lock').open('a+b') as f:
+        if os.name == 'nt':
+            import msvcrt
+            if f.tell() == 0:
+                f.write(b'\0'); f.flush()
+            f.seek(0)
+            try:msvcrt.locking(f.fileno(),msvcrt.LK_NBLCK,1)
+            except OSError as exc:raise RuntimeError('Another multi-source job is running in this cache') from exc
+            try:yield
+            finally:
+                f.seek(0)
+                msvcrt.locking(f.fileno(),msvcrt.LK_UNLCK,1)
+        else:
+            import fcntl
+            try:fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError as exc:raise RuntimeError('Another multi-source job is running in this cache') from exc
+            try:yield
+            finally:fcntl.flock(f,fcntl.LOCK_UN)
 
 
 def selected(candidate: Candidate,options: ImportOptions) -> bool:
@@ -66,7 +82,7 @@ async def acquire_corpus(root: Path,options: ImportOptions,*,store: Any=None,dis
         raise ValueError('An import needs a persistence store; use --download-only explicitly')
     started=time.monotonic()
     run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid4().hex[:8]
-    report={'format_version':1,'application_version':'1.3.0','run_id':run_id,'status':'running',
+    report={'format_version':1,'application_version':'1.3.1','run_id':run_id,'status':'running',
         'started_at':datetime.now(timezone.utc).isoformat(),'options':asdict(options),
         'scope':'Configured sources and explicit open licenses only; not all Bibles worldwide',
         'items':[],'sources':{},'source_errors':[]}

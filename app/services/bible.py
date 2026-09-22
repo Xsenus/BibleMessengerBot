@@ -1,14 +1,16 @@
 """Indexed Bible lookup; text, numbering, provenance and destination UI are distinct."""
 from __future__ import annotations
 import hashlib
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
 from urllib.parse import urlparse
+from app.catalog.policy import _identifier, _url_identifier
 from app.catalog.profiles import normalize_language_code
 from app.services.formatting import escape
-from app.services.i18n import tr, ui_for_language
+from app.services.i18n import native_ui_name, tr, ui_for_language
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +27,25 @@ class TranslationChoice:
     verses: int = 0
 
 
+def display_title(translation: Any) -> str:
+    """Readable edition names without changing any source metadata or Bible text."""
+    source = translation.get('source_name', '')
+    identifier = translation.get('source_translation_id', '')
+    known = {('getBible/v2', 'synodal'): 'Синодальный перевод',
+             ('getBible/v2', 'web'): 'World English Bible'}
+    return known.get((source, identifier), translation.get('title') or translation.get('short_title') or identifier)
+
+
+def display_language(language_code: str, ui_language: str) -> str:
+    """Use readable names for the bundled editions, then native UI language names."""
+    names = {'ru': {'rus': 'Русский', 'eng': 'Английский'},
+             'en': {'rus': 'Russian', 'eng': 'English'}}
+    if language_code in names.get(ui_language, {}):
+        return names[ui_language][language_code]
+    locale = ui_for_language(language_code)
+    return native_ui_name(locale) if locale else language_code
+
+
 async def list_translations(connection: Any) -> list[TranslationChoice]:
     """Advertise usable editions only, with physical counts and measured coverage."""
     rows = await connection.fetch("""SELECT t.*,l.code AS language_code FROM translations t
@@ -32,8 +53,8 @@ async def list_translations(connection: Any) -> list[TranslationChoice]:
         AND t.audit_status IN ('passed','passed_with_warnings') ORDER BY l.code,t.title""")
     from app.catalog.multisource.types import SOURCE_NAMES
     slugs={name:slug for slug,name in SOURCE_NAMES.items()}
-    return [TranslationChoice(r['id'],r['language_code'],slugs.get(r['source_name'],'source')+':'+r['source_translation_id'],r['title'],
-        r['short_title'] or r['title'],r['coverage'],r['license_type'],r['book_count'],r['verse_count']) for r in rows]
+    return [TranslationChoice(r['id'],r['language_code'],slugs.get(r['source_name'],'source')+':'+r['source_translation_id'],display_title(r),
+        display_title(r),r['coverage'],r['license_type'],r['book_count'],r['verse_count']) for r in rows]
 
 
 async def find_translation(connection: Any, identifier: str | int | None,
@@ -102,24 +123,80 @@ def _safe_link(value: str | None) -> str | None:
     return value if parsed.scheme in {'http','https'} and parsed.hostname and not parsed.username else None
 
 
+def _linked(label: str, url: str | None) -> str:
+    safe = _safe_link(url)
+    return f'<a href="{escape(safe).replace(chr(34), "&quot;")}">{escape(label)}</a>' if safe else escape(label)
+
+
+def _license_name(translation: Any, ui_language: str) -> str:
+    raw = translation.get('license_type') or ''
+    identifier = _identifier(raw)
+    if identifier == 'public-domain':
+        return 'Общественное достояние' if ui_language == 'ru' else 'Public domain'
+    if identifier == 'cc0':
+        return 'CC0 1.0'
+    if identifier in {'by', 'by-sa', 'by-nc', 'by-nd', 'by-nc-sa', 'by-nc-nd'}:
+        version = translation.get('license_version') or ''
+        if not version:
+            match = re.search(r'[1-4]\.0', raw + ' ' + (translation.get('license_url') or ''))
+            version = match.group() if match else ''
+        return ('CC ' + identifier.upper() + ' ' + version).strip()
+    return raw
+
+
+def _source_name(translation: Any) -> str:
+    source = translation.get('source_name') or 'eBible / BibleNLP'
+    return {'getBible/v2': 'getBible', 'BibleNLP/eBible': 'BibleNLP / eBible'}.get(source, source)
+
+
+def _rights(translation: Any) -> list[str]:
+    return list(dict.fromkeys(x for x in (
+        translation.get('copyright_notice'), translation.get('copyright_holder'),
+        translation.get('translated_by')) if x))
+
+
 def attribution(translation: Any, ui_language: str) -> str:
-    """Keep the edition's license, rights holder and source with redistributed text."""
-    title = translation.get('short_title') or translation['title']
-    lines = [f'<i>{escape(title)}</i>']
-    rights = list(dict.fromkeys(x for x in (
-        translation.get('copyright_notice'),translation.get('copyright_holder'),translation.get('translated_by')) if x))
+    """Keep routine reading concise while retaining required licensed attribution."""
+    lines = [f'<i>{escape(display_title(translation))}</i>']
+    identifier = _identifier(translation.get('license_type') or '')
+    linked_license = _url_identifier(translation.get('license_url') or '')
+    if identifier in {'public-domain', 'cc0'} and linked_license in {None, 'public-domain', 'cc0'}:
+        return lines[0]
+    rights = _rights(translation)
     if rights:
         lines.append(escape(' · '.join(rights)))
-    license_name = translation['license_type']
-    license_url = _safe_link(translation.get('license_url'))
-    license_part = f'<a href="{escape(license_url).replace(chr(34), "&quot;")}">{escape(license_name)}</a>' if license_url else escape(license_name)
+    license_part = _linked(_license_name(translation, ui_language), translation.get('license_url'))
     source_url = _safe_link(translation.get('publication_url')) or _safe_link(translation.get('source_file_url'))
-    source_name=translation.get('source_name') or 'eBible / BibleNLP'
-    source = f'<a href="{escape(source_url).replace(chr(34), "&quot;")}">{escape(source_name)}</a>' if source_url else escape(source_name)
-    lines.append(f"{tr(ui_language,'source')}: {source} · {license_part}")
-    numbering=translation.get('numbering_system','BibleNLP Original versification')
-    note=tr(ui_language,'numbering_note') if numbering.startswith('BibleNLP') else numbering
-    lines.append(f'<i>{escape(note)}</i>')
+    lines.append(f"{tr(ui_language,'source')}: {_linked(_source_name(translation), source_url)} · {license_part}")
+    return '\n'.join(lines)
+
+
+def license_details(translation: Any, ui_language: str) -> str:
+    """Explain provenance separately from reading; raw records remain untouched."""
+    russian = ui_language == 'ru'
+    lines = [f'<b>{escape(display_title(translation))}</b>',
+             f"{tr(ui_language,'license')}: {_linked(_license_name(translation, ui_language), translation.get('license_url'))}"]
+    source_url = _safe_link(translation.get('publication_url')) or _safe_link(translation.get('source_file_url'))
+    lines.append(f"{tr(ui_language,'source')}: {_linked(_source_name(translation), source_url)}")
+    data_url = _safe_link(translation.get('source_file_url'))
+    if data_url and data_url != source_url:
+        lines.append(_linked('Исходные данные издания' if russian else 'Original edition data', data_url))
+    rights = [item for item in _rights(translation) if _identifier(item) not in {'public-domain', 'cc0'}]
+    if rights:
+        lines.append(('Сведения о правах: ' if russian else 'Rights notice: ') + escape(' · '.join(rights)))
+    numbering = translation.get('numbering_system') or 'BibleNLP Original versification'
+    if numbering.startswith('BibleNLP'):
+        note = ('Нумерация корпуса BibleNLP; может отличаться от печатного издания.' if russian else
+                'BibleNLP corpus numbering; it may differ from the printed edition.')
+    elif numbering.startswith('native:'):
+        note = ('Нумерация глав и стихов сохранена по исходному изданию.' if russian else
+                'Chapter and verse numbering is preserved from the original edition.')
+        if 'synodal' in numbering.lower():
+            note = ('Синодальная нумерация глав и стихов.' if russian else
+                    'Chapter and verse numbering of the Synodal edition.')
+    else:
+        note = numbering
+    lines.append(('Нумерация: ' if russian else 'Numbering: ') + escape(note))
     return '\n'.join(lines)
 
 

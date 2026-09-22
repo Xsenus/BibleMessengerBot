@@ -1,6 +1,7 @@
 """Offline format, coverage, permission and identifier invariants."""
 from __future__ import annotations
 import copy
+import hashlib
 from dataclasses import replace
 import pytest
 from app.catalog.models import LicenseInfo
@@ -9,7 +10,7 @@ from app.catalog.multisource.types import ImportOptions,safe_id
 from app.catalog.multisource.sources import source_language,language_filter_codes,make_meta
 from app.catalog.multisource.licenses import parse_license_html,ebible_id
 from app.catalog.multisource.parsers import (parse_helloao,parse_getbible,fingerprint,positive,book_code,
-    text_value,verify_records,append_verse,native_audit,CHAPTER_FLOOR)
+    text_value,verify_records,append_verse,native_audit,CHAPTER_FLOOR,getbible_book)
 from app.catalog.policy import decide_license
 from tests.multisource_fixtures import hello_fixture,get_fixture
 
@@ -79,6 +80,56 @@ def test_getbible_whole_translation_shape(tmp_path):
     assert r.records[0][:3]==('1JN',1,1)
     assert r.audit.coverage=='partial'
     assert r.book_names['1JN']=='Fixture 1 John'
+
+
+@pytest.mark.parametrize('number,code',[(67,'1ES'),(68,'2ES'),(69,'TOB'),(70,'JDT'),
+    (73,'WIS'),(74,'SIR'),(75,'BAR'),(79,'MAN'),(80,'1MA'),(81,'2MA'),(82,'3MA'),(84,'LJE')])
+def test_getbible_synodal_additional_books_are_preserved(tmp_path,number,code):
+    c,p,x,inventory=get_fixture(tmp_path)
+    extra=copy.deepcopy(x['books'][0]);extra['nr']=number
+    extra['name']='Synthetic additional book';x['books'].append(extra)
+    inventory[str(number)]={'nr':number,'chapters':1}
+    result=parse_getbible(c,p,x,inventory)
+    assert result.audit.books==2 and result.audit.dc_books==1
+    assert sum(r[0]==code for r in result.records)==2
+    assert getbible_book(number)==code
+
+
+def test_getbible_unknown_extra_book_still_rejects_edition(tmp_path):
+    c,p,x,inventory=get_fixture(tmp_path)
+    extra=copy.deepcopy(x['books'][0]);extra['nr']=999
+    x['books'].append(extra);inventory['999']={'nr':999}
+    with pytest.raises(ValueError,match='not verified'):
+        parse_getbible(c,p,x,inventory)
+
+
+def test_getbible_checks_publisher_checksum_without_embedded_sha(tmp_path):
+    c,p,x,inventory=get_fixture(tmp_path)
+    x.pop('sha',None)
+    expected=hashlib.sha1(p.read_bytes(),usedforsecurity=False).hexdigest()
+    c=replace(c,raw={**c.raw,'sha':expected})
+    assert parse_getbible(c,p,x,inventory).diagnostics['publisher_sha1_verified']
+    p.write_bytes(p.read_bytes()+b' ')
+    with pytest.raises(ValueError,match='publisher SHA-1 mismatch'):
+        parse_getbible(c,p,x,inventory)
+
+
+@pytest.mark.parametrize('field,changed',[('distribution_license','Copyrighted; All rights reserved'),
+    ('distribution_versification','Changed numbering')])
+def test_getbible_changed_terms_or_numbering_are_rejected(tmp_path,field,changed):
+    c,p,x,inventory=get_fixture(tmp_path)
+    c=replace(c,raw={**c.raw,field:'Public Domain' if field.endswith('license') else 'KJV'})
+    x[field]=changed
+    with pytest.raises(ValueError,match='changed since catalog'):
+        parse_getbible(c,p,x,inventory)
+
+
+@pytest.mark.parametrize('field,changed',[('abbreviation','different-edition'),('lang','ru')])
+def test_getbible_mixed_inventory_is_rejected(tmp_path,field,changed):
+    c,p,x,inventory=get_fixture(tmp_path)
+    inventory['62'][field]=changed
+    with pytest.raises(ValueError,match='inventory .* mismatch'):
+        parse_getbible(c,p,x,inventory)
 
 @pytest.mark.parametrize('mutation',[
     lambda x,i:x.update(abbreviation='wrong'),lambda x,i:x.update(lang='ru'),

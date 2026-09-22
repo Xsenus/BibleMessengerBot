@@ -19,8 +19,8 @@ from app.services.locks import lock_key
 LOGGER = logging.getLogger(__name__)
 
 
-async def bootstrap() -> dict[str, object]:
-    settings = Settings.from_env(require_bot_token=False)
+async def bootstrap(settings: Settings | None = None) -> dict[str, object]:
+    settings = settings or Settings.from_env(require_bot_token=False)
     await wait_for_database(settings)
     async with maintenance(settings):
         return await bootstrap_locked(settings)

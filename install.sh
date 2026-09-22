@@ -32,7 +32,7 @@ if [[ -f .env ]]; then
   log "Keeping existing .env and all database credentials."
   chmod 600 .env
 else
-  if [[ -n "$(docker volume ls -q --filter name='^bible-messenger-bot_postgres_data$')" ]]; then
+  if [[ -n "$(docker volume ls -q --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME:-bible-messenger-bot}" --filter "label=com.docker.compose.volume=postgres_data")" ]]; then
     die "Existing database volume found but .env is missing. Restore the original .env; do not generate a different password."
   fi
   TOKEN="${BOT_TOKEN:-}"

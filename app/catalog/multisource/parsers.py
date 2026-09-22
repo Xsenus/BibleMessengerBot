@@ -11,10 +11,21 @@ from typing import Any
 
 from app.catalog.audit import CORE, NT, OT, CorpusAudit, audit_corpus
 from app.catalog.models import DownloadedTranslation, TranslationMeta, VerseReference
+from app.catalog.policy import normalize_license
 from app.catalog.multisource.transport import digest_file
 from app.catalog.multisource.types import Candidate, Prepared, Record
 
 ORDER = {book: i for i, book in enumerate(OT + NT)}
+# getBible's numeric identifiers are not USFM's numeric file prefixes.
+# Verified against the publisher's builder conf/bookNumbers.json and the USFM
+# book-identifier table on 2026-09-22; retain native chapter/verse coordinates.
+# https://github.com/getbible/v2_builder/blob/master/conf/bookNumbers.json
+# https://ubsicap.github.io/usfm/identification/books.html
+GETBIBLE_EXTRA_BOOKS = {
+    67:'1ES',68:'2ES',69:'TOB',70:'JDT',71:'ESG',72:'PS2',73:'WIS',
+    74:'SIR',75:'BAR',76:'S3Y',77:'SUS',78:'BEL',79:'MAN',80:'1MA',
+    81:'2MA',82:'3MA',83:'4MA',84:'LJE',85:'PSS',86:'ODA',
+}
 # Independent coarse coverage floor, NOT a verse-level proof. Joel/Malachi vary by tradition.
 CHAPTER_FLOOR = dict(zip(OT+NT, [50,40,27,36,34,24,21,4,31,24,22,25,29,36,10,13,10,42,150,31,12,8,66,52,5,48,12,14,3,9,1,4,7,3,3,3,2,14,3,
     28,16,24,21,28,16,16,13,6,6,4,4,5,3,6,4,3,1,13,5,5,3,5,1,1,1,22], strict=True))
@@ -230,10 +241,12 @@ def parse_helloao(candidate: Candidate, path: Path, payload: dict, books_payload
 
 
 def getbible_book(number: Any) -> str:
-    # The documented 1..66 mapping. Unmapped extra books cause edition rejection, never dropping.
+    # Unmapped books still reject the entire edition, never silently drop text.
     n=positive(number,'getBible book number')
     if n>66:
-        raise ValueError(f"getBible extra-book mapping {n} is not verified; use a USFM-code source for this edition")
+        if n not in GETBIBLE_EXTRA_BOOKS:
+            raise ValueError(f"getBible extra-book mapping {n} is not verified; use a USFM-code source for this edition")
+        return GETBIBLE_EXTRA_BOOKS[n]
     return (OT+NT)[n-1]
 
 
@@ -244,10 +257,31 @@ def parse_getbible(candidate: Candidate,path: Path,payload: dict,books_payload: 
         raise ValueError('getBible changed during download; retry with --refresh')
     if payload.get('lang') and payload['lang']!=candidate.raw.get('lang'):
         raise ValueError("getBible language mismatch")
+    # The publisher documents SHA-1 checksums of the complete JSON files. The
+    # payload normally has no embedded `sha`, so checking that field alone
+    # missed stale or corrupted full downloads. SHA-256 remains our own receipt.
+    # https://github.com/getbible/v2_builder (scripture-folder/checksum contract)
+    published_sha=candidate.raw.get('sha','')
+    publisher_verified=False
+    if isinstance(published_sha,str) and re.fullmatch(r'[0-9a-fA-F]{40}',published_sha):
+        with path.open('rb') as stream:
+            actual_sha=hashlib.file_digest(stream,lambda:hashlib.sha1(usedforsecurity=False)).hexdigest()
+        if actual_sha!=published_sha.lower():
+            raise ValueError('getBible publisher SHA-1 mismatch; catalog and text are from different snapshots or the file is corrupt')
+        publisher_verified=True
+    for field in ('distribution_license','distribution_versification'):
+        if field in payload and field in candidate.raw:
+            normalize=normalize_license if field=='distribution_license' else lambda value:str(value).strip()
+            if normalize(payload[field])!=normalize(candidate.raw[field]):
+                raise ValueError(f'getBible {field} changed since catalog discovery')
     inventory={}
     if not isinstance(books_payload,dict) or not books_payload:raise ValueError("Missing getBible book inventory")
     for k,b in books_payload.items():
         if not isinstance(b,dict):raise ValueError("Invalid book inventory entry")
+        if b.get('abbreviation',candidate.metadata.translation_id)!=candidate.metadata.translation_id:
+            raise ValueError('getBible inventory edition mismatch')
+        if b.get('lang',candidate.raw.get('lang'))!=candidate.raw.get('lang'):
+            raise ValueError('getBible inventory language mismatch')
         code=getbible_book(b.get('nr',b.get('book_nr',k)))
         if code in inventory:raise ValueError("Duplicate inventory book")
         inventory[code]=b
@@ -270,4 +304,4 @@ def parse_getbible(candidate: Candidate,path: Path,payload: dict,books_payload: 
     if set(chapters)!=set(inventory):raise ValueError("Missing books from getBible inventory")
     return prepared_native(candidate,path,records,names,chapters,
         ['getBible inventory confirms books; native omissions are recorded, not repaired with another translation'],
-        {'book_inventory_checked':True,'verse_level_external_reference':False})
+        {'book_inventory_checked':True,'publisher_sha1_verified':publisher_verified,'verse_level_external_reference':False})

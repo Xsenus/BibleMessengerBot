@@ -1,6 +1,8 @@
 # Аудит исходной1.1.0 и изменения1.2.0
 
-База: реально переданные ZIP/Git bundle; контрольная сумма ZIP: `3c9c6abeaacc3f4e93a57c42923c3621539ecbe0c98ed3175ff8dc8bc5045ccb`, commit `ac6045ed54c0aa814538dbaeeb3d12022b2eed94`. Доказательство совпадения файлов — `evidence/BASELINE-ARCHIVE.json`.
+> Историческое описание соответствующей поставки. Актуальные изменения: [CHANGELOG](../CHANGELOG.md); текущие проверки: [VALIDATION](VALIDATION.md).
+
+База: реально переданные ZIP/Git bundle; контрольная сумма ZIP: `3c9c6abeaacc3f4e93a57c42923c3621539ecbe0c98ed3175ff8dc8bc5045ccb`, commit `ac6045ed54c0aa814538dbaeeb3d12022b2eed94`. Доказательство совпадения файлов — [исторический BASELINE-ARCHIVE.json](history/1.2.0/evidence/BASELINE-ARCHIVE.json).
 
 | Область | Найдено/ограничение прежней версии | Изменение |
 |---|---|---|

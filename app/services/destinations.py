@@ -5,6 +5,7 @@ from typing import Any
 from app.services.errors import UserError
 from app.services.i18n import available_ui
 from app.services.locks import chat_lock
+from app.services.plans import validate_plan
 from app.services.scheduling import next_occurrence, validate_timezone
 
 
@@ -65,11 +66,13 @@ async def configure_chat(connection: Any, chat_id: int, *, actor_id: int | None,
         if changed_edition and translation:
             if not translation.get('numbering_system','BibleNLP Original versification').startswith('BibleNLP'):
                 await connection.execute("UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE telegram_chat_id=$1 AND mode='topic_of_day'",chat_id)
-            # A plan requiring the whole Bible must not silently run on a partial edition.
-            await connection.execute('''UPDATE subscriptions SET is_enabled=false,next_run_at=NULL
-                WHERE telegram_chat_id=$1 AND mode='reading_plan' AND
-                ((plan_code LIKE 'bible-%' AND NOT $2) OR (plan_code='new-testament-90' AND NOT $3))''',
-                chat_id,translation['canonical_66_complete'],translation['nt_complete'])
+            # This also covers Psalm plans when the replacement has no/too few Psalms.
+            plans = await connection.fetch("SELECT id,plan_code FROM subscriptions WHERE telegram_chat_id=$1 AND mode='reading_plan' AND is_enabled",chat_id)
+            for plan in plans:
+                try:
+                    await validate_plan(connection,translation,plan['plan_code'])
+                except UserError:
+                    await connection.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE id=$1',plan['id'])
         schedules = await connection.fetch('SELECT * FROM subscriptions WHERE telegram_chat_id=$1 AND is_enabled',chat_id)
         for sub in schedules:
             next_run = (sub['next_run_at'] if timezone_name is None and sub['next_run_at'] is not None
