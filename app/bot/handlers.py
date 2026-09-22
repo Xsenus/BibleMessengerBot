@@ -13,6 +13,7 @@ from aiogram import F,Router
 from aiogram.types import Message,CallbackQuery,InlineKeyboardMarkup,InlineKeyboardButton,ChatMemberUpdated
 from aiogram.exceptions import TelegramAPIError
 from app.bot.commands import parse_command,mode_name,encode_callback,decode_callback
+from app.bot.donations import handle_command as handle_donation_command
 from app.bot.transport import TelegramSender
 from app.bot.ui import main_keyboard,keyboard_command,welcome_text,menu_hint,search_prompt,onboarding_help,send_welcome
 from app.catalog.profiles import normalize_language_code
@@ -57,11 +58,12 @@ async def authorize(bot: Any, chat: Any, actor_id: int) -> None:
         raise UserError('forbidden')
 
 
-async def register_context(connection: Any, user: Any, chat: Any, settings: Any) -> None:
+async def register_context(connection: Any, user: Any, chat: Any, settings: Any,
+                           *, allow_blocked: bool = False) -> None:
     """Persist a private user's initial UI once; group defaults are deterministic."""
     await upsert_user(connection,user_id=user.id,username=user.username,first_name=user.first_name,
         last_name=user.last_name,language_code=user.language_code,default_timezone=settings.default_timezone)
-    if await connection.fetchval('SELECT is_blocked FROM telegram_users WHERE telegram_user_id=$1',user.id):
+    if not allow_blocked and await connection.fetchval('SELECT is_blocked FROM telegram_users WHERE telegram_user_id=$1',user.id):
         raise UserError('forbidden')
     await upsert_chat(connection,chat_id=chat.id,chat_type=enum_value(chat.type),title=chat.title,
         username=chat.username,registered_by=user.id,default_timezone=settings.default_timezone,
@@ -395,6 +397,7 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
     """Anonymous administrators must use private chat under their real identity."""
     if not message.from_user or message.from_user.is_bot or message.sender_chat:
         return
+    donation_command = None
     async with db_pool.acquire() as connection:
         locale = initial_ui(message.from_user.language_code)
         try:
@@ -403,12 +406,18 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
                 me = await bot.get_me()
                 if parsed.mentioned_bot.lower()!=(me.username or '').lower():
                     return
-            await register_context(connection,message.from_user,message.chat,settings)
+            await register_context(connection,message.from_user,message.chat,settings,
+                allow_blocked=parsed.name in {'paysupport','donations','terms'})
             locale = await connection.fetchval('SELECT ui_language FROM telegram_chats WHERE telegram_chat_id=$1',message.chat.id)
-            text,markup = await run_command(connection,bot,settings,message,parsed)
-            if parsed.name=='start' and enum_value(message.chat.type)=='private':
-                if await send_welcome(bot,connection,settings,message.chat.id,text,markup):
-                    return
+            if parsed.name in {'donate','donations','paysupport','terms'}:
+                donation_command = (parsed.name,' '.join(parsed.arguments))
+            elif parsed.name=='start' and parsed.arguments==('donate',):
+                donation_command = ('donate','')
+            else:
+                text,markup = await run_command(connection,bot,settings,message,parsed)
+                if parsed.name=='start' and enum_value(message.chat.type)=='private':
+                    if await send_welcome(bot,connection,settings,message.chat.id,text,markup):
+                        return
         except UserError as error:
             text,markup = tr(locale,error.key),None
         except (ValueError,KeyError):
@@ -418,9 +427,13 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
         except Exception as error:
             LOGGER.error('Command failed: %s',type(error).__name__)
             text,markup = tr(locale,'not_ready'),None
-        if markup is None and enum_value(message.chat.type)=='private':
-            markup = main_keyboard(locale)
-        await reply(bot,connection,settings,message.chat.id,text,markup,message.message_thread_id)
+        if donation_command is None:
+            if markup is None and enum_value(message.chat.type)=='private':
+                markup = main_keyboard(locale)
+            await reply(bot,connection,settings,message.chat.id,text,markup,message.message_thread_id)
+    if donation_command is not None:
+        # Release the shared connection before the payment flow acquires its own.
+        await handle_donation_command(message,bot,settings,db_pool,*donation_command)
 
 
 @router.message(F.chat.type=='private',F.text,~F.text.startswith('/'))

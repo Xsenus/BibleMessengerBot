@@ -60,6 +60,7 @@ async def test_lost_singleton_connection_stops_polling(monkeypatch):
     async def branding_loop(*args):
         await asyncio.Future()
     monkeypatch.setattr(main, 'branding_loop', branding_loop)
+    monkeypatch.setattr(main, 'reconciliation_loop', branding_loop)
 
     with pytest.raises(ConnectionError, match='lost lock session'):
         await main.main()

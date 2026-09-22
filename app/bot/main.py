@@ -10,10 +10,12 @@ from aiogram.client.default import DefaultBotProperties
 from app.bot.branding import COMMAND_KEYS as COMMAND_KEYS
 from app.bot.branding import branding_loop
 from app.bot.handlers import router
+from app.bot.donations import router as donations_router
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
 from app.logging import configure_logging
 from app.services.locks import lock_key
+from app.services.donation_reconciliation import reconciliation_loop
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ async def main() -> None:
     pool = await create_pool(settings)
     bot = Bot(settings.bot_token,default=DefaultBotProperties(parse_mode='HTML'))
     dispatcher = Dispatcher()
+    dispatcher.include_router(donations_router)
     dispatcher.include_router(router)
     dispatcher['db_pool'],dispatcher['settings'] = pool,settings
     try:
@@ -43,6 +46,7 @@ async def main() -> None:
             if webhook.url:
                 raise RuntimeError('This bot has an active webhook; deliberately remove it before switching to polling')
             tasks = [asyncio.create_task(heartbeat(owner)),asyncio.create_task(branding_loop(bot,pool)),
+                asyncio.create_task(reconciliation_loop(bot,pool)),
                 asyncio.create_task(dispatcher.start_polling(
                 bot,allowed_updates=dispatcher.resolve_used_update_types(),close_bot_session=False,
                 handle_as_tasks=True,tasks_concurrency_limit=16))]

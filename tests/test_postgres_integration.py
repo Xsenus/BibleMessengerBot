@@ -104,7 +104,7 @@ async def drain(connection,identifier,sender):
 
 async def test_migrations_and_real_import_indexes(db):
     connection,settings,path=db
-    assert await connection.fetchval('SELECT count(*) FROM schema_migrations')==3
+    assert await connection.fetchval('SELECT count(*) FROM schema_migrations')==4
     edition,downloaded,refs=await load_fixture(connection,path)
     assert await _is_up_to_date(connection,downloaded)
     await import_translation(connection,downloaded,refs)

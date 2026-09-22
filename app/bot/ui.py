@@ -22,6 +22,7 @@ WELCOME_PATH = Path(__file__).resolve().parents[2] / 'assets' / 'brand' / 'welco
 BUTTONS = (
     ('next', '📖'), ('today', '🌅'), ('random', '🎲'),
     ('search', '🔎'), ('settings', '⚙️'), ('help', '❔'),
+    ('donate', '⭐'),
 )
 LABELS = {
     'ru': {'next': 'Читать дальше', 'today': 'Стих дня', 'help': 'Помощь'},
@@ -30,6 +31,8 @@ LABELS = {
 
 
 def button_label(locale: str, command: str, emoji: str) -> str:
+    if command == 'donate':
+        return f"{emoji} " + ('Поддержать' if locale == 'ru' else 'Support')
     return f"{emoji} {LABELS.get(locale, {}).get(command, tr(locale, command))}"
 
 
@@ -181,6 +184,11 @@ def onboarding_help(locale: str) -> str | None:
             '<code>/thread 123 @group</code> — тема форума\n'
             '<code>/reset confirm</code> — сбросить прогресс и приостановить подписки\n'
             '/topics — темы для изданий с совместимой нумерацией\n\n'
+            '<b>Добровольная поддержка</b>\n'
+            '/donate — поддержать сервер и развитие Telegram Stars\n'
+            '/donations — история поддержки · /terms — условия\n'
+            '/paysupport текст — вопрос по платежу или запрос возврата\n'
+            'Библия бесплатна; поддержка разовая и добровольная.\n\n'
             'Кнопки внизу всегда под рукой. Вернуться к началу: /start'
         )
     if locale == 'en':
@@ -206,6 +214,11 @@ def onboarding_help(locale: str) -> str | None:
             '<code>/thread 123 @group</code> — choose a forum topic\n'
             '<code>/reset confirm</code> — reset progress and pause subscriptions\n'
             '/topics — themes for editions with compatible numbering\n\n'
+            '<b>Voluntary support</b>\n'
+            '/donate — support hosting and development with Telegram Stars\n'
+            '/donations — support history · /terms — terms\n'
+            '/paysupport your message — payment issue or refund request\n'
+            'The Bible is free; support is optional and one-time.\n\n'
             'The keyboard below is always available. Start again: /start'
         )
     return None

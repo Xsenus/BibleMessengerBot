@@ -62,8 +62,13 @@ COMMAND_DESCRIPTIONS = {
 def commands_for(locale: str) -> list[BotCommand]:
     language = locale or 'ru'
     descriptions = COMMAND_DESCRIPTIONS.get(language)
-    return [BotCommand(command=command, description=(descriptions[i] if descriptions else tr(language,key))[:256])
+    commands = [BotCommand(command=command, description=(descriptions[i] if descriptions else tr(language,key))[:256])
         for i,(command,key) in enumerate(COMMAND_KEYS)]
+    commands.extend([
+        BotCommand(command='donate', description='Добровольно поддержать бота ⭐' if language == 'ru' else 'Support the bot with Stars ⭐'),
+        BotCommand(command='paysupport', description='Вопрос по платежу или возврат' if language == 'ru' else 'Payment issue or refund request'),
+    ])
+    return commands
 
 
 async def apply_branding(bot: Any, connection: Any, *, avatar_path: Path | None = None) -> bool:
