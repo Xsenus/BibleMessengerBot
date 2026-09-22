@@ -1,5 +1,5 @@
 {
-  "baseline_commit": "e7225af25d5ffa03f056613a84a01102d4de3215",
+  "baseline_commit": "0bf228485486eba34a67d230f6100b38698e4995",
   "unchanged_migrations": [
     {
       "path": "sql/schema.sql",
@@ -11,5 +11,6 @@
       "unchanged": true,
       "sha256": "e1bd7266a760288bf4d1c00553956f3c7ec1aa90068835589bb50595767ac0a3"
     }
-  ]
+  ],
+  "baseline_tag_object": "e7225af25d5ffa03f056613a84a01102d4de3215"
 }

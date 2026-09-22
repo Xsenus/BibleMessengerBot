@@ -2,7 +2,8 @@
   "input_archive": "BibleMessengerBot-1.2.0-ALL-IN-ONE.zip",
   "sha256": "c17fc2eb5be9361e94731f1999a7f3c271d32e5735adef0c155d342037102f54",
   "baseline_tag": "v1.2.0",
-  "baseline_commit": "e7225af25d5ffa03f056613a84a01102d4de3215",
+  "baseline_commit": "0bf228485486eba34a67d230f6100b38698e4995",
   "tracked_files_matched": 135,
-  "all_baseline_files_match": true
+  "all_baseline_files_match": true,
+  "baseline_tag_object": "e7225af25d5ffa03f056613a84a01102d4de3215"
 }
