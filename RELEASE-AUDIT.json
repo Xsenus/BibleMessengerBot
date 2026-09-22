@@ -1,88 +1,41 @@
 {
   "project": "BibleMessengerBot",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "date": "2026-09-22",
-  "status": "LIVE_VALIDATED",
-  "environment": {
-    "python": "3.12.14",
-    "postgresql": "16.15",
-    "docker": "29.8.1",
-    "compose": "5.5.1"
-  },
+  "status": "LIVE_API_VALIDATED_PAYMENT_UNTESTED",
+  "tested_code_commit": "74e1786adc33f8939ff797fa2c73d06936d2e024",
   "tests": {
     "linux_postgresql": {
-      "passed": 457,
+      "passed": 581,
       "failed": 0,
-      "skipped": 0
+      "skipped": 0,
+      "seconds": 27.34
     },
     "windows": {
-      "passed": 431,
+      "passed": 538,
       "failed": 0,
-      "skipped": 26,
-      "skip_reason": "18 real PostgreSQL cases and 8 POSIX shell cases run separately on Linux"
+      "skipped": 43,
+      "skip_reason": "35 PostgreSQL and 8 POSIX tests executed separately on VPS"
     }
   },
-  "corpus": {
-    "status": "passed",
-    "languages": [
-      "eng",
-      "rus"
-    ],
-    "verses": 68193,
-    "editions": [
-      {
-        "source": "getBible/v2",
-        "id": "web",
-        "language": "eng",
-        "books": 66,
-        "verse_rows": 31095,
-        "sha256": "731ddc05b7570ac0c525a74e4a49d6da4f922aec18e7e982514a4f88432ad1ac",
-        "content_sha256_checked": true
-      },
-      {
-        "source": "getBible/v2",
-        "id": "synodal",
-        "language": "rus",
-        "books": 78,
-        "verse_rows": 37098,
-        "sha256": "a5ef208701f6ddee669de45b27141e457436ec806e68a38c2251d089e4a6eced",
-        "content_sha256_checked": true
-      }
-    ]
-  },
-  "checks": {
-    "docker_build": "passed",
+  "ci": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/35717226589",
+  "live_checks": {
     "all_four_services_healthy": true,
-    "real_bible_import_and_hash_audit": "passed",
-    "real_read_search_random_daily_five_plans": "passed",
-    "backup_restore_into_isolated_database": "passed",
-    "daily_backup_timer_enabled": true,
-    "telegram_private_start": "confirmed by user",
-    "telegram_welcome_photo": "Telegram photo returned and file_id cached",
-    "telegram_daily_and_random": "visible in user-provided screenshot",
-    "public_profile_names_descriptions_avatar_and_16_commands": "read back and verified through Telegram Bot API",
-    "native_keyboard": "six buttons verified by user screenshot",
-    "reading_footer": "Friendly edition titles; full provenance remains in /license; required attribution retained."
+    "schema_migrations": 4,
+    "corpus_audit": "passed",
+    "menu_commands": 18,
+    "invoice_link_api": "accepted; unpublished; order rolled back",
+    "stars_balance_api": "accepted",
+    "stars_history_api": "accepted",
+    "pre_checkout_handler": true,
+    "backup_before_upgrade": true
   },
-  "dependencies": {
-    "pinned_linux_packages": 41,
-    "audited": 41,
-    "skipped": 0,
-    "known_vulnerabilities": 0,
-    "tool": "pip-audit 2.10.1",
-    "fixed": "CVE-2025-71176 in pytest; upgraded to 9.1.1"
-  },
-  "security": {
-    "git_history_objects_scanned": 290,
-    "basic_secret_pattern_findings": 0,
-    "secrets_in_git": false,
-    "admin_bind": "127.0.0.1:8080",
-    "postgres_published": false
-  },
+  "actual_payment_executed": false,
+  "actual_refund_executed": false,
+  "previous_release_evidence": "docs/history/1.3.1/RELEASE-AUDIT.json",
   "limitations": [
-    "No live scheduled/group/channel delivery is claimed without a configured destination; SQL delivery tests use a simulated Telegram transport.",
-    "Thematic references require verified BibleNLP numbering; disabled for native getBible editions.",
-    "Separate Telegram pre-start description picture is a BotFather setting; avatar and in-chat welcome are automated.",
-    "No sustained load/soak test or independent verse-by-verse proofreading is claimed."
+    "No live paid transaction or live refund was executed.",
+    "Operator must read and answer payment support requests through the server CLI; no automatic owner notification.",
+    "Reconciliation recovers known orders; it cannot reconstruct an order erased from all database backups."
   ]
 }
