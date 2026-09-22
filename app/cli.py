@@ -24,19 +24,11 @@ from app.services.verification import verify_database
 
 
 async def catalog_preview(settings: Settings, refresh: bool) -> dict[str, Any]:
-    async with BibleNlpSource(
-        settings.source_cache_dir,
-        timeout_seconds=settings.download_timeout_seconds,
-    ) as source:
-        catalog = await source.fetch_catalog(refresh=refresh)
-    result = select_translations(
-        catalog,
-        profile=settings.bible_profile,
-        max_editions_per_language=settings.max_editions_per_language,
-        allow_restricted=settings.allow_restricted_licenses,
-        allow_unknown=settings.allow_unknown_licenses,
-    )
-    return selection_summary(result)
+    from app.catalog.multisource.runner import acquire_corpus, process_lock
+    from app.catalog.multisource.types import ImportOptions
+    options=ImportOptions.from_env(profile=settings.bible_profile,max_editions=settings.max_editions_per_language)
+    with process_lock(settings.source_cache_dir):
+        return await acquire_corpus(settings.source_cache_dir,options,discover_only=True,refresh_catalog=refresh)
 
 
 async def db_stats(settings: Settings) -> dict[str, Any]:
@@ -126,7 +118,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main() -> None:
-    configure_logging()
+    import sys
+    configure_logging(stream=sys.stderr)
     args = parser().parse_args()
     result = asyncio.run(run(args))
     payload = json.dumps(result, ensure_ascii=False, indent=2, default=str)
@@ -135,6 +128,8 @@ def main() -> None:
     print(payload)
     if result.get("status") == "failed":
         raise SystemExit(1)
+    if result.get("status") == "partial":
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

@@ -80,7 +80,7 @@ class BibleNlpSource:
             timeout=httpx.Timeout(timeout_seconds, connect=30),
             follow_redirects=True,
             headers={
-                "User-Agent": "BibleMessengerBot/1.2.0 (+https://github.com/BibleNLP/ebible)",
+                "User-Agent": "BibleMessengerBot/1.3.0 (+https://github.com/BibleNLP/ebible)",
                 "Accept": "text/plain, application/json;q=0.9, */*;q=0.1",
             },
         )

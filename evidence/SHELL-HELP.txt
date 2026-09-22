@@ -1,0 +1,8 @@
+Usage: sudo bash fill_database.sh [import|discover|download|status|config] [options]
+Default: download all approved editions from biblenlp,getbible,helloao, then import.
+  --sources biblenlp,getbible,helloao    Select resources and their order
+  --languages ru,en,es                 Optional language filter
+  --editions biblenlp:russyn,helloao:BSB Exact edition filter
+  --profile all-open|core|extended|none
+  --refresh                           Refresh cached text files too
+Read docs/MULTISOURCE_IMPORT_RU.md. Existing installations must retain their .env.

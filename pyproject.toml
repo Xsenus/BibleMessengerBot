@@ -1,6 +1,6 @@
 [project]
 name = "bible-messenger-bot"
-version = "1.2.0"
+version = "1.3.0"
 description = "Multilingual Telegram Bible reading and scheduled publishing bot"
 requires-python = ">=3.12"
 license = {text = "MIT"}

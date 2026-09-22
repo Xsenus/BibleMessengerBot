@@ -7,7 +7,7 @@ from app.catalog.profiles import ISO_639_1_TO_3
 
 ROOT = Path(__file__).resolve().parents[2] / 'locales'
 ISO3_TO_UI = {v: k for k, v in ISO_639_1_TO_3.items() if k not in {'iw', 'no'}}
-ISO3_TO_UI.update({'nob':'no', 'fil':'tl', 'yue':'zh', 'grc':'el'})
+ISO3_TO_UI.update({'nob':'no', 'fil':'tl', 'yue':'zh', 'grc':'el','ara':'ar','fas':'fa','zho':'zh','heb':'he','msa':'ms','swa':'sw'})
 
 
 @lru_cache(maxsize=1)

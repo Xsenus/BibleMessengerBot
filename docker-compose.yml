@@ -1,6 +1,6 @@
 name: bible-messenger-bot
 x-app: &app
-  image: bible-messenger-bot:1.2.0
+  image: bible-messenger-bot:1.3.0
   build:
     context: .
     dockerfile: Dockerfile

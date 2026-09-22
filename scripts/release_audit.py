@@ -59,8 +59,8 @@ def main() -> int:
     failed = sum(case.find('failure') is not None or case.find('error') is not None for case in cases)
     tests = {'passed':len(cases)-len(skipped)-failed,'failed':failed,
              'skipped_collection_units_or_cases':len(skipped),'skipped':skipped}
-    for path in sorted(ROOT.glob('*.sh')):
-        checks.append(command('SHELL-'+path.stem,['bash','-n',path.name]))
+    for path in sorted([*ROOT.glob('*.sh'),*ROOT.glob('scripts/*.sh')]):
+        checks.append(command('SHELL-'+path.stem,['bash','-n',str(path.relative_to(ROOT))]))
     structured_errors = []
     parsed_files = []
     for path in project_files():
@@ -88,7 +88,7 @@ def main() -> int:
     checks.append({'name':'BASIC_SECRET_AND_PATH_SCAN','status':'failed' if unsafe else 'passed',
                    'matches':unsafe,'limitation':'A basic pattern scan, not a full security audit.'})
     required=['README.md','VERSION','Dockerfile','docker-compose.yml','.env.example','install.sh',
-              'sql/schema.sql','sql/migrations/002_hardening.sql','app/bootstrap.py','app/bot/main.py',
+              'sql/schema.sql','sql/migrations/002_hardening.sql','sql/migrations/003_multisource.sql','fill_database.sh','app/catalog/multisource/cli.py','docs/MULTISOURCE_IMPORT_RU.md','app/bootstrap.py','app/bot/main.py',
               'app/worker/main.py','app/web/main.py','docs/LIMITATIONS.md','docs/LANGUAGE-MATRIX.md',
               'tests/test_postgres_integration.py','tests/test_aiogram_contracts.py']
     missing=[p for p in required if not (ROOT/p).is_file()]
@@ -111,11 +111,14 @@ def main() -> int:
     ok=all(c['status']=='passed' for c in checks)
     profiles=json.loads((ROOT/'data/language_profiles.json').read_text())
     report={'project':'BibleMessengerBot','version':(ROOT/'VERSION').read_text().strip(),
-            'generated_at_machine_clock':datetime.now(timezone.utc).isoformat(),'release_context_date':'2026-09-21',
+            'generated_at_machine_clock':datetime.now(timezone.utc).isoformat(),'release_context_date':'2026-09-22',
             'status':'OFFLINE_PASS_LIVE_UNVERIFIED' if ok else 'OFFLINE_FAILED',
             'tests':tests,'checks':checks,'environment':env,
             'ui_catalogs':len(list((ROOT/'locales').glob('*.json'))),
-            'target_import_languages':len(profiles['extended']),
+            'extended_profile_language_codes':len(profiles['extended']),
+            'default_profile':'all-open','default_language_limit':None,'source_adapters':['biblenlp','getbible','helloao'],
+            'network_source_tests':'synthetic httpx streams; not real downloads',
+            'shell_tests':'fake Docker executable; not actual containers',
             'bundled_authentic_complete_editions':0,'prebuilt_database_dump_included':False,
             'not_executed':not_executed,
             'runtime_gate':'install.sh executes installed-library and disposable PostgreSQL tests, then real import+database audit before starting services; not run here.'}
@@ -129,7 +132,7 @@ def main() -> int:
     lines += ['', 'Полные команды, причины пропусков и результаты: RELEASE-AUDIT.json, evidence/TESTS.txt и TESTS.xml. Разбор YAML не является запуском Docker Compose. Компиляция Python не проверяет отсутствующие зависимости или SQL на сервере.',
               '', '## Не выполнено','']+[f'- {x}' for x in not_executed]
     lines += ['', '## Фактическое наполнение', '',
-              f"Каталогов UI: {report['ui_catalogs']}. Целевых языков импортёра: {report['target_import_languages']}. Полностью скачанных изданий в ZIP: **0**. Готового дампа нет.",
+              f"Каталогов UI: {report['ui_catalogs']}. Источников: 3. Профиль all-open не ограничен списком из 56 языков, но фильтрует лицензии и формат. Полностью скачанных изданий в ZIP: **0**. Готового дампа нет.",
               '', 'Установщик должен выполнить реальные интеграционные тесты, импорт и аудит на VPS. До их успешного завершения публикации не запускаются. Это дополнительная проверка на сервере, а не уже выполненная здесь работа. Гарантии отсутствия всех ошибок нет.']
     (ROOT/'RELEASE-AUDIT.md').write_text('\n'.join(lines)+'\n')
     print(json.dumps({'status':report['status'],'tests':tests,'report':'RELEASE-AUDIT.json'},ensure_ascii=False,indent=2))

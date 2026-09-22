@@ -63,6 +63,8 @@ async def configure_chat(connection: Any, chat_id: int, *, actor_id: int | None,
             completed=CASE WHEN $4 THEN false ELSE completed END,updated_at=now()
             WHERE telegram_chat_id=$1''',chat_id,translation_id,timezone_name,changed_edition)
         if changed_edition and translation:
+            if not translation.get('numbering_system','BibleNLP Original versification').startswith('BibleNLP'):
+                await connection.execute("UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE telegram_chat_id=$1 AND mode='topic_of_day'",chat_id)
             # A plan requiring the whole Bible must not silently run on a partial edition.
             await connection.execute('''UPDATE subscriptions SET is_enabled=false,next_run_at=NULL
                 WHERE telegram_chat_id=$1 AND mode='reading_plan' AND

@@ -22,9 +22,9 @@ class RedactingFormatter(logging.Formatter):
         return redact(super().format(record))
 
 
-def configure_logging() -> None:
+def configure_logging(*, stream=None) -> None:
     """Configure once per process; HTTP clients do not log token-bearing URLs."""
-    handler = logging.StreamHandler(sys.stdout)
+    handler = logging.StreamHandler(stream if stream is not None else sys.stdout)
     handler.setFormatter(RedactingFormatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
     logging.basicConfig(level=os.getenv('LOG_LEVEL','INFO').upper(),handlers=[handler],force=True)
     logging.getLogger('httpx').setLevel(logging.WARNING)

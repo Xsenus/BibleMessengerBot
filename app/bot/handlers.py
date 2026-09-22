@@ -318,14 +318,20 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
     return await bible.render_verse(connection,row,edition,ui_language=locale) if row else tr(locale,'no_result'),None
 
 
-async def language_menu(connection: Any, chat: Any) -> tuple[str,Any]:
-    """Language choices reflect imported editions, not the 56-language target profile."""
+async def language_menu(connection: Any, chat: Any, page: int=0) -> tuple[str,Any]:
+    """Page through ALL actually imported languages, including the all-open corpus."""
     editions = await bible.list_translations(connection)
     codes = sorted({e.language_code for e in editions})
-    # The bounded chooser is for the configured core/extended profile; /translations supports paging.
-    rows = [[button(code,'lang',chat['telegram_chat_id'],code) for code in codes[i:i+3]] for i in range(0,min(len(codes),90),3)]
+    page=max(0,min(page,max((len(codes)-1)//36,0)))
+    chosen=codes[page*36:page*36+36]
+    rows = [[button(code,'lang',chat['telegram_chat_id'],code) for code in chosen[i:i+3]] for i in range(0,len(chosen),3)]
+    navigation=[]
+    for delta,key in [(-1,'previous_page'),(1,'next_page')]:
+        if 0<=page+delta and (page+delta)*36<len(codes):
+            navigation.append(button(tr(chat['ui_language'],key),'langs',chat['telegram_chat_id'],str(page+delta)))
+    if navigation:rows.append(navigation)
     rows.append([button(tr(chat['ui_language'],'back'),'settings',chat['telegram_chat_id'])])
-    return tr(chat['ui_language'],'language')+'\n<code>/language ISO</code>',InlineKeyboardMarkup(inline_keyboard=rows)
+    return tr(chat['ui_language'],'language')+f' · {page+1}/{max((len(codes)+35)//36,1)}\n<code>/language ISO</code>',InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def ui_menu(chat: Any) -> tuple[str,Any]:
@@ -439,7 +445,7 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
                 text = tr(locale,'plan')
                 markup = InlineKeyboardMarkup(inline_keyboard=[[button(code,'plan',chat_id,code)] for code in PLANS])
             elif action=='langs':
-                text,markup = await language_menu(connection,chat)
+                text,markup = await language_menu(connection,chat,int(value or '0'))
             elif action=='uilangs':
                 text,markup = ui_menu(chat)
             elif action=='editions':

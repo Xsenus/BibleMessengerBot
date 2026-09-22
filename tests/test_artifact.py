@@ -33,10 +33,10 @@ def test_no_real_bot_token_in_example():
     assert not any(line.startswith("BOT_TOKEN=") and ":" in line for line in text.splitlines())
 
 
-def test_default_profile_imports_up_to_two_editions_per_language():
+def test_new_install_defaults_to_all_open_and_keeps_narrow_profile_limit():
     example = (ROOT / ".env.example").read_text()
     installer = (ROOT / "install.sh").read_text()
-    assert "BIBLE_PROFILE=extended" in example
+    assert "BIBLE_PROFILE=all-open" in example
     assert "MAX_EDITIONS_PER_LANGUAGE=2" in example
     assert 'MAX_EDITIONS="${MAX_EDITIONS_PER_LANGUAGE:-2}"' in installer
     assert "MAX_EDITIONS_PER_LANGUAGE=${MAX_EDITIONS}" in installer

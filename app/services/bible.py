@@ -30,7 +30,9 @@ async def list_translations(connection: Any) -> list[TranslationChoice]:
     rows = await connection.fetch("""SELECT t.*,l.code AS language_code FROM translations t
         JOIN languages l ON l.id=t.language_id WHERE t.is_active AND t.verse_count>0
         AND t.audit_status IN ('passed','passed_with_warnings') ORDER BY l.code,t.title""")
-    return [TranslationChoice(r['id'],r['language_code'],r['source_translation_id'],r['title'],
+    from app.catalog.multisource.types import SOURCE_NAMES
+    slugs={name:slug for slug,name in SOURCE_NAMES.items()}
+    return [TranslationChoice(r['id'],r['language_code'],slugs.get(r['source_name'],'source')+':'+r['source_translation_id'],r['title'],
         r['short_title'] or r['title'],r['coverage'],r['license_type'],r['book_count'],r['verse_count']) for r in rows]
 
 
@@ -43,7 +45,20 @@ async def find_translation(connection: Any, identifier: str | int | None,
     if identifier is not None:
         if isinstance(identifier,int) or str(identifier).isdigit():
             return await connection.fetchrow(base+'AND t.id=$1',int(identifier))
-        return await connection.fetchrow(base+'AND lower(t.source_translation_id)=lower($1)',str(identifier))
+        text=str(identifier)
+        if ':' in text:
+            slug,source_id=text.split(':',1)
+            from app.catalog.multisource.types import SOURCE_NAMES
+            if slug not in SOURCE_NAMES or not source_id:
+                return None
+            return await connection.fetchrow(base+'''AND (
+                EXISTS(SELECT 1 FROM translation_sources s WHERE s.translation_id=t.id
+                       AND s.source_slug=$1 AND s.source_translation_id=$2)
+                OR (t.source_name=$3 AND t.source_translation_id=$2)) LIMIT 1''',slug,source_id,SOURCE_NAMES[slug])
+        # A plain ID used by two resources is ambiguous. Require source:ID or the numeric DB ID.
+        return await connection.fetchrow(base+'''AND lower(t.source_translation_id)=lower($1)
+            AND (SELECT count(*) FROM translations t2 WHERE t2.is_active
+                AND lower(t2.source_translation_id)=lower($1))=1''',text)
     language = normalize_language_code(preferred_language)
     if not language:
         return None
@@ -67,8 +82,11 @@ async def user_translation(connection: Any, telegram_user_id: int,
     return await chat_translation(connection,telegram_user_id)
 
 
-async def _book_name(connection: Any, book_code: str, language_code: str) -> str:
+async def _book_name(connection: Any, book_code: str, language_code: str, translation_id: int | None = None) -> str:
     """Use a localized book name when present, otherwise the language-neutral USFM code."""
+    if translation_id is not None:
+        name=await connection.fetchval('SELECT name FROM translation_book_names WHERE translation_id=$1 AND book_code=$2',translation_id,book_code)
+        if name:return name
     locale = ui_for_language(language_code) or language_code
     return await connection.fetchval('SELECT name FROM book_names WHERE book_code=$1 AND language_code=$2',book_code,locale) or book_code
 
@@ -96,16 +114,19 @@ def attribution(translation: Any, ui_language: str) -> str:
     license_url = _safe_link(translation.get('license_url'))
     license_part = f'<a href="{escape(license_url).replace(chr(34), "&quot;")}">{escape(license_name)}</a>' if license_url else escape(license_name)
     source_url = _safe_link(translation.get('publication_url')) or _safe_link(translation.get('source_file_url'))
-    source = f'<a href="{escape(source_url).replace(chr(34), "&quot;")}">eBible / BibleNLP</a>' if source_url else 'eBible / BibleNLP'
+    source_name=translation.get('source_name') or 'eBible / BibleNLP'
+    source = f'<a href="{escape(source_url).replace(chr(34), "&quot;")}">{escape(source_name)}</a>' if source_url else escape(source_name)
     lines.append(f"{tr(ui_language,'source')}: {source} · {license_part}")
-    lines.append(f"<i>{tr(ui_language,'numbering_note')}</i>")
+    numbering=translation.get('numbering_system','BibleNLP Original versification')
+    note=tr(ui_language,'numbering_note') if numbering.startswith('BibleNLP') else numbering
+    lines.append(f'<i>{escape(note)}</i>')
     return '\n'.join(lines)
 
 
 async def render_verse(connection: Any, row: Any, translation: Any,
                        *, ui_language: str = 'ru') -> str:
     """Escape verse text verbatim and retain the source reference range."""
-    name = await _book_name(connection,row['book_code'],translation['language_code'])
+    name = await _book_name(connection,row['book_code'],translation['language_code'],translation['id'])
     return (f"<blockquote>{escape(row['text'])}</blockquote>\n"
             f"<b>{escape(name)} {row['chapter']}:{verse_label(row)}</b>\n"+attribution(translation,ui_language))
 
@@ -134,6 +155,8 @@ async def verse_of_day(connection: Any, translation: Any, seed: str, on_date: da
 async def topic_verse(connection: Any, translation: Any, topic_code: str | None = None,
                       seed: str = '', on_date: date | None = None) -> tuple[str, Any] | None:
     """Choose only themes that have actual text in this particular edition."""
+    if not translation.get('numbering_system','BibleNLP Original versification').startswith('BibleNLP'):
+        return None  # No verified cross-versification theme mapping for native source editions yet.
     rows = await connection.fetch('''SELECT tr.topic_code,v.book_code,v.chapter,v.verse,v.verse_end,v.text
         FROM topic_references tr JOIN topics t ON t.code=tr.topic_code AND t.is_active
         JOIN verses v ON v.translation_id=$1 AND v.book_code=tr.book_code AND v.chapter=tr.chapter
@@ -160,7 +183,7 @@ async def render_chapter(connection: Any, translation: Any, book_code: str, chap
     visible = [r for r in rows if r['text'] and not r['is_range_continuation']]
     if not visible:
         return None
-    name = await _book_name(connection,book_code,translation['language_code'])
+    name = await _book_name(connection,book_code,translation['language_code'],translation['id'])
     body = '\n'.join(f"<b>{verse_label(r)}</b> {escape(r['text'])}" for r in visible)
     return f'<b>{escape(name)} {chapter}</b>\n\n{body}'+('\n\n'+attribution(translation,ui_language) if with_attribution else '')
 

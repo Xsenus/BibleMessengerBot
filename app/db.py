@@ -25,7 +25,7 @@ async def create_pool(settings: Settings) -> Any:
     if _pool is None:
         _pool = await asyncpg.create_pool(dsn=normalize_asyncpg_dsn(settings.database_url),
             min_size=1,max_size=10,command_timeout=120,
-            server_settings={'application_name':'BibleMessengerBot-1.2.0'})
+            server_settings={'application_name':'BibleMessengerBot-1.3.0'})
     return _pool
 
 

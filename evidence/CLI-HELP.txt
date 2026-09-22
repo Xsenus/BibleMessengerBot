@@ -1,0 +1,35 @@
+usage: cli.py [-h] [--sources SOURCES]
+              [--profile {all-open,core,extended,none}]
+              [--languages LANGUAGES] [--editions EDITIONS]
+              [--max-editions MAX_EDITIONS] [--refresh] [--cached-catalog]
+              [--replace-existing] [--cache-dir CACHE_DIR] [--output OUTPUT]
+              [--full-report]
+              {discover,download,import,status,config}
+
+Download and validate licensed editions from independent resources; atomically
+import into BibleMessenger PostgreSQL
+
+positional arguments:
+  {discover,download,import,status,config}
+
+options:
+  -h, --help            show this help message and exit
+  --sources SOURCES     biblenlp,getbible,helloao (subset and order)
+  --profile {all-open,core,extended,none}
+  --languages LANGUAGES
+                        ISO codes, e.g. ru,en,es. Empty means no additional
+                        filter
+  --editions EDITIONS   Exact source:id keys, e.g. biblenlp:russyn,helloao:BSB
+  --max-editions MAX_EDITIONS
+                        Successful editions per language PER SOURCE; ignored
+                        by all-open
+  --refresh             Re-download completed corpus files too; default
+                        refreshes catalog only
+  --cached-catalog      Reuse SHA-checked catalog snapshot from an earlier
+                        download phase
+  --replace-existing    Allow changed text ONLY when it has no subscriptions,
+                        progress, defaults, delivery history or aliases
+  --cache-dir CACHE_DIR
+  --output OUTPUT       Additional full report path (inside container for
+                        Docker commands)
+  --full-report         Print all entries rather than a summary

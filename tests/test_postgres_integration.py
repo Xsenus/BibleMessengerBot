@@ -104,7 +104,7 @@ async def drain(connection,identifier,sender):
 
 async def test_migrations_and_real_import_indexes(db):
     connection,settings,path=db
-    assert await connection.fetchval('SELECT count(*) FROM schema_migrations')==2
+    assert await connection.fetchval('SELECT count(*) FROM schema_migrations')==3
     edition,downloaded,refs=await load_fixture(connection,path)
     assert await _is_up_to_date(connection,downloaded)
     await import_translation(connection,downloaded,refs)
@@ -213,3 +213,115 @@ async def test_claim_owner_once_and_search_wildcards(db):
     assert not await claim_owner(connection,telegram_user_id=101,supplied_code='x'*32,expected_code='x'*32)
     rows=await bible.search_verses(connection,edition['id'],'10%_',3)
     assert len(rows)==3 and all('10%_' in row['text'] for row in rows)
+
+# Multi-source SQL tests below run only on REAL PostgreSQL via install.sh / RUN_DB_TESTS=1.
+# Their HTTP input is deliberately synthetic and does not certify any live Bible corpus.
+
+async def test_multisource_sql_roundtrip_repeat_and_exact_alias(db):
+    from app.catalog.multisource.parsers import parse_helloao
+    from app.catalog.multisource.store import PostgresStore
+    from tests.multisource_fixtures import hello_fixture
+    connection,_,path=db
+    store=PostgresStore(connection,batch_size=1)
+    prepared=parse_helloao(*hello_fixture(path,'source-a'))
+    first=await store.save(prepared)
+    assert first['outcome']=='imported'
+    second=await store.save(prepared)
+    assert second['outcome']=='already_present' and second['database_id']==first['database_id']
+    alias=await store.save(parse_helloao(*hello_fixture(path,'source-b')))
+    assert alias['outcome']=='exact_duplicate'
+    assert await connection.fetchval('SELECT count(*) FROM translations')==1
+    assert await connection.fetchval('SELECT count(*) FROM translation_sources')==2
+    assert await connection.fetchval('SELECT count(*) FROM verses')==2
+    selected=await bible.find_translation(connection,'helloao:source-b')
+    assert selected['id']==first['database_id']
+    assert await bible._book_name(connection,'GEN','eng',first['database_id'])=='Fixture Genesis'
+    result=await verify_database(connection,profile='none')
+    assert result['status']=='passed' and result['editions'][0]['content_sha256_checked']
+
+
+async def test_multisource_sql_replacement_is_explicit_and_blocked_for_used_editions(db):
+    from app.catalog.multisource.parsers import parse_helloao
+    from app.catalog.multisource.store import PostgresStore,UpdateHeld
+    from tests.multisource_fixtures import hello_fixture
+    connection,_,path=db
+    old=parse_helloao(*hello_fixture(path,'source-a'))
+    first=await PostgresStore(connection).save(old)
+    changed=parse_helloao(*hello_fixture(path,'source-a',text='SYNTHETIC CHANGED'))
+    with pytest.raises(UpdateHeld):await PostgresStore(connection).save(changed)
+    assert await connection.fetchval('SELECT text FROM verses WHERE translation_id=$1 AND verse=1',first['database_id'])==old.records[0][3]
+    updated=await PostgresStore(connection,allow_replace=True).save(changed)
+    assert updated['outcome']=='updated'
+    await create_destination(connection)
+    await configure_chat(connection,101,actor_id=101,translation_id=first['database_id'])
+    again=parse_helloao(*hello_fixture(path,'source-a',text='SYNTHETIC CHANGED AGAIN'))
+    with pytest.raises(UpdateHeld):await PostgresStore(connection,allow_replace=True).save(again)
+    assert await connection.fetchval('SELECT text FROM verses WHERE translation_id=$1 AND verse=1',first['database_id'])=='SYNTHETIC CHANGED'
+
+
+async def test_multisource_sql_copy_failure_rolls_back_edition_and_alias(db):
+    from app.catalog.multisource.parsers import parse_helloao
+    from app.catalog.multisource.store import PostgresStore
+    from tests.multisource_fixtures import hello_fixture
+    connection,_,path=db
+    class FaultAfterActualCopy:
+        def __getattr__(self,name):return getattr(connection,name)
+        async def copy_records_to_table(self,*args,**kwargs):
+            await connection.copy_records_to_table(*args,**kwargs)
+            raise RuntimeError('synthetic failure AFTER a real COPY')
+    prepared=parse_helloao(*hello_fixture(path))
+    with pytest.raises(RuntimeError,match='synthetic failure'):
+        await PostgresStore(FaultAfterActualCopy(),batch_size=1).save(prepared)
+    assert await connection.fetchval('SELECT count(*) FROM translations')==0
+    assert await connection.fetchval('SELECT count(*) FROM verses')==0
+    assert await connection.fetchval('SELECT count(*) FROM translation_sources')==0
+
+
+async def test_multisource_sql_plain_id_ambiguity_and_explicit_source_selection(db):
+    from app.catalog.multisource.parsers import parse_helloao,parse_getbible
+    from app.catalog.multisource.store import PostgresStore
+    from tests.multisource_fixtures import hello_fixture,get_fixture
+    connection,_,path=db
+    store=PostgresStore(connection)
+    h=await store.save(parse_helloao(*hello_fixture(path)))
+    g=await store.save(parse_getbible(*get_fixture(path)))
+    assert h['database_id']!=g['database_id']
+    assert await bible.find_translation(connection,'sample') is None
+    assert (await bible.find_translation(connection,'helloao:sample'))['id']==h['database_id']
+    assert (await bible.find_translation(connection,'getbible:sample'))['id']==g['database_id']
+
+
+async def test_multisource_sql_tampered_source_file_never_commits(db):
+    from app.catalog.multisource.parsers import parse_helloao
+    from app.catalog.multisource.store import PostgresStore
+    from tests.multisource_fixtures import hello_fixture
+    connection,_,path=db
+    prepared=parse_helloao(*hello_fixture(path))
+    prepared.downloaded.path.write_text('tampered after parser')
+    with pytest.raises(ValueError,match='checksum'):
+        await PostgresStore(connection).save(prepared)
+    assert await connection.fetchval('SELECT count(*) FROM translations')==0
+
+
+async def test_multisource_sql_content_audit_catches_same_count_corruption(db):
+    from app.catalog.multisource.parsers import parse_helloao
+    from app.catalog.multisource.store import PostgresStore
+    from tests.multisource_fixtures import hello_fixture
+    connection,_,path=db
+    first=await PostgresStore(connection).save(parse_helloao(*hello_fixture(path)))
+    await connection.execute("UPDATE verses SET text='SYNTHETIC TAMPERING' WHERE translation_id=$1 AND verse=1",first['database_id'])
+    report=await verify_database(connection,profile='none')
+    assert report['status']=='failed' and any('content hash mismatch' in x for x in report['errors'])
+
+
+async def test_multisource_sql_native_theme_subscription_refused(db):
+    from app.catalog.multisource.parsers import parse_helloao
+    from app.catalog.multisource.store import PostgresStore
+    from tests.multisource_fixtures import hello_fixture
+    connection,_,path=db
+    first=await PostgresStore(connection).save(parse_helloao(*hello_fixture(path)))
+    await create_destination(connection)
+    with pytest.raises(UserError):
+        await create_or_update_subscription(connection,chat_id=101,created_by=101,translation_id=first['database_id'],
+            mode='topic_of_day',send_time=time(9),timezone_name='UTC')
+    assert await connection.fetchval('SELECT count(*) FROM subscriptions')==0

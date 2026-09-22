@@ -1,11 +1,24 @@
-# Third-party notices
+# Third-party sources and rights — 1.3.0
 
-Application code uses the MIT license in LICENSE. This does not license Bible translations.
+The MIT license for this application does not license Bible translations. No complete authentic Bible text or populated database is bundled. Synthetic fixtures are marked as test data and are not represented as Scripture.
 
-No complete Bible text is bundled in1.2.0. The importer accesses BibleNLP/ebible at the pinned revision in data/source_snapshot.json. Every edition retains its own rights notice, source URL, license URL and measured provenance. Only explicit public-domain/CC0/CC BY/CC BY-SA metadata is admitted by the runtime policy. Original source terms prevail; no generic repository license overrides them.
+## BibleNLP / eBible
 
-Source format documentation: https://github.com/BibleNLP/ebible . Telegram contracts: https://core.telegram.org/bots/api and https://core.telegram.org/bots/faq . Library documentation: https://docs.aiogram.dev/ . Accessed21September2026 via browser/connector; full source files were not downloaded into this release environment.
+https://github.com/BibleNLP/ebible and https://ebible.org/
+The corpus README specifies verse-per-line alignment, a reference list, and edition-specific rights. This application obtains metadata and individual files at a resolved immutable repository revision. Individual translation license declarations govern reuse, not a repository software license.
 
-Python dependencies are listed in requirements.txt and requirements-test.txt, with their respective upstream licenses. They are installed from package repositories during Docker build, not copied into this source ZIP. The resolved tree is captured in BUILD-DEPENDENCIES.txt inside the built image and runtime-evidence/dependencies.txt on the VPS. Container base images and OS packages have their own licenses. This ZIP does not redistribute their binaries.
+## getBible
 
-UI catalogs are translations prepared for this project; independent native-speaker review has not been performed. Synthetic test fixtures are marked as synthetic and are not Scripture. Historical reports are explicitly not evidence for current live functionality.
+https://github.com/getbible/v2 and https://api.getbible.net/v2/translations.json
+The adapter reads complete-translation JSON and distribution-license metadata for each edition. It does not infer redistribution permission from the host's generic terms or the code repository license.
+
+## HelloAO / Free Use Bible API
+
+https://bible.helloao.org/docs/reference/translations/simplified.html
+The adapter reads complete.simple.json and an independent book inventory. Edition rights are checked against exact eBible identifiers or a narrowly scoped primary Berean declaration at https://berean.bible/licensing.htm. No blanket license is inferred for all hosted translations.
+
+## Policy and attribution
+
+Recognized Public Domain, CC0, CC BY and CC BY-SA may pass the application's conservative policy when metadata is consistent and downloading/redistribution are allowed. Unknown, contradictory, NC and ND declarations do not pass. Passing a parser is not a jurisdiction-specific legal opinion. Raw license evidence, source URLs, hashes, notices and decisions are retained. The bot includes edition/source/license attribution with publications.
+
+Primary-source documentation consulted on 2026-09-22. Full live corpus acquisition was not executed in this preparation environment. Runtime dependencies retain their respective licenses; the installer records the installed package versions. No proprietary binaries, font files, private secrets or commercial Bible dumps are included.

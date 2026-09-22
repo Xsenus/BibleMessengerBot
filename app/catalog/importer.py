@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 from app.catalog.models import DownloadedTranslation, TranslationMeta, VerseReference
 from app.catalog.references import pair_verses, parse_reference_lines, with_ordinals
-from app.catalog.audit import audit_corpus
+from app.catalog.audit import audit_corpus, CorpusAudit
 from app.catalog.source import SOURCE_REVISION
 from app.catalog.policy import decide_license
 from app.services.locks import lock_key
@@ -128,10 +128,17 @@ async def import_translation(
     references: list[VerseReference],
     *,
     batch_size: int = 2000,
+    source_name: str = "BibleNLP/eBible",
+    source_revision: str = SOURCE_REVISION,
+    prepared_records: list | None = None,
+    prepared_audit: CorpusAudit | None = None,
 ) -> dict[str, Any]:
     metadata = downloaded.metadata
-    text_lines = downloaded.path.read_text(encoding="utf-8-sig").splitlines()
-    records = pair_verses(references, text_lines)
+    if prepared_records is None:
+        text_lines = downloaded.path.read_text(encoding="utf-8-sig").splitlines()
+        records = pair_verses(references, text_lines)
+    else:
+        records = prepared_records
     if not records:
         raise ValueError(f"Translation {metadata.translation_id} contains no nonblank verses")
 
@@ -140,14 +147,14 @@ async def import_translation(
         raise ValueError(f'License rejected at import boundary: {decision.reason}')
     if hashlib.sha256(downloaded.path.read_bytes()).hexdigest() != downloaded.sha256:
         raise ValueError('Downloaded source checksum changed before import')
-    audit = audit_corpus(metadata, references, records)
+    audit = prepared_audit or audit_corpus(metadata, references, records)
     reference_sha = hashlib.sha256('\n'.join(f'{r.book_code} {r.chapter}:{r.verse}' for r in references).encode()).hexdigest()
     actual_books = audit.books
     actual_nonempty = sum(1 for record in records if record[3] and not record[4])
     license_info = metadata.license
 
     async with connection.transaction():
-        await connection.execute('SELECT pg_advisory_xact_lock($1)', lock_key('edition', metadata.translation_id))
+        await connection.execute('SELECT pg_advisory_xact_lock($1)', lock_key('edition', source_name + ':' + metadata.translation_id))
         await ensure_reference_books(connection, references)
         language_id = await connection.fetchval(
             """
@@ -178,7 +185,7 @@ async def import_translation(
                 ot_books, nt_books, dc_books, book_count, verse_count,
                 nonempty_verse_count, metadata
             ) VALUES(
-                $1, 'BibleNLP/eBible', $2, $3, NULLIF($4, ''), $5, $6,
+                $1, $27, $2, $3, NULLIF($4, ''), $5, $6,
                 NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''),
                 NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''), $14, $15,
                 $16, now(), true, $17, $18, $19, $20, $21, $22, $23, $24, $25,
@@ -240,6 +247,7 @@ async def import_translation(
             len(records),
             actual_nonempty,
             _metadata_json(metadata),
+            source_name,
         )
 
         await connection.execute("DELETE FROM verses WHERE translation_id = $1", translation_id)
@@ -274,7 +282,7 @@ async def import_translation(
             UPDATE translations SET audit_status=$2,source_revision=$3,reference_sha256=$4,
                 validation_report=$5::jsonb,canonical_66_complete=$6,nt_complete=$7 WHERE id=$1
         """, translation_id, 'passed_with_warnings' if audit.warnings else 'passed',
-             SOURCE_REVISION, reference_sha, json.dumps(audit.as_dict(),ensure_ascii=False),
+             source_revision, reference_sha, json.dumps(audit.as_dict(),ensure_ascii=False),
              audit.canonical_66_complete, audit.nt_complete)
 
     return {
@@ -288,11 +296,11 @@ async def import_translation(
         "source_url": downloaded.source_url,
         "audit": audit.as_dict(),
         "reference_sha256_normalized": reference_sha,
-        "source_revision": SOURCE_REVISION,
+        "source_revision": source_revision,
     }
 
 
-async def run_import(
+async def run_legacy_import(
     settings: Settings,
     *,
     refresh_catalog: bool = True,
@@ -306,7 +314,7 @@ async def run_import(
     from app.db import normalize_asyncpg_dsn, maintenance
     if not maintenance_owned:
         async with maintenance(settings):
-            return await run_import(settings,refresh_catalog=refresh_catalog,
+            return await run_legacy_import(settings,refresh_catalog=refresh_catalog,
                 refresh_translations=refresh_translations,maintenance_owned=True)
     connection = await asyncpg.connect(normalize_asyncpg_dsn(settings.database_url), timeout=30)
     source = BibleNlpSource(
@@ -476,3 +484,14 @@ async def run_import(
         raise
     finally:
         await connection.close()
+
+
+async def run_import(settings: Settings, *, refresh_catalog: bool = True,
+                     refresh_translations: bool = False, maintenance_owned: bool = False) -> dict[str, Any]:
+    """Default bootstrap path: independent sources, per-edition transactions, durable reports."""
+    from app.catalog.multisource.runner import run_multisource
+    from app.catalog.multisource.types import ImportOptions
+    options = ImportOptions.from_env(profile=settings.bible_profile,
+        max_editions=settings.max_editions_per_language,refresh=refresh_translations)
+    return await run_multisource(settings,options,maintenance_owned=maintenance_owned,
+        refresh_catalog=refresh_catalog)

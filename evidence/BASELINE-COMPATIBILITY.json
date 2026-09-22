@@ -1,0 +1,15 @@
+{
+  "baseline_commit": "e7225af25d5ffa03f056613a84a01102d4de3215",
+  "unchanged_migrations": [
+    {
+      "path": "sql/schema.sql",
+      "unchanged": true,
+      "sha256": "b04fc3b2755bdfc15df4a4b3d311558634b89f36148f96322f6d95d5cb70ac91"
+    },
+    {
+      "path": "sql/migrations/002_hardening.sql",
+      "unchanged": true,
+      "sha256": "e1bd7266a760288bf4d1c00553956f3c7ec1aa90068835589bb50595767ac0a3"
+    }
+  ]
+}

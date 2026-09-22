@@ -7,7 +7,7 @@ log() { printf '\n%s\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 trap 'printf "\nInstallation stopped. No success is claimed. Inspect the last error and runtime-evidence/. Existing data was not deleted.\n" >&2' ERR
 if [[ $EUID -ne 0 ]]; then
-  exec sudo --preserve-env=BOT_TOKEN,BIBLE_PROFILE,MAX_EDITIONS_PER_LANGUAGE,REQUIRED_LANGUAGES bash "$0" "$@"
+  exec sudo --preserve-env=BOT_TOKEN,BIBLE_PROFILE,BIBLE_SOURCES,MAX_EDITIONS_PER_LANGUAGE,REQUIRED_LANGUAGES bash "$0" "$@"
 fi
 [[ -f /etc/os-release ]] || die "Unsupported OS"
 # shellcheck disable=SC1091
@@ -38,12 +38,14 @@ else
   TOKEN="${BOT_TOKEN:-}"
   if [[ -z "$TOKEN" ]]; then read -r -s -p 'Telegram bot token: ' TOKEN; printf '\n'; fi
   [[ "$TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]{30,}$ ]] || die "Invalid token format"
-  PROFILE="${BIBLE_PROFILE:-extended}"
+  PROFILE="${BIBLE_PROFILE:-all-open}"
   case "$PROFILE" in core|extended|all-open|none) ;; *) die "Invalid profile" ;; esac
   MAX_EDITIONS="${MAX_EDITIONS_PER_LANGUAGE:-2}"
   [[ "$MAX_EDITIONS" =~ ^[0-9]+$ ]] && (( MAX_EDITIONS>=1 && MAX_EDITIONS<=20 )) || die "Invalid edition limit"
   REQUIRED="${REQUIRED_LANGUAGES:-rus,eng}"
   [[ "$REQUIRED" =~ ^[a-z,]*$ ]] || die "Invalid required language list"
+  SOURCES="${BIBLE_SOURCES:-biblenlp,getbible,helloao}"
+  [[ "$SOURCES" =~ ^(biblenlp|getbible|helloao)(,(biblenlp|getbible|helloao))*$ ]] || die "Invalid BIBLE_SOURCES"
   PG_PASS="$(openssl rand -hex 24)"
   ADMIN_KEY="$(openssl rand -hex 32)"
   CLAIM="$(openssl rand -hex 16)"
@@ -57,6 +59,13 @@ DATABASE_URL=postgresql://biblebot:${PG_PASS}@postgres:5432/biblebot
 ADMIN_API_KEY=${ADMIN_KEY}
 ADMIN_HOST_PORT=8080
 BIBLE_PROFILE=${PROFILE}
+BIBLE_SOURCES=${BIBLE_SOURCES:-biblenlp,getbible,helloao}
+BIBLENLP_REVISION=latest
+IMPORT_RETRIES=5
+IMPORT_REQUESTS_PER_SECOND=2
+IMPORT_MIN_FREE_MB=1024
+IMPORT_MAX_CACHE_MB=30720
+IMPORT_MAX_FILE_MB=128
 MAX_EDITIONS_PER_LANGUAGE=${MAX_EDITIONS}
 REQUIRED_LANGUAGES=${REQUIRED}
 IMPORT_ON_START=true
@@ -108,7 +117,7 @@ for _ in $(seq 1 90); do
 done
 [[ "$ready" == true ]] || die "Runtime health checks failed; inspect docker compose logs bot worker admin"
 docker compose ps
-log 'Local installation checks passed. Start the bot in Telegram and use /settings.'
+log 'Runtime readiness checks passed. Check bootstrap/source reports for partial acquisition or rejected editions; use /settings in Telegram.'
 # Display local secrets only on the controlling terminal, never in evidence logs.
 CLAIM="$(sed -n 's/^OWNER_CLAIM_CODE=//p' .env)"
 printf '\nOwner claim (send privately to your bot): /claim %s\n' "$CLAIM"

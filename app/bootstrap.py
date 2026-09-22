@@ -40,7 +40,12 @@ async def bootstrap_locked(settings: Settings) -> dict[str,object]:
 
     result: dict[str, object] = {"schema": "applied", "static_data": "seeded"}
     if settings.import_on_start and settings.bible_profile != "none":
-        result["import"] = await run_import(settings,maintenance_owned=True)
+        from app.catalog.multisource.cli import report_summary
+        result["import"] = report_summary(await run_import(settings,maintenance_owned=True))
+        if result['import']['status']=='failed':
+            raise RuntimeError('No requested source editions could be acquired; see SOURCE_CACHE_DIR/reports/latest.json')
+        if result['import']['status']=='partial':
+            LOGGER.warning('Corpus acquisition is partial; usable editions will be checked before runtime starts')
     else:
         result["import"] = {"status": "skipped"}
 

@@ -36,6 +36,8 @@ async def create_or_update_subscription(connection: Any, *, chat_id: int, create
             AND is_active AND audit_status IN ('passed','passed_with_warnings')""",translation_id)
         if not translation:
             raise UserError('not_ready')
+        if mode=='topic_of_day' and not translation.get('numbering_system','BibleNLP Original versification').startswith('BibleNLP'):
+            raise UserError('no_result','No verified thematic reference mapping for this numbering system')
         if plan_code and ((plan_code.startswith('bible-') and not translation['canonical_66_complete'])
                  or (plan_code == 'new-testament-90' and not translation['nt_complete'])):
             raise UserError('invalid','The requested plan requires a structurally complete edition')

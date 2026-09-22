@@ -62,7 +62,7 @@ class Settings:
         if require_bot_token and not bot_token:
             raise RuntimeError("BOT_TOKEN is required")
 
-        profile = os.getenv("BIBLE_PROFILE", "extended").strip().lower()
+        profile = os.getenv("BIBLE_PROFILE", "all-open").strip().lower()
         if profile not in {"core", "extended", "all-open", "none"}:
             raise ValueError("BIBLE_PROFILE must be core, extended, all-open, or none")
 

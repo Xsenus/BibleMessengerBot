@@ -55,3 +55,16 @@ def test_real_message_chat_type_is_normalized():
     message=Message(message_id=1,date=datetime.now(timezone.utc),chat=Chat(id=101,type='private'),
         from_user=User(id=101,is_bot=False,first_name='Fixture'),text='/settings')
     assert enum_value(message.chat.type)=='private'
+
+
+@pytest.mark.asyncio
+async def test_all_open_language_menu_has_pages_after_first_ninety(monkeypatch):
+    from app.bot.handlers import language_menu
+    from app.services import bible
+    editions=[SimpleNamespace(language_code=f'a{i:03d}') for i in range(150)]
+    monkeypatch.setattr(bible,'list_translations',AsyncMock(return_value=editions))
+    text,markup=await language_menu(None,{'telegram_chat_id':-100123,'ui_language':'ru'},page=3)
+    assert '4/5' in text
+    labels=[button.text for row in markup.inline_keyboard for button in row]
+    assert 'a108' in labels and 'a143' in labels and 'a000' not in labels
+    assert all(len(button.callback_data.encode())<=64 for row in markup.inline_keyboard for button in row)

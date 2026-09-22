@@ -1,23 +1,23 @@
 {
   "project": "BibleMessengerBot",
-  "version": "1.2.0",
-  "generated_at_machine_clock": "2026-09-21T08:53:51.976819+00:00",
-  "release_context_date": "2026-09-21",
+  "version": "1.3.0",
+  "generated_at_machine_clock": "2026-09-22T03:29:00.468026+00:00",
+  "release_context_date": "2026-09-22",
   "status": "OFFLINE_PASS_LIVE_UNVERIFIED",
   "tests": {
-    "passed": 184,
+    "passed": 317,
     "failed": 0,
     "skipped_collection_units_or_cases": 2,
     "skipped": [
       {
         "name": "tests.test_aiogram_contracts",
         "reason": "collection skipped",
-        "detail": "('/mnt/data/bible_audit/repo/tests/test_aiogram_contracts.py', 8, 'Skipped: aiogram is unavailable in this audit environment')"
+        "detail": "('/mnt/data/bible_work/repo/tests/test_aiogram_contracts.py', 8, 'Skipped: aiogram is unavailable in this audit environment')"
       },
       {
         "name": "tests.test_postgres_integration",
         "reason": "collection skipped",
-        "detail": "('/mnt/data/bible_audit/repo/tests/test_postgres_integration.py', 18, 'Skipped: Real PostgreSQL integration requires asyncpg')"
+        "detail": "('/mnt/data/bible_work/repo/tests/test_postgres_integration.py', 18, 'Skipped: Real PostgreSQL integration requires asyncpg')"
       }
     ]
   },
@@ -78,6 +78,17 @@
       "log": "evidence/SHELL-diagnose.txt"
     },
     {
+      "name": "SHELL-fill_database",
+      "status": "passed",
+      "command": [
+        "bash",
+        "-n",
+        "fill_database.sh"
+      ],
+      "returncode": 0,
+      "log": "evidence/SHELL-fill_database.txt"
+    },
+    {
       "name": "SHELL-install",
       "status": "passed",
       "command": [
@@ -130,8 +141,10 @@
         "data/source_snapshot.json",
         "data/topics.json",
         "docker-compose.yml",
-        "evidence/BASELINE-ARCHIVE.json",
+        "evidence/BASELINE-COMPATIBILITY.json",
+        "evidence/CLI-CONFIG.json",
         "evidence/ENVIRONMENT.json",
+        "evidence/INPUT-ARCHIVE-VERIFICATION.json",
         "locales/ar.json",
         "locales/bn.json",
         "locales/de.json",
@@ -192,7 +205,16 @@
     }
   },
   "ui_catalogs": 24,
-  "target_import_languages": 56,
+  "extended_profile_language_codes": 56,
+  "default_profile": "all-open",
+  "default_language_limit": null,
+  "source_adapters": [
+    "biblenlp",
+    "getbible",
+    "helloao"
+  ],
+  "network_source_tests": "synthetic httpx streams; not real downloads",
+  "shell_tests": "fake Docker executable; not actual containers",
   "bundled_authentic_complete_editions": 0,
   "prebuilt_database_dump_included": false,
   "not_executed": [

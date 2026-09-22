@@ -17,7 +17,7 @@ async def verify_database(connection: Any, *, profile: str = 'extended', full: b
         JOIN languages l ON l.id=t.language_id WHERE t.is_active ORDER BY l.code,t.source_translation_id''')
     errors,editions = [],[]
     for row in rows:
-        item = {'id':row['source_translation_id'],'language':row['language_code'],'coverage':row['coverage'],
+        item = {'database_id':row['id'],'source':row['source_name'],'numbering':row.get('numbering_system'),'id':row['source_translation_id'],'language':row['language_code'],'coverage':row['coverage'],
             'audit_status':row['audit_status'],'books':row['book_count'],'verse_rows':row['verse_count'],
             'visible_verses':row['nonempty_verse_count'],'sha256':row['source_sha256'],
             'reference_sha256_normalized':row['reference_sha256'],'source_revision':row['source_revision'],
@@ -43,6 +43,13 @@ async def verify_database(connection: Any, *, profile: str = 'extended', full: b
                  (text<>'' AND NOT is_range_continuation AND (ordinal IS NULL OR verse_end<verse OR verse_end IS NULL)))''',row['id'])
             if invalid:
                 errors.append(f"{item['id']}: invalid verse/range indexes")
+            if row.get('content_sha256'):
+                from app.catalog.multisource.store import database_fingerprint
+                async with connection.transaction():
+                    actual_hash=await database_fingerprint(connection,row['id'],row['numbering_system'])
+                item['content_sha256_checked']=actual_hash==row['content_sha256']
+                if actual_hash!=row['content_sha256']:
+                    errors.append(f"{item['source']}:{item['id']}: content hash mismatch")
             item['physical'] = dict(physical)
             item['chapter_index'] = dict(chapters)
         report = json.loads(row['validation_report']) if isinstance(row['validation_report'],str) else row['validation_report']
