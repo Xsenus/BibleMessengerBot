@@ -14,7 +14,7 @@ class Envelope:
     """An immutable payload with the next unconfirmed message position."""
     id: int
     chat_id: int
-    chunks: tuple[str, ...]
+    chunks: tuple[str | dict, ...]
     next_chunk: int = 0
     thread_id: int | None = None
 
@@ -28,7 +28,7 @@ class Checkpoints(Protocol):
 
 class Sender(Protocol):
     """Known API rejections are SendError; network ambiguity is 'uncertain'."""
-    async def send(self, chat_id: int, text: str, thread_id: int | None) -> int: ...
+    async def send(self, chat_id: int, text: str | dict, thread_id: int | None) -> int: ...
 
 
 async def dispatch_chunk(envelope: Envelope, checkpoints: Checkpoints, sender: Sender) -> str:

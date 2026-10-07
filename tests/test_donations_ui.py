@@ -236,8 +236,8 @@ def test_support_discovery_is_localized_and_bible_stays_free():
     for locale in ('ru','en','ja'):
         assert {'donate','paysupport'} <= {c.command for c in commands_for(locale)}
         keyboard=main_keyboard(locale)
-        assert keyboard_command(keyboard.keyboard[-1][0].text)=='/donate'
-    assert main_keyboard('ja').keyboard[-1][0].text=='⭐ Support'
+        assert keyboard_command(keyboard.keyboard[-1][1].text)=='/donate'
+    assert main_keyboard('ja').keyboard[-1][1].text=='⭐ Support'
     for locale in ('ru','en'):
         assert '/paysupport' in onboarding_help(locale)
         assert '/donations' in ui.terms_text(locale)

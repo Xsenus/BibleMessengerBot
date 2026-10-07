@@ -1,0 +1,20 @@
+{
+  "generator": "Codex built-in image generation",
+  "date": "2026-10-07",
+  "purpose": "Illustrative interpretations, not source Bible content",
+  "shared_brief": "Detailed painterly realism; historically plausible biblical surroundings; blue and warm gold natural light; readable on a phone. No text, numbers, watermark, modern objects, graphic violence or anthropomorphic depiction of God.",
+  "images": [
+    {
+      "file": "synodal-EZK-36-13.png",
+      "edition": "getbible:synodal",
+      "reference": "EZK 36:13",
+      "brief": "Symbolic desolate ancient Judean terraces, olive tree, clouds and sunrise, evoking the troubled land described by Ezekiel; no people."
+    },
+    {
+      "file": "synodal-JDG-6-16.png",
+      "edition": "getbible:synodal",
+      "reference": "JDG 6:16",
+      "brief": "Gideon standing among ancient hills in linen clothing; gentle light suggests reassurance and courage, without combat or a personified divine figure."
+    }
+  ]
+}

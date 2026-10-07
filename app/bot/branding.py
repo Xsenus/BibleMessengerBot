@@ -21,7 +21,7 @@ PROFILE = {
         'name': 'Библия каждый день',
         'short_description': 'Стих дня, чтение Библии по главам и планы чтения. Лично, в группах и каналах.',
         'description': '📖 Библия каждый день\n\n'
-            'Читайте Синодальный перевод и World English Bible: стих дня, следующая глава, поиск и планы чтения.\n\n'
+            'Читайте Библию на разных языках: стих дня, главы, поиск по словам и адресам. Доступны древнееврейский Ветхий Завет и древнегреческий Новый Завет.\n\n'
             'Выберите удобное время и получайте чтение в личном чате, группе или канале. '
             'Прогресс сохраняется, рассылку можно поставить на паузу.\n\n'
             'Нажмите «Начать», чтобы выбрать перевод и настроить чтение.',
@@ -30,7 +30,7 @@ PROFILE = {
         'name': 'Bible Every Day',
         'short_description': 'Daily verses, chapter reading and Bible plans. Read privately or share with your group or channel.',
         'description': '📖 Bible Every Day\n\n'
-            'Read the World English Bible and Russian Synodal Bible: daily verses, the next chapter, search and reading plans.\n\n'
+            'Read the Bible in multiple languages: daily verses, chapters and search by words or reference. Hebrew Old Testament and ancient Greek New Testament editions are available.\n\n'
             'Choose your schedule for a private chat, group or channel. '
             'Your reading progress is saved, and you can pause deliveries anytime.\n\n'
             'Tap Start to choose a translation and begin reading.',
@@ -47,12 +47,12 @@ COMMAND_KEYS = [
 ]
 COMMAND_DESCRIPTIONS = {
     'ru': ['Открыть главное меню','Прочитать стих дня','Прочитать следующую главу','Прочитать случайный стих',
-        'Найти слова в Библии','Выбрать перевод Библии','Выбрать язык Библии','Выбрать язык интерфейса',
+        'Найти слова, главу или стих','Выбрать перевод Библии','Выбрать язык Библии','Выбрать язык интерфейса',
         'Настроить ежедневное чтение','Изменить время и часовой пояс','Посмотреть подписки и прогресс',
         'Приостановить рассылку','Возобновить рассылку',
         'Посмотреть источник и лицензию','Открыть настройки','Помощь и примеры команд'],
     'en': ['Open the main menu','Read the verse of the day','Read the next chapter','Read a random verse',
-        'Search words in the Bible','Choose a Bible translation','Choose the Bible language','Choose the interface language',
+        'Search words or Bible references','Choose a Bible translation','Choose the Bible language','Choose the interface language',
         'Set up daily reading','Change the time and time zone','View subscriptions and progress',
         'Pause deliveries','Resume deliveries',
         'View the source and license','Open settings','Help and command examples'],
@@ -67,6 +67,8 @@ def commands_for(locale: str) -> list[BotCommand]:
     commands.extend([
         BotCommand(command='donate', description='Добровольно поддержать бота ⭐' if language == 'ru' else 'Support the bot with Stars ⭐'),
         BotCommand(command='paysupport', description='Вопрос по платежу или возврат' if language == 'ru' else 'Payment issue or refund request'),
+        BotCommand(command='daily', description='Включить ежедневный стих' if language == 'ru' else 'Enable daily verse delivery'),
+        BotCommand(command='read', description='Найти главу или стих по адресу' if language == 'ru' else 'Read a chapter or verse by reference'),
     ])
     return commands
 

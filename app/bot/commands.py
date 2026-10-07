@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import re
 from app.services.errors import UserError
 
-MANAGEMENT = {'settings','language','ui','translation','translations','register','subscribe','channel',
+MANAGEMENT = {'settings','language','ui','translation','translations','register','subscribe','channel','daily','read',
     'pause','resume','unsubscribe','status','next','reset','resolve','thread','time','license','topics'}
 MODE_ALIASES = {'order':'sequential','порядок':'sequential','verse':'verse_of_day','стих':'verse_of_day',
     'topic':'topic_of_day','тема':'topic_of_day','plan':'reading_plan','план':'reading_plan'}

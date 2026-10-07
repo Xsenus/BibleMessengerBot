@@ -6,8 +6,8 @@ from datetime import datetime,timezone,timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 from app.services import bible
+from app.services import illustrations
 from app.services.errors import UserError
-from app.services.formatting import split_message
 from app.services.i18n import tr
 from app.services.locks import chat_lock
 from app.services.outbox import Envelope,dispatch_chunk
@@ -22,9 +22,9 @@ def decoded(value: Any) -> Any:
 
 async def insert_payload(connection: Any, chat: Any, translation: Any, text: str,
                          key: str, mode: str, progress: dict[str,Any], *,
-                         subscription: Any = None, max_length: int = 3900) -> int:
+                         subscription: Any = None, max_length: int = 3900, image_id: int | None = None) -> int:
     """Persist content and references atomically before the first send request."""
-    chunks = split_message(text,max_length)
+    chunks = illustrations.chunks(text,image_id,max_length)
     if not chunks:
         raise ValueError('An empty payload cannot enter the delivery queue')
     identifier = await connection.fetchval('''INSERT INTO delivery_log(
@@ -62,6 +62,7 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
         local_date = sub['next_run_at'].astimezone(ZoneInfo(sub['timezone'])).date()
         progress: dict[str,Any] = {'kind':'subscription','completed':False}
         mode = sub['mode']
+        image_id = None
         if mode in {'verse_of_day','topic_of_day'}:
             row = await bible.verse_of_day(connection,edition,str(chat['telegram_chat_id']),local_date) if mode=='verse_of_day' else None
             if mode=='topic_of_day':
@@ -70,6 +71,7 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
             if not row:
                 raise UserError('no_result')
             text = f"<b>{tr(locale,mode)}</b>\n\n"+await bible.render_verse(connection,row,edition,ui_language=locale)
+            image_id = await illustrations.lookup_or_queue(connection,row,edition)
         elif mode=='sequential':
             reference = await bible.next_chapter_reference(connection,edition['id'],sub['current_book_code'],sub['current_chapter'])
             if reference:
@@ -101,7 +103,7 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
         if not text:
             raise UserError('no_result')
         key = hashlib.sha256(f"{sub['id']}:{sub['revision']}:{sub['next_run_at'].isoformat()}".encode()).hexdigest()
-        return await insert_payload(connection,chat,edition,text,key,mode,progress,subscription=sub,max_length=max_length)
+        return await insert_payload(connection,chat,edition,text,key,mode,progress,subscription=sub,max_length=max_length,image_id=image_id)
 
 
 async def enqueue_next(connection: Any, chat: Any, translation: Any, request_id: str,

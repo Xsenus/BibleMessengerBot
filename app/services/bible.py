@@ -8,7 +8,7 @@ from datetime import date
 from typing import Any
 from urllib.parse import urlparse
 from app.catalog.policy import _identifier, _url_identifier
-from app.catalog.profiles import normalize_language_code
+from app.catalog.profiles import normalize_language_code, language_details
 from app.services.formatting import escape
 from app.services.i18n import native_ui_name, tr, ui_for_language
 
@@ -42,6 +42,14 @@ def display_language(language_code: str, ui_language: str) -> str:
              'en': {'rus': 'Russian', 'eng': 'English'}}
     if language_code in names.get(ui_language, {}):
         return names[ui_language][language_code]
+    if language_code=='zho':
+        language_code='cmn'
+    if language_code in {'hbo','grc'}:
+        return {'ru':{'hbo':'Древнееврейский','grc':'Древнегреческий'},
+                'en':{'hbo':'Ancient Hebrew','grc':'Ancient Greek'}}.get(ui_language,{'hbo':'Ancient Hebrew','grc':'Ancient Greek'})[language_code]
+    details = language_details(language_code)
+    if details:
+        return details.get('name_ru' if ui_language=='ru' else 'native_name',language_code)
     locale = ui_for_language(language_code)
     return native_ui_name(locale) if locale else language_code
 
@@ -83,8 +91,12 @@ async def find_translation(connection: Any, identifier: str | int | None,
     language = normalize_language_code(preferred_language)
     if not language:
         return None
-    return await connection.fetchrow(base+'''AND l.code=$1
+    result = await connection.fetchrow(base+'''AND l.code=$1
         ORDER BY t.canonical_66_complete DESC,t.nonempty_verse_count DESC,t.source_translation_id LIMIT 1''',language)
+    if result is None and language=='cmn':
+        result = await connection.fetchrow(base+'''AND l.code=$1
+            ORDER BY t.canonical_66_complete DESC,t.nonempty_verse_count DESC,t.source_translation_id LIMIT 1''','zho')
+    return result
 
 
 async def chat_translation(connection: Any, telegram_chat_id: int,
@@ -261,7 +273,7 @@ async def render_chapter(connection: Any, translation: Any, book_code: str, chap
     if not visible:
         return None
     name = await _book_name(connection,book_code,translation['language_code'],translation['id'])
-    body = '\n'.join(f"<b>{verse_label(r)}</b> {escape(r['text'])}" for r in visible)
+    body = '\n'.join(f"<b>[{verse_label(r)}]</b> {escape(r['text'])}" for r in visible)
     return f'<b>{escape(name)} {chapter}</b>\n\n{body}'+('\n\n'+attribution(translation,ui_language) if with_attribution else '')
 
 

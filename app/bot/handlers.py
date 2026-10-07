@@ -18,6 +18,7 @@ from app.bot.transport import TelegramSender
 from app.bot.ui import main_keyboard,keyboard_command,welcome_text,menu_hint,search_prompt,onboarding_help,send_welcome
 from app.catalog.profiles import normalize_language_code
 from app.services import bible
+from app.services import passage,illustrations
 from app.services.accounts import upsert_user,upsert_chat,claim_owner
 from app.services.destinations import configure_chat,ensure_resolved,cancel_queued
 from app.services.errors import UserError,SendError
@@ -90,7 +91,7 @@ async def destination(connection: Any, bot: Any, current_chat: Any, actor_id: in
 async def reply(bot: Any, connection: Any, settings: Any, chat_id: int, text: str,
                 markup: Any = None, thread: int | None = None) -> None:
     """Split HTML safely and never automatically replay an ambiguous UI response."""
-    parts = split_message(text,settings.max_message_length)
+    parts = illustrations.chunks(text,getattr(text,'image_id',None),settings.max_message_length)
     sender = TelegramSender(bot,connection,settings)
     for index,part in enumerate(parts):
         try:
@@ -112,7 +113,16 @@ def settings_keyboard(chat: Any) -> InlineKeyboardMarkup:
         [button(tr(locale,'edition'),'editions',identifier,'0'),button(tr(locale,'mode'),'modes',identifier)],
         [button(tr(locale,'pause'),'pause',identifier),button(tr(locale,'resume'),'resume',identifier)],
         [button(tr(locale,'status'),'status',identifier),button(tr(locale,'time'),'timehelp',identifier)]]
+    rows.append([button('🔔 Стих каждый день' if locale=='ru' else '🔔 Daily verse','daily',identifier)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def daily_confirmation(subscription: Any, locale: str) -> str:
+    clock = subscription['send_time'].strftime('%H:%M')
+    zone = escape(subscription['timezone'])
+    if locale=='ru':
+        return f'🔔 <b>Ежедневный стих включён</b>\nКаждый день в <b>{clock}</b> · {zone}\n\nИзменить время: /time · Отключить: /daily off'
+    return f'🔔 <b>Daily verse enabled</b>\nEvery day at <b>{clock}</b> · {zone}\n\nChange schedule: /time · Turn off: /daily off'
 
 
 async def settings_text(connection: Any, chat: Any) -> str:
@@ -211,6 +221,22 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         return menu_hint(locale),None
     if name=='search' and not args:
         return search_prompt(locale),None
+    if name=='read' and not args:
+        return search_prompt(locale),None
+    if name=='daily':
+        if args==['off']:
+            await set_enabled(connection,chat['telegram_chat_id'],False,'verse_of_day')
+            return ('🔕 Ежедневный стих отключён.' if locale=='ru' else '🔕 Daily verse disabled.'),settings_keyboard(chat)
+        if len(args)>2:
+            raise UserError('invalid')
+        edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
+        if not edition:
+            raise UserError('not_ready')
+        sub = await create_or_update_subscription(connection,chat_id=chat['telegram_chat_id'],created_by=user.id,
+            translation_id=edition['id'],mode='verse_of_day',
+            send_time=parse_hhmm(args[0] if args else settings.default_send_time),
+            timezone_name=args[1] if len(args)>1 else chat['timezone'])
+        return daily_confirmation(sub,locale),settings_keyboard(chat)
     if name=='claim':
         if enum_value(message.chat.type)!='private':
             raise UserError('private_only')
@@ -327,12 +353,23 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
     elif name=='topic':
         result = await bible.topic_verse(connection,edition,args[0] if args else None,str(chat['telegram_chat_id']),local_date)
         row = result[1] if result else None
-    elif name=='search':
+    elif name in {'search','read'}:
+        result = await passage.lookup(connection,edition,' '.join(args))
+        if result:
+            text = await passage.render(connection,edition,result,locale)
+            if len(result[2])==1:
+                text = await illustrations.decorate(connection,text,result[2][0],edition)
+            return text,None
+        if name=='read':
+            return search_prompt(locale),None
         rows = await bible.search_verses(connection,edition['id'],' '.join(args),5)
         return '\n\n'.join([await bible.render_verse(connection,r,edition,ui_language=locale) for r in rows]) or tr(locale,'no_result'),None
     else:
         raise UserError('invalid')
-    return await bible.render_verse(connection,row,edition,ui_language=locale) if row else tr(locale,'no_result'),None
+    if row:
+        text = await bible.render_verse(connection,row,edition,ui_language=locale)
+        return await illustrations.decorate(connection,text,row,edition),None
+    return tr(locale,'no_result'),None
 
 
 async def language_menu(connection: Any, chat: Any, page: int=0) -> tuple[str,Any]:
@@ -341,7 +378,7 @@ async def language_menu(connection: Any, chat: Any, page: int=0) -> tuple[str,An
     codes = sorted({e.language_code for e in editions})
     page=max(0,min(page,max((len(codes)-1)//36,0)))
     chosen=codes[page*36:page*36+36]
-    rows = [[button(code,'lang',chat['telegram_chat_id'],code) for code in chosen[i:i+3]] for i in range(0,len(chosen),3)]
+    rows = [[button(bible.display_language(code,chat['ui_language']),'lang',chat['telegram_chat_id'],code) for code in chosen[i:i+3]] for i in range(0,len(chosen),3)]
     navigation=[]
     for delta,key in [(-1,'previous_page'),(1,'next_page')]:
         if 0<=page+delta and (page+delta)*36<len(codes):
@@ -441,7 +478,14 @@ async def private_text_handler(message: Message,bot: Any,db_pool: Any,settings: 
     """Route exact navigation labels through the usual authorization and error handling."""
     if enum_value(message.chat.type)!='private':
         return
-    command = keyboard_command(message.text or '') or '/menu'
+    content = message.text or ''
+    command = keyboard_command(content)
+    if command is None:
+        try:
+            reference = passage.parse_reference(content)
+        except UserError:
+            reference = True
+        command = '/read '+content if reference else '/menu'
     await command_handler(message.model_copy(update={'text':command}),bot,db_pool,settings)
 
 
@@ -497,6 +541,14 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
                 text,markup = modes_menu(chat)
             elif action=='status':
                 text,markup = await status_text(connection,chat),settings_keyboard(chat)
+            elif action=='daily':
+                edition = await bible.chat_translation(connection,chat_id)
+                if not edition:
+                    raise UserError('not_ready')
+                sub = await create_or_update_subscription(connection,chat_id=chat_id,created_by=callback.from_user.id,
+                    translation_id=edition['id'],mode='verse_of_day',
+                    send_time=parse_hhmm(settings.default_send_time),timezone_name=chat['timezone'])
+                text,markup = daily_confirmation(sub,locale),settings_keyboard(chat)
             elif action=='timehelp':
                 suffix = f" {chat_id}" if chat_id<0 else ''
                 text,markup = f"{tr(locale,'time')}: <code>/time 09:00 {escape(chat['timezone'])}{suffix}</code>",None

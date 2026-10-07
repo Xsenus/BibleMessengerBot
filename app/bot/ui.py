@@ -22,7 +22,7 @@ WELCOME_PATH = Path(__file__).resolve().parents[2] / 'assets' / 'brand' / 'welco
 BUTTONS = (
     ('next', '📖'), ('today', '🌅'), ('random', '🎲'),
     ('search', '🔎'), ('settings', '⚙️'), ('help', '❔'),
-    ('donate', '⭐'),
+    ('daily', '🔔'), ('donate', '⭐'),
 )
 LABELS = {
     'ru': {'next': 'Читать дальше', 'today': 'Стих дня', 'help': 'Помощь'},
@@ -33,6 +33,8 @@ LABELS = {
 def button_label(locale: str, command: str, emoji: str) -> str:
     if command == 'donate':
         return f"{emoji} " + ('Поддержать' if locale == 'ru' else 'Support')
+    if command == 'daily':
+        return f"{emoji} " + ('Стих каждый день' if locale == 'ru' else 'Daily verse')
     return f"{emoji} {LABELS.get(locale, {}).get(command, tr(locale, command))}"
 
 
@@ -66,7 +68,8 @@ def welcome_text(locale: str, edition_title: str | None = None) -> str:
             '📖 <b>Библия — рядом каждый день</b>\n\n'
             'Читайте в своём темпе, находите нужные слова и возвращайтесь к чтению.\n\n'
             '📖 <b>Читать дальше</b> — следующая глава с сохранением прогресса.\n'
-            '🌅 <b>Стих дня</b> — короткий отрывок на сегодня.\n'
+            '🌅 <b>Стих дня</b> — отрывок на сегодня по нажатию.\n'
+            '🔔 <b>Стих каждый день</b> — включить ежедневную доставку.\n'
             '⚙️ <b>Настройки</b> — перевод, язык и ежедневная рассылка.\n\n'
             'Выберите действие на клавиатуре внизу ↓'
         )
@@ -75,7 +78,8 @@ def welcome_text(locale: str, edition_title: str | None = None) -> str:
             '📖 <b>A little time for the Bible, every day</b>\n\n'
             'Read at your own pace, find a passage, and continue where you left off.\n\n'
             '📖 <b>Continue reading</b> — the next chapter, with progress saved.\n'
-            '🌅 <b>Verse of the day</b> — a short passage for today.\n'
+            '🌅 <b>Verse of the day</b> — today’s passage on request.\n'
+            '🔔 <b>Daily verse</b> — turn on daily delivery.\n'
             '⚙️ <b>Settings</b> — edition, language, and daily deliveries.\n\n'
             'Choose an action on the keyboard below ↓'
         )
@@ -148,13 +152,15 @@ def menu_hint(locale: str) -> str:
 def search_prompt(locale: str) -> str:
     if locale == 'ru':
         return ('🔎 <b>Найти слова в Библии</b>\n\n'
-                'Отправьте команду и слово или короткую фразу:\n'
-                '<code>/search любовь</code>\n\n'
+            'Отправьте адрес главы или стиха:\n'
+            '<code>Иоанна 3</code>\n<code>Иоанна 3:16</code>\n<code>Пс 118:55–57</code>\n\n'
+            'Поиск слова или фразы: <code>/search любовь</code>\n\n'
                 'Поиск идёт по выбранному переводу. Изменить его: /settings')
     if locale == 'en':
         return ('🔎 <b>Find words in the Bible</b>\n\n'
-                'Send the command followed by a word or short phrase:\n'
-                '<code>/search love</code>\n\n'
+            'Send a chapter or verse address:\n'
+            '<code>John 3</code>\n<code>John 3:16</code>\n<code>Psalm 119:55–57</code>\n\n'
+            'Search words: <code>/search love</code>\n\n'
                 'Search uses your selected edition. Change it in /settings')
     return (f"🔎 <b>{escape(tr(locale, 'search'))}</b>\n\n<code>/search …</code>\n\n"
             f"{escape(tr(locale, 'edition'))}: /settings")
@@ -168,10 +174,12 @@ def onboarding_help(locale: str) -> str | None:
             '/next — следующая глава; прогресс сохраняется после доставки\n'
             '/today — стих дня · /random — случайный стих\n'
             '/search любовь — поиск по выбранному переводу\n\n'
+            '/read Иоанна 3:16 — стих; Иоанна 3 — глава\n\n'
             '<b>Выбрать перевод</b>\n'
             '/settings — язык, перевод и режим чтения\n'
             '/translations — доступные издания · /license — источник текста\n\n'
             '<b>Читать каждый день</b>\n'
+            '/daily — включить стих каждый день · /daily off — отключить\n'
             '<code>/subscribe verse 09:00 Europe/Moscow</code>\n'
             '<code>/subscribe reading_plan 09:00 Europe/Moscow bible-365</code>\n'
             '/time — время рассылки · /status — прогресс\n'
@@ -198,10 +206,12 @@ def onboarding_help(locale: str) -> str | None:
             '/next — the next chapter; progress is saved after delivery\n'
             '/today — verse of the day · /random — random verse\n'
             '/search love — search your selected edition\n\n'
+            '/read John 3:16 — a verse; John 3 — a chapter\n\n'
             '<b>Choose an edition</b>\n'
             '/settings — language, edition, and reading mode\n'
             '/translations — available editions · /license — text source\n\n'
             '<b>Read every day</b>\n'
+            '/daily — enable daily verses · /daily off — disable\n'
             '<code>/subscribe verse 09:00 Europe/London</code>\n'
             '<code>/subscribe reading_plan 09:00 Europe/London bible-365</code>\n'
             '/time — delivery time · /status — progress\n'

@@ -1,0 +1,41 @@
+{
+  "project": "BibleMessengerBot",
+  "version": "1.3.2",
+  "date": "2026-09-22",
+  "status": "LIVE_API_VALIDATED_PAYMENT_UNTESTED",
+  "tested_code_commit": "74e1786adc33f8939ff797fa2c73d06936d2e024",
+  "tests": {
+    "linux_postgresql": {
+      "passed": 581,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 27.34
+    },
+    "windows": {
+      "passed": 538,
+      "failed": 0,
+      "skipped": 43,
+      "skip_reason": "35 PostgreSQL and 8 POSIX tests executed separately on VPS"
+    }
+  },
+  "ci": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/35717226589",
+  "live_checks": {
+    "all_four_services_healthy": true,
+    "schema_migrations": 4,
+    "corpus_audit": "passed",
+    "menu_commands": 18,
+    "invoice_link_api": "accepted; unpublished; order rolled back",
+    "stars_balance_api": "accepted",
+    "stars_history_api": "accepted",
+    "pre_checkout_handler": true,
+    "backup_before_upgrade": true
+  },
+  "actual_payment_executed": false,
+  "actual_refund_executed": false,
+  "previous_release_evidence": "docs/history/1.3.1/RELEASE-AUDIT.json",
+  "limitations": [
+    "No live paid transaction or live refund was executed.",
+    "Operator must read and answer payment support requests through the server CLI; no automatic owner notification.",
+    "Reconciliation recovers known orders; it cannot reconstruct an order erased from all database backups."
+  ]
+}

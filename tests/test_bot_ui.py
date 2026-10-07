@@ -30,13 +30,13 @@ def pool_for(connection):
 
 
 @pytest.mark.parametrize('locale', sorted(available_ui()))
-def test_every_localized_keyboard_has_seven_working_commands(locale):
+def test_every_localized_keyboard_has_eight_working_commands(locale):
     keyboard = main_keyboard(locale)
     assert keyboard.resize_keyboard and keyboard.is_persistent and not keyboard.one_time_keyboard
-    assert [len(row) for row in keyboard.keyboard] == [2, 2, 2, 1]
+    assert [len(row) for row in keyboard.keyboard] == [2, 2, 2, 2]
     labels = [button.text for row in keyboard.keyboard for button in row]
     assert [keyboard_command(label) for label in labels] == ['/' + name for name, _ in BUTTONS]
-    assert len(set(labels)) == 7
+    assert len(set(labels)) == 8
     assert split_message(welcome_text(locale, 'Fixture <Edition> & text'))
     assert split_message(search_prompt(locale))
     assert split_message(handlers.help_text(locale))
