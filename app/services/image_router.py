@@ -13,10 +13,17 @@ from app.services.locks import lock_key
 
 
 def providers(settings):
+    from app.services.openai_credentials import image_keys
     keys = {"openai": settings.key, **settings.extra_keys}
     return [
-        api.Provider(name, keys.get(name, "")) for name in settings.provider_order if keys.get(name)
+        api.Provider(name, key) for name in settings.provider_order
+        for key in (image_keys(settings.key, settings.openai_keys) if name == 'openai' else (keys.get(name, ''),))
+        if key
     ]
+
+
+def attempt_limit(settings):
+    return max(5, len(providers(settings)))
 
 
 def fingerprint(provider):
@@ -24,13 +31,11 @@ def fingerprint(provider):
 
 
 async def configure(connection, settings):
-    """Key rotation resets only that provider's breaker, never paid uncertainty."""
+    """New keys get independent breakers; existing cooldowns/history are retained."""
     for provider in providers(settings):
         await connection.execute(
             """INSERT INTO image_provider_health(provider,key_fingerprint)
-            VALUES($1,$2) ON CONFLICT(provider) DO UPDATE SET key_fingerprint=EXCLUDED.key_fingerprint,
-            failures=0,blocked_until=NULL,error_code=NULL,updated_at=now()
-            WHERE image_provider_health.key_fingerprint<>EXCLUDED.key_fingerprint""",
+            VALUES($1,$2) ON CONFLICT(provider,key_fingerprint) DO NOTHING""",
             provider.name,
             fingerprint(provider),
         )
@@ -39,7 +44,7 @@ async def configure(connection, settings):
     if providers(settings):
         await connection.execute("""UPDATE image_generation_jobs SET state='retry',retry_at=NULL
             WHERE state='failed' AND error_code IN ('auth','missing_key','quota','providers_exhausted')
-            AND attempts<5""")
+            AND attempts<$1""", attempt_limit(settings))
 
 
 async def reserve(connection, job_id, settings):
@@ -49,7 +54,7 @@ async def reserve(connection, job_id, settings):
         job = await connection.fetchrow(
             "SELECT * FROM image_generation_jobs WHERE id=$1 FOR UPDATE", job_id
         )
-        if not job or job["state"] not in {"queued", "retry"} or job["attempts"] >= 5:
+        if not job or job["state"] not in {"queued", "retry"} or job["attempts"] >= attempt_limit(settings):
             return None, None, "budget_or_not_due"
         if job["retry_at"] and job["retry_at"] > datetime.now(UTC):
             return None, None, "budget_or_not_due"
@@ -57,15 +62,19 @@ async def reserve(connection, job_id, settings):
             "SELECT provider,key_fingerprint FROM image_generation_attempts WHERE job_id=$1", job_id
         )
         health = {
-            r["provider"]: r for r in await connection.fetch("SELECT * FROM image_provider_health")
+            (r["provider"], r["key_fingerprint"]): r for r in await connection.fetch("SELECT * FROM image_provider_health")
         }
-        usage = await connection.fetch("""SELECT provider,COALESCE(sum(reserved_usd),0) AS monthly,
+        usage = await connection.fetch("""SELECT provider,key_fingerprint,COALESCE(sum(reserved_usd),0) AS monthly,
             count(*) FILTER(WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
             FROM image_generation_attempts
             WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
-            GROUP BY provider""")
+            GROUP BY provider,key_fingerprint""")
         monthly_reserved = sum(r["monthly"] for r in usage)
-        daily_used = {r["provider"]: r["daily"] for r in usage}
+        daily_used = {}
+        credential_used = {}
+        for record in usage:
+            daily_used[record['provider']] = daily_used.get(record['provider'], 0) + record['daily']
+            credential_used[(record['provider'], record['key_fingerprint'])] = record['daily']
         candidates = []
         blocked = False
         daily_exhausted = False
@@ -76,10 +85,13 @@ async def reserve(connection, job_id, settings):
                 for r in used
             ):
                 continue
-            if daily_used.get(provider.name, 0) >= settings.daily_requests:
+            identifier = (provider.name, fingerprint(provider))
+            daily_count = (credential_used.get(identifier, 0) + credential_used.get(('openai', None), 0) if provider.name == 'openai'
+                           and settings.openai_daily_scope == 'key' else daily_used.get(provider.name, 0))
+            if daily_count >= settings.daily_requests:
                 daily_exhausted = True
                 continue
-            state = health.get(provider.name)
+            state = health.get(identifier)
             if (
                 state
                 and state["key_fingerprint"] == fingerprint(provider)
@@ -89,6 +101,9 @@ async def reserve(connection, job_id, settings):
                 blocked = True
                 continue
             candidates.append(provider)
+        # Preserve provider order, balancing usage only between keys of the same service.
+        candidates.sort(key=lambda p: (settings.provider_order.index(p.name),
+                                      credential_used.get((p.name, fingerprint(p)), 0)))
         if not candidates:
             if daily_exhausted:
                 # Keep the job eligible for the next UTC day; another provider
@@ -133,7 +148,7 @@ async def reserve(connection, job_id, settings):
         return attempt, provider, None
 
 
-async def fail(connection, job_id, attempt, provider, error):
+async def fail(connection, job_id, attempt, provider, error, *, max_attempts=5):
     async with connection.transaction():
         await connection.execute(
             "UPDATE image_generation_attempts SET state=$2,error_code=$3 WHERE id=$1",
@@ -143,7 +158,7 @@ async def fail(connection, job_id, attempt, provider, error):
         )
         # A moderation rejection is terminal for the source, not routed around.
         terminal = error.code == "moderation" or await connection.fetchval(
-            "SELECT attempts>=5 FROM image_generation_jobs WHERE id=$1", job_id
+            "SELECT attempts>=$2 FROM image_generation_jobs WHERE id=$1", job_id, max_attempts
         )
         await connection.execute(
             """UPDATE image_generation_jobs SET state=$2,error_code=$3,
@@ -157,7 +172,7 @@ async def fail(connection, job_id, attempt, provider, error):
             await connection.execute(
                 """INSERT INTO image_provider_health
                 (provider,key_fingerprint,failures,blocked_until,error_code) VALUES($1,$2,1,$3,$4)
-                ON CONFLICT(provider) DO UPDATE SET failures=image_provider_health.failures+1,
+                ON CONFLICT(provider,key_fingerprint) DO UPDATE SET failures=image_provider_health.failures+1,
                 blocked_until=EXCLUDED.blocked_until,error_code=EXCLUDED.error_code,updated_at=now()""",
                 provider.name,
                 fingerprint(provider),
@@ -210,7 +225,8 @@ async def process_job(connection, job_id, settings, *, generator=None):
     )
     resume = None
     if pending:
-        provider = next((p for p in providers(settings) if p.name == pending["provider"]), None)
+        provider = next((p for p in providers(settings) if p.name == pending["provider"]
+                         and fingerprint(p) == pending['key_fingerprint']), None)
         if not provider:
             return "providers_unavailable"
         attempt = pending["id"]
@@ -222,6 +238,7 @@ async def process_job(connection, job_id, settings, *, generator=None):
                 attempt,
                 provider,
                 api.GenerationError("remote_timeout", uncertain=True),
+                max_attempts=attempt_limit(settings),
             )
             return "remote_timeout"
     else:
@@ -286,8 +303,8 @@ async def process_job(connection, job_id, settings, *, generator=None):
                 request_id,
             )
             await connection.execute(
-                "UPDATE image_provider_health SET failures=0,blocked_until=NULL,error_code=NULL WHERE provider=$1",
-                provider.name,
+                "UPDATE image_provider_health SET failures=0,blocked_until=NULL,error_code=NULL WHERE provider=$1 AND key_fingerprint=$2",
+                provider.name, fingerprint(provider),
             )
         return "ready"
     except api.GenerationError as error:
@@ -300,7 +317,7 @@ async def process_job(connection, job_id, settings, *, generator=None):
                 job_id,
             )
             return "remote_pending"
-        await fail(connection, job_id, attempt, provider, error)
+        await fail(connection, job_id, attempt, provider, error, max_attempts=attempt_limit(settings))
         return error.code
     except Exception:
         # Failed persistence must never trigger another paid request.

@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
+from dataclasses import replace
 
 import asyncpg
 
@@ -41,24 +42,46 @@ async def run(args):
         if args.command == 'providers':
             from app.services import image_router, image_providers
             settings = artwork.ArtSettings.from_env()
-            configured = {p.name for p in image_router.providers(settings)}
-            health = {r['provider']: dict(r) for r in await c.fetch(
-                'SELECT provider,failures,blocked_until,error_code FROM image_provider_health')}
+            if settings.provider == 'openai':
+                settings = replace(settings, provider_order=('openai',))
+            configured = image_router.providers(settings)
+            health = {(r['provider'], r['key_fingerprint']): dict(r) for r in await c.fetch(
+                'SELECT provider,key_fingerprint,failures,blocked_until,error_code FROM image_provider_health')}
             usage = await c.fetch("""SELECT provider,COALESCE(sum(reserved_usd),0) AS monthly,
                 count(*) FILTER(WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
                 FROM image_generation_attempts
                 WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
                 GROUP BY provider""")
             daily = {r['provider']: r['daily'] for r in usage}
+            credential_usage = {(r['provider'], r['key_fingerprint']): r['daily'] for r in await c.fetch(
+                """SELECT provider,key_fingerprint,count(*) AS daily FROM image_generation_attempts
+                WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+                GROUP BY provider,key_fingerprint""")}
+            provider_status = []
+            for name in settings.provider_order:
+                keys = [p for p in configured if p.name == name]
+                credentials = []
+                for index, p in enumerate(keys, 1):
+                    identifier = (name, image_router.fingerprint(p))
+                    state = health.get(identifier, {})
+                    used = credential_usage.get(identifier, 0)
+                    credentials.append(dict(key_number=index, daily_requests_used=used,
+                        failures=state.get('failures', 0), blocked_until=state.get('blocked_until'),
+                        error_code=state.get('error_code')))
+                unassigned = credential_usage.get((name, None), 0)
+                remaining = (sum(max(0, settings.daily_requests - p['daily_requests_used'] - unassigned) for p in credentials)
+                             if name == 'openai' and settings.openai_daily_scope == 'key'
+                             else max(0, settings.daily_requests - daily.get(name, 0)))
+                provider_status.append(dict(provider=name,model=image_providers.MODELS[name],
+                    configured=bool(keys),configured_keys=len(keys),daily_requests_used=daily.get(name, 0),
+                    unassigned_daily_requests=unassigned,
+                    daily_requests_remaining=remaining if keys else 0,credentials=credentials))
             return {'mode': settings.provider, 'order': settings.provider_order,
                     'daily_max_requests_per_provider': settings.daily_requests,
+                    'openai_daily_scope': settings.openai_daily_scope,
                     'monthly_reserved_limit_usd': str(settings.monthly_usd),
                     'monthly_reserved_usd': str(sum(r['monthly'] for r in usage)),
-                    'providers': [{'provider': name, 'model': image_providers.MODELS[name],
-                                   'daily_requests_used': daily.get(name, 0),
-                                   'daily_requests_remaining': max(0, settings.daily_requests - daily.get(name, 0)),
-                                   'configured': name in configured, **health.get(name, {})}
-                                  for name in settings.provider_order]}
+                    'providers': provider_status}
         if args.command == "stats":
             return [
                 dict(r)

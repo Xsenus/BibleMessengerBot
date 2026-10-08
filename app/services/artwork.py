@@ -29,14 +29,19 @@ class ArtSettings:
     reservation_usd: Decimal = Decimal("0.10")
     daily_requests: int = 10  # Per provider in auto mode; UTC day, including failures.
     extra_keys: dict = field(default_factory=dict, repr=False)
+    openai_keys: tuple = field(default=(), repr=False)
+    openai_daily_scope: str = 'provider'
     provider_order: tuple = ('openai', 'gemini', 'bfl', 'ideogram', 'stability')
 
     @classmethod
     def from_env(cls):
         from app.services.image_providers import KEY_ENV, NAMES
+        from app.services.openai_credentials import from_env as credential_pool
         result = cls(
             provider=os.getenv("ILLUSTRATION_PROVIDER", "manual"),
             key=os.getenv("OPENAI_API_KEY", ""),
+            openai_keys=credential_pool(),
+            openai_daily_scope=os.getenv('IMAGE_OPENAI_DAILY_SCOPE', 'provider'),
             monthly_usd=Decimal(os.getenv("IMAGE_MONTHLY_BUDGET_USD", "10")),
             daily_requests=int(os.getenv("IMAGE_DAILY_MAX_REQUESTS", "10")),
             extra_keys={name: os.getenv(env, '').strip() for name, env in KEY_ENV.items() if name != 'openai'},
@@ -50,6 +55,7 @@ class ArtSettings:
             or not result.monthly_usd.is_finite()
             or not Decimal("0") <= result.monthly_usd <= Decimal("1000")
             or not 1 <= result.daily_requests <= 100
+            or result.openai_daily_scope not in {'provider', 'key'}
         ):
             raise ValueError("Invalid artwork settings")
         return result

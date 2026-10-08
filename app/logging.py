@@ -13,6 +13,14 @@ def redact(value: str) -> str:
         if len(secret)>=8:
             value = value.replace(secret,'[REDACTED]')
     value = re.sub(r'\b\d{5,}:[A-Za-z0-9_-]{20,}', '[BOT_TOKEN]',value)
+    from app.services.openai_credentials import from_env as image_keys
+    try:
+        for secret in image_keys():
+            if len(secret) >= 8:
+                value = value.replace(secret, '[REDACTED]')
+    except ValueError:
+        pass
+    value = re.sub(r'\bsk-[A-Za-z0-9_-]{16,}', '[REDACTED]', value)
     return re.sub(r'(postgres(?:ql)?://[^:\s/@]+:)[^@\s]+@',r'\1[REDACTED]@',value)
 
 

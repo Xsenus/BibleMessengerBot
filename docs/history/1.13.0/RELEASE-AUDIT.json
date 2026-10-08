@@ -1,0 +1,96 @@
+{
+  "version": "1.13.0",
+  "status": "verified",
+  "verified_date": "2026-10-08",
+  "verified_code_commit": "92c730143b84dd219184279abad8d8b49e7e1cee",
+  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37788720718",
+  "tests": {
+    "github_linux_postgres": {
+      "passed": 767,
+      "skipped": 0,
+      "seconds": 83.45
+    },
+    "vps_linux_postgres": {
+      "passed": 767,
+      "skipped": 0,
+      "seconds": 115.86
+    },
+    "vps_final_voice_regressions": {
+      "passed": 17,
+      "skipped": 0,
+      "seconds": 27.49
+    },
+    "windows_before_final_normalization": {
+      "passed": 632,
+      "skipped": 134,
+      "seconds": 10.05
+    },
+    "compile": "passed",
+    "ruff_F_E9": "passed",
+    "shell_syntax": "passed",
+    "basic_secret_scan": "passed"
+  },
+  "production": {
+    "schema_migrations": 14,
+    "healthy_services": [
+      "postgres",
+      "bot",
+      "worker",
+      "admin",
+      "illustrator",
+      "speaker"
+    ],
+    "editions": 14,
+    "languages": 12,
+    "verse_rows": 414980,
+    "original_tables_preserved": 16,
+    "all_preservation_hashes_equal": true,
+    "new_voice_profile_column_excluded": true,
+    "encrypted_s3_backup_before_and_after_verified": true,
+    "backup_timer_active": true,
+    "local_models_ready": [
+      "rus",
+      "lat",
+      "grc"
+    ],
+    "telegram_existing_message_roundtrip": [
+      "rus",
+      "lat",
+      "grc",
+      "rus"
+    ],
+    "actual_audio_providers": [
+      "piper",
+      "mms",
+      "mms",
+      "piper"
+    ],
+    "same_message_photo_audio_buttons_confirmed": true,
+    "russian_cache_reused": true,
+    "original_selection_restored": true,
+    "selected_quality_cards_upgraded": 3,
+    "all_quality_cards_acknowledged": true,
+    "old_cached_quality_recordings_preserved": 4,
+    "paid_audio_attempts": 0,
+    "paid_audio_enabled": false,
+    "latin_letter_coverage": {
+      "verse_rows": 35809,
+      "unsupported_letters": 0
+    },
+    "ancient_greek_letter_coverage": {
+      "verse_rows": 7939,
+      "unsupported_letters": 0
+    }
+  },
+  "voice_models": {
+    "rus": "Piper ru_RU-denis-medium",
+    "lat": "facebook/mms-tts-lat",
+    "grc": "facebook/mms-tts-grc"
+  },
+  "limitations": [
+    "Synthetic voices do not guarantee correct stress for every name or a particular historical/liturgical pronunciation.",
+    "Meta MMS checkpoints are CC BY-NC 4.0; the application MIT license does not replace model terms.",
+    "MP3 decoding and letter coverage were verified; no human MOS or full-corpus listening test was performed.",
+    "Group permissions are covered by existing automated tests; no live third-party group test or new full restore was performed."
+  ]
+}

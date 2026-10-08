@@ -73,6 +73,10 @@ def check_status(response):
         "insufficient_quota",
         "billing_hard_limit_reached",
         "insufficient_credits",
+        "credit_balance_exhausted",
+        "organization_spend_limit_exceeded",
+        "project_spend_limit_exceeded",
+        "organization_usage_limit_exceeded",
     }:
         raise GenerationError("quota")
     if (

@@ -18,6 +18,7 @@ def test_auto_configuration_missing_keys_order_and_redaction(monkeypatch):
     monkeypatch.setenv("IMAGE_PROVIDER_ORDER", "bfl,gemini,openai,ideogram,stability")
     for name in api.KEY_ENV.values():
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv('OPENAI_API_KEYS', raising=False)
     for name in ("GEMINI_API_KEY", "BFL_API_KEY"):
         monkeypatch.setenv(name, "secret-value-" + name)
         assert "secret-value-" not in redact("secret-value-" + name)

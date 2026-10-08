@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import logging
+from dataclasses import replace
 
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
@@ -38,6 +38,8 @@ async def mirror(pool, cloud):
 async def worker():
     settings = Settings.from_env(require_bot_token=False)
     art = artwork.ArtSettings.from_env()
+    if art.provider == 'openai':
+        art = replace(art, provider_order=('openai',))
     cloud = cloud_backup.CloudSettings.from_env()
     await wait_for_database(settings)
     pool = await create_pool(settings)
@@ -51,20 +53,8 @@ async def worker():
             ):
                 raise RuntimeError("Another illustrator is running")
             await image_router.recover(owner)
-            if art.provider == 'auto':
+            if art.provider in {'auto', 'openai'}:
                 await image_router.configure(owner, art)
-            fingerprint = hashlib.sha256(art.key.encode()).hexdigest()
-            previous = await owner.fetchval(
-                "SELECT value FROM app_settings WHERE key='imagegen-key-fingerprint'"
-            )
-            if fingerprint != previous:
-                await owner.execute(
-                    "UPDATE image_generation_jobs SET state='queued',retry_at=NULL,error_code=NULL WHERE state='failed' AND error_code IN ('auth','missing_key')"
-                )
-                await owner.execute(
-                    "INSERT INTO app_settings(key,value) VALUES('imagegen-key-fingerprint',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
-                    fingerprint,
-                )
             beat = asyncio.create_task(heartbeat(pool))
             copies = asyncio.create_task(mirror(pool, cloud))
             while True:
@@ -72,25 +62,12 @@ async def worker():
                     await artwork.upgrade_queued_prompts(c)
                     await artwork.plan_ahead(c)
                     await artwork.dispatch_requests(c)
-                    if art.provider == 'auto':
-                        jobs = await artwork.due_jobs(c, max_attempts=5)
+                    if art.provider in {'auto', 'openai'}:
+                        jobs = await artwork.due_jobs(c, max_attempts=image_router.attempt_limit(art))
                         for job in jobs:
                             outcome = await image_router.process_job(c, job['id'], art)
                             LOGGER.info('Artwork job %s: %s', job['id'], outcome)
                             await artwork.dispatch_requests(c)
-                    if art.provider == "openai" and art.key:
-                        # Pause after authentication failure until the key is changed.
-                        auth_blocked = await c.fetchval(
-                            "SELECT EXISTS(SELECT 1 FROM image_generation_jobs WHERE state='failed' AND error_code='auth')"
-                        )
-                        if not auth_blocked:
-                            jobs = await artwork.due_jobs(c)
-                            for job in jobs:
-                                outcome = await artwork.process_job(c, job["id"], art)
-                                LOGGER.info("Artwork job %s: %s", job["id"], outcome)
-                                await artwork.dispatch_requests(c)
-                                if outcome in {"auth", "budget_or_not_due"}:
-                                    break
                 await asyncio.sleep(10)
     finally:
         for task in (beat, copies):

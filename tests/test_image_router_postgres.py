@@ -234,12 +234,15 @@ async def test_rotating_key_resets_only_its_breaker(db):
         c, replace(settings, extra_keys={**settings.extra_keys, "gemini": "new-fixture-key"})
     )
     assert (
-        await c.fetchval("SELECT blocked_until FROM image_provider_health WHERE provider='gemini'")
+        await c.fetchval("SELECT blocked_until FROM image_provider_health WHERE provider='gemini' AND key_fingerprint=$1",
+                         router.fingerprint(api.Provider('gemini', 'new-fixture-key')))
         is None
     )
     assert await c.fetchval(
         "SELECT blocked_until IS NOT NULL FROM image_provider_health WHERE provider='openai'"
     )
+    assert await c.fetchval("SELECT blocked_until IS NOT NULL FROM image_provider_health WHERE provider='gemini' AND key_fingerprint=$1",
+                           router.fingerprint(api.Provider('gemini', 'fixture-gemini')))
 
 
 async def test_source_change_during_external_generation_prevents_publication(db):
