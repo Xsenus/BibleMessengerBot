@@ -1,1 +1,66 @@
-{"version": "1.10.1", "status": "in_preparation"}
+{
+  "version": "1.10.1",
+  "status": "verified",
+  "verified_date": "2026-10-08",
+  "verified_code_commit": "bbb492d693118c1c87bc6e74847adeef982867a4",
+  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37744469278",
+  "tests": {
+    "github_linux_postgres": {
+      "passed": 725,
+      "skipped": 0,
+      "seconds": 109.35
+    },
+    "vps_daily_limits_postgres": {
+      "passed": 49,
+      "skipped": 0,
+      "seconds": 35.8
+    },
+    "vps_final_provider_adapters_and_router": {
+      "passed": 45,
+      "skipped": 0,
+      "seconds": 16.61
+    },
+    "windows": {
+      "passed": 619,
+      "skipped": 106,
+      "seconds": 10.83
+    },
+    "ruff": "passed"
+  },
+  "production": {
+    "healthy_services": [
+      "postgres",
+      "bot",
+      "worker",
+      "admin",
+      "illustrator"
+    ],
+    "schema_migrations": 11,
+    "editions": 14,
+    "languages": 12,
+    "provider_mode": "auto",
+    "configured_providers": [
+      "openai",
+      "ideogram"
+    ],
+    "daily_attempt_limit_per_provider": 10,
+    "monthly_reserved_limit_usd": "10",
+    "snapshot_monthly_reserved_usd": "1.4000",
+    "snapshot_attempts_today": {
+      "openai": 10,
+      "ideogram": 4
+    },
+    "snapshot_ready_images": 14,
+    "live_ideogram_generations_succeeded": 3,
+    "acknowledged_waiting_cards_updated": 3,
+    "telegram_edits_confirmed": true,
+    "legacy_uncertain_job_preserved": true,
+    "schema_change": false
+  },
+  "limitations": [
+    "Gemini, BFL and Stability live credentials/results are not verified.",
+    "One Ideogram response could not be processed; its paid reservation remains uncertain and is not retried with the same provider/key.",
+    "The monthly reserve is an internal bound, not a provider invoice.",
+    "No new full database restore was performed."
+  ]
+}
