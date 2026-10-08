@@ -1,9 +1,9 @@
 [Unit]
-Description=Daily BibleMessengerBot PostgreSQL backup
+Description=Daily encrypted BibleMessengerBot S3 backup
 
 [Timer]
-OnCalendar=daily
-RandomizedDelaySec=15m
+OnCalendar=*-*-* 01:30:00 Asia/Novosibirsk
+RandomizedDelaySec=5m
 Persistent=true
 
 [Install]

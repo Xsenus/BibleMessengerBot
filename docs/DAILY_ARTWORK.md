@@ -21,3 +21,6 @@
 Проверка: `docker compose logs --tail=100 illustrator`; состояние очереди — таблицы `image_generation_jobs`, `image_generation_attempts`, `image_generation_targets`. Не публикуйте prompts с личными данными, .env, пользовательские журналы и полные дампы.
 
 При обслуживании БД останавливайте `bot worker admin illustrator`; затем запускайте те же службы после миграций и аудита.
+
+
+Проверенные примеры API: [Притчи 15:14](../assets/verses/synodal-PRO-15-14.jpg), [Бытие 45:5](../assets/verses/synodal-GEN-45-5.jpg). [Точные prompts и SHA-256](../assets/verses/openai-examples.json). Они служат примерами; рабочие картинки хранятся в БД и S3, а не коммитятся автоматически.

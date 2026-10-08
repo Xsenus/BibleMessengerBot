@@ -78,7 +78,7 @@ docker compose run --rm --no-deps bootstrap python -m app.cli audit
 Продолжайте только после успешных тестов, bootstrap и аудита:
 
 ```bash
-docker compose up -d --no-deps bot worker admin
+docker compose up -d --no-deps bot worker admin illustrator
 docker compose ps
 curl --fail http://127.0.0.1:8080/ready
 ```

@@ -28,6 +28,10 @@
 |---|---|
 | `/daily [HH:MM] [timezone] [target]` | Включить ежедневный стих (по умолчанию 09:00 в часовом поясе чата). |
 | `/daily off [target]` | Отключить только ежедневный стих. |
+| `/devotions [target]` | Включить утро 09:38 и вечер 21:13 в часовом поясе назначения. |
+| `/devotions off [target]` | Отключить утреннюю и вечернюю рассылки. |
+| `/subscribe morning 09:38 Asia/Novosibirsk [target]` | Задать отдельное время утреннего стиха. |
+| `/subscribe evening 21:13 Asia/Novosibirsk [target]` | Задать отдельное время вечернего стиха. |
 | `/settings [target]` | Настройки назначения. |
 | `/language ru [target]` | Выбрать язык Библии и доступный интерфейс. |
 | `/ui en [target]` | Изменить только язык интерфейса. |
@@ -36,7 +40,7 @@
 | `/subscribe sequential 09:00 Europe/Moscow [target]` | Последовательное чтение по расписанию. |
 | `/subscribe verse 09:00 Europe/Moscow [target]` | Ежедневный стих. |
 | `/subscribe reading_plan 09:00 Europe/Moscow bible-365 [target]` | План чтения. |
-| `/time 08:30 Europe/Moscow [target]` | Изменить время и часовой пояс. |
+| `/time 08:30 Europe/Moscow [target]` | Изменить время обычных подписок и общий часовой пояс, сохраняя часы утренней и вечерней. |
 | `/status [target]` | Подписки, прогресс и незавершённые задания. |
 | `/pause [mode] [target]` | Приостановить рассылку. |
 | `/resume [mode] [target]` | Возобновить разрешённые задания. |

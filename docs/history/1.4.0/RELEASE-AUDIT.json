@@ -1,0 +1,91 @@
+{
+  "project": "BibleMessengerBot",
+  "version": "1.4.0",
+  "date": "2026-10-07",
+  "status": "LIVE_READING_AND_PHOTO_VALIDATED_IMAGE_CORPUS_INCOMPLETE",
+  "tested_code_commit": "7888db705da96f47b09cbd0db6a311c70d0e9f7e",
+  "tests": {
+    "linux_postgresql": {
+      "passed": 608,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 30.12
+    },
+    "windows": {
+      "passed": 562,
+      "failed": 0,
+      "skipped": 46,
+      "seconds": 9.09
+    }
+  },
+  "ci": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37637242896",
+  "live_checks": {
+    "all_four_services_healthy": true,
+    "schema_migrations": 5,
+    "corpus_audit": "passed",
+    "editions": 14,
+    "languages": 12,
+    "verse_rows": 414980,
+    "menu_commands": 20,
+    "reference_queries": {
+      "Ин 3": {
+        "rows": 36,
+        "characters": 3599
+      },
+      "Ин. 3,16": {
+        "rows": 1,
+        "characters": 157
+      },
+      "1 Кор 13:4–8": {
+        "rows": 5,
+        "characters": 421
+      },
+      "Пс 22": {
+        "rows": 6,
+        "characters": 586
+      },
+      "Иез 36:13": {
+        "rows": 1,
+        "characters": 153
+      },
+      "hbo": {
+        "language_code": "hbo",
+        "source": "codex",
+        "text_length": 65
+      },
+      "grc": {
+        "language_code": "grc",
+        "source": "grc_tis",
+        "text_length": 136
+      },
+      "ukr": {
+        "language_code": "ukr",
+        "source": "ukr_pan",
+        "text_length": 114
+      },
+      "zh": {
+        "language_code": "zho",
+        "source": "chiunl",
+        "text_length": 27
+      }
+    },
+    "daily_photo_api_confirmed": true,
+    "image_file_id_cached": true,
+    "backup_before_upgrade": true
+  },
+  "illustrations": {
+    "ready": 2,
+    "corpus_complete": false,
+    "automatic_generator_configured": false,
+    "storage": "PostgreSQL bytea",
+    "maximum_binary_storage_bytes": 2147483648
+  },
+  "actual_payment_executed": false,
+  "actual_refund_executed": false,
+  "limitations": [
+    "Full illustration generation needs an approved provider, API credential, budget and expanded storage.",
+    "Hebrew is an Old Testament edition; ancient Greek is a New Testament edition, not original autograph manuscripts.",
+    "Russian currently has one audited imported translation. Additional Russian editions require usable text and appropriate rights.",
+    "API delivery acknowledgement does not prove the human recipient read the message."
+  ]
+}

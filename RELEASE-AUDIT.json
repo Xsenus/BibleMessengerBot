@@ -1,91 +1,118 @@
 {
   "project": "BibleMessengerBot",
-  "version": "1.4.0",
-  "date": "2026-10-07",
-  "status": "LIVE_READING_AND_PHOTO_VALIDATED_IMAGE_CORPUS_INCOMPLETE",
-  "tested_code_commit": "7888db705da96f47b09cbd0db6a311c70d0e9f7e",
+  "version": "1.5.0",
+  "date": "2026-10-08",
+  "status": "LIVE_ARTWORK_SCHEDULED_MORNING_AND_ENCRYPTED_S3_RESTORE_VALIDATED",
+  "tested_code_commit": "cac42a8c8780e81e8fa9eece26b5b261799ee4a3",
   "tests": {
-    "linux_postgresql": {
-      "passed": 608,
+    "github_linux_postgresql": {
+      "passed": 627,
       "failed": 0,
       "skipped": 0,
-      "seconds": 30.12
+      "seconds": 38.33
     },
-    "windows": {
-      "passed": 562,
+    "vps_initial_full_suite": {
+      "passed": 625,
       "failed": 0,
-      "skipped": 46,
-      "seconds": 9.09
+      "skipped": 0,
+      "seconds": 138.39
+    },
+    "vps_final_artwork_sql_checks": {
+      "passed": 19,
+      "failed": 0,
+      "seconds": 7.49
+    },
+    "windows_final_targeted_checks": {
+      "passed": 166,
+      "failed": 0,
+      "seconds": 1.92
     }
   },
-  "ci": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37637242896",
+  "ci": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37717485842",
   "live_checks": {
-    "all_four_services_healthy": true,
-    "schema_migrations": 5,
-    "corpus_audit": "passed",
+    "all_five_services_healthy": true,
+    "schema_migrations": 6,
     "editions": 14,
     "languages": 12,
     "verse_rows": 414980,
-    "menu_commands": 20,
-    "reference_queries": {
-      "Ин 3": {
-        "rows": 36,
-        "characters": 3599
-      },
-      "Ин. 3,16": {
-        "rows": 1,
-        "characters": 157
-      },
-      "1 Кор 13:4–8": {
-        "rows": 5,
-        "characters": 421
-      },
-      "Пс 22": {
-        "rows": 6,
-        "characters": 586
-      },
-      "Иез 36:13": {
-        "rows": 1,
-        "characters": 153
-      },
-      "hbo": {
-        "language_code": "hbo",
-        "source": "codex",
-        "text_length": 65
-      },
-      "grc": {
-        "language_code": "grc",
-        "source": "grc_tis",
-        "text_length": 136
-      },
-      "ukr": {
-        "language_code": "ukr",
-        "source": "ukr_pan",
-        "text_length": 114
-      },
-      "zh": {
-        "language_code": "zho",
-        "source": "chiunl",
-        "text_length": 27
-      }
+    "telegram_menu_commands": 21,
+    "menu_locales": [
+      "default",
+      "ru",
+      "en"
+    ],
+    "scheduled_daily_times": [
+      "09:00",
+      "09:38",
+      "21:13"
+    ],
+    "timezone": "Asia/Novosibirsk",
+    "existing_daily_sent_at": "2026-10-08T02:00:06.671825Z",
+    "morning_delivery": {
+      "status": "scheduled_morning_photo_sent",
+      "sent_at": "2026-10-08 02:38:02.706508+00:00",
+      "reference": "PRO 15:14",
+      "telegram_file_id_cached": true,
+      "saved_image_matches_s3": true,
+      "next_local_run": "2026-10-09 09:38:00+07:00"
     },
-    "daily_photo_api_confirmed": true,
-    "image_file_id_cached": true,
-    "backup_before_upgrade": true
+    "evening_first_natural_delivery": "not_observed_yet; scheduled 2026-10-08T14:13:00Z",
+    "today_three_references": [
+      "JDG 6:16",
+      "PRO 15:14",
+      "GEN 45:5"
+    ]
   },
-  "illustrations": {
-    "ready": 2,
-    "corpus_complete": false,
-    "automatic_generator_configured": false,
-    "storage": "PostgreSQL bytea",
-    "maximum_binary_storage_bytes": 2147483648
+  "artwork": {
+    "provider": "OpenAI Images API",
+    "model": "gpt-image-2",
+    "quality": "medium",
+    "size": "1536x1024",
+    "format": "JPEG",
+    "prompt_strategies": [
+      "historical",
+      "symbolic",
+      "watercolor"
+    ],
+    "successful_api_images": 5,
+    "uncertain_interrupted_requests": 1,
+    "api_attempts_today": 6,
+    "reserved_usd_this_month": "0.60",
+    "monthly_reservation_cap_usd": "10.00",
+    "daily_request_cap": 6,
+    "ready_images_in_database": 7,
+    "ready_images_verified_in_s3": 7,
+    "tomorrow_prepared_images": 2,
+    "tomorrow_evening": "queued; eligible after UTC daily cap resets at 07:00 Asia/Novosibirsk",
+    "entire_bible_image_collection_generated": false
   },
-  "actual_payment_executed": false,
-  "actual_refund_executed": false,
-  "limitations": [
-    "Full illustration generation needs an approved provider, API credential, budget and expanded storage.",
-    "Hebrew is an Old Testament edition; ancient Greek is a New Testament edition, not original autograph manuscripts.",
-    "Russian currently has one audited imported translation. Additional Russian editions require usable text and appropriate rights.",
-    "API delivery acknowledgement does not prove the human recipient read the message."
+  "backup": {
+    "database_encryption": "AES-256-GCM",
+    "s3_put_head_full_get_sha256_verified": true,
+    "s3_download_authenticated_decryption": true,
+    "full_restore_disposable_database": true,
+    "restored_verse_rows": 414980,
+    "restored_editions": 14,
+    "restored_schema_migrations": 6,
+    "restored_images": 7,
+    "all_image_sha256_match": true,
+    "full_restored_corpus_audit": "passed",
+    "production_database_replaced": false,
+    "temporary_databases_removed": true,
+    "offserver_decryption_with_independent_key": true,
+    "offserver_dump_bytes": 31338088,
+    "offserver_dump_sha256": "df541f6586b472e71dfab9b49ee19b9689eeb1b57da213515bf6df4c811749c1",
+    "daily_timer_enabled": true,
+    "daily_backup_local_time": "01:30-01:35 Asia/Novosibirsk",
+    "latest_timer_service_result": "success",
+    "automatic_cloud_object_deletion": false
+  },
+  "limits": [
+    "The whole Bible image collection is not generated.",
+    "The next natural evening delivery has not occurred at audit time.",
+    "Artwork budget counts conservative reservations, including unsuccessful or uncertain attempts; it is not a provider billing statement.",
+    "Themed keyword matching is curated for Russian/English; other languages use edition-native fallback.",
+    "Telegram acceptance confirms API delivery, not human viewing.",
+    "No real Stars payment or refund was performed in this release."
   ]
 }

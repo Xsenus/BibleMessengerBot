@@ -79,7 +79,7 @@ sudo systemctl enable --now bible-messenger-backup.timer
 systemctl list-timers bible-messenger-backup.timer
 ```
 
-Таймер с `Persistent=true` выполняет ежедневный запуск с небольшой случайной задержкой и догоняет пропущенный запуск после простоя. Результаты: `journalctl -u bible-messenger-backup.service`. Таймер не удаляет старые dump и не отправляет их вне сервера — следите за местом и независимыми копиями.
+По умолчанию время — 01:30 Asia/Novosibirsk, задержка до пяти минут. Таймер с `Persistent=true` выполняет ежедневный запуск с небольшой случайной задержкой и догоняет пропущенный запуск после простоя. Результаты: `journalctl -u bible-messenger-backup.service`. При настроенном S3 сценарий шифрует и отправляет dump, проверяет полное скачивание и затем оставляет до семи собственных локальных снимков в пределах 4 GiB, минимум последний. Без настроенного S3 сохраняются локальные копии с той же ротацией. При ошибке S3 ротация не выполняется. [Настройка и проверка восстановления](S3_BACKUP.md).
 
 ## Восстановление
 
@@ -96,7 +96,7 @@ sudo bash restore.sh backups/YOUR_BACKUP.dump --confirm-replace-data
 После проверки состояния:
 
 ```bash
-docker compose up -d --no-deps bot worker admin
+docker compose up -d --no-deps bot worker admin illustrator
 docker compose ps
 ```
 
