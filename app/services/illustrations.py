@@ -33,6 +33,50 @@ class ReadingText(str):
         return instance
 
 
+class ChapterText(ReadingText):
+    """Full chapter, with one editable first card and lossless continuations."""
+
+    def __new__(cls, text, first, continuations):
+        instance = super().__new__(cls, text, first.image_id, first.request_id)
+        instance.first, instance.continuations = first, continuations
+        return instance
+
+
+def chapter_source(rows):
+    visible = [dict(r) for r in rows if r['text'] and not r.get('is_range_continuation')]
+    if not visible:
+        return None
+    return dict(visible[0], artwork_scope='chapter', reading_rows=visible,
+                text='\n'.join(f"[{r['verse']}-{r.get('verse_end') or r['verse']}] {r['text']}" for r in visible))
+
+
+async def source_row(connection, image):
+    """Rebuild the exact source that defines this verse or complete chapter."""
+    from app.services import bible
+
+    if image.get('artwork_scope', 'verse') == 'chapter':
+        return chapter_source(await bible.chapter_rows(connection, image['translation_id'], image['book_code'], image['chapter']))
+    return await connection.fetchrow(
+        "SELECT book_code,chapter,verse,verse_end,text FROM verses WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4 AND text<>'' AND NOT is_range_continuation",
+        image['translation_id'], image['book_code'], image['chapter'], image['verse'])
+
+
+async def decorate_chapter(connection, text, translation, book_code, chapter, *, chat,
+                           request_key, thread_id=None, max_length=3900, rows=None):
+    from app.services import bible
+
+    row = chapter_source(rows if rows is not None else await bible.chapter_rows(connection, translation['id'], book_code, chapter))
+    if not row:
+        return text
+    fits = len(text.encode('utf-8')) <= 24000 and (max_length >= 3900 or utf16_length(plain_text(text)) <= max_length)
+    parts = [str(text)] if fits else split_message(text, min(max_length, 3900))
+    first = await decorate(connection, parts[0], row, translation, chat=chat,
+                           request_key=request_key, thread_id=thread_id)
+    if not isinstance(first, ReadingText):
+        return text
+    return ChapterText(text, first, parts[1:])
+
+
 async def bind_message(connection, chat_id, request_id, message_id):
     """Only a confirmed initial send may give a background edit its target."""
     if request_id is not None:
@@ -52,7 +96,7 @@ def identity(row, translation):
         row["book_code"],
         row["chapter"],
         row["verse"],
-        hashlib.sha256(row["text"].encode("utf-8")).hexdigest(),
+        hashlib.sha256((('chapter\0' if row.get('artwork_scope') == 'chapter' else '') + row["text"]).encode("utf-8")).hexdigest(),
     )
 
 
@@ -70,14 +114,15 @@ async def pending(connection, row, translation):
     """One open version per exact source text, including concurrent callers."""
     key = identity(row, translation)
     await connection.execute(
-        """INSERT INTO verse_illustrations(translation_id,book_code,chapter,verse,text_sha256)
-        VALUES($1,$2,$3,$4,$5) ON CONFLICT(translation_id,book_code,chapter,verse,text_sha256)
+        """INSERT INTO verse_illustrations(translation_id,book_code,chapter,verse,text_sha256,artwork_scope)
+        VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(translation_id,book_code,chapter,verse,text_sha256)
         WHERE status='pending' DO NOTHING""",
         key[0],
         key[1],
         key[2],
         key[3],
         key[4],
+        row.get('artwork_scope', 'verse'),
     )
     return await connection.fetchrow(
         """SELECT * FROM verse_illustrations WHERE translation_id=$1 AND book_code=$2
@@ -181,7 +226,10 @@ async def decorate(
 
 
 def chunks(text: str, image_id: int | None, max_length: int = 3900) -> list:
+    if isinstance(text, ChapterText):
+        return [*chunks(text.first, text.image_id, max_length), *text.continuations]
     if isinstance(text, ReadingText):
+        image_id = text.image_id if image_id is None else image_id
         if len(text.encode("utf-8")) > 24000:
             raise ValueError("Reading card exceeds the bounded rich-message size")
         return [
@@ -251,7 +299,7 @@ async def store(
             image_id,
             data,
             mime,
-            prompt[:10000],
+            prompt if row.get('artwork_scope') == 'chapter' else prompt[:10000],
             prompt_version,
         )
         if identifier is None:

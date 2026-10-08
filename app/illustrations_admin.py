@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import json
 from pathlib import Path
 
@@ -26,7 +25,8 @@ def parser():
     add.add_argument("--translation", required=True)
     add.add_argument("--book", required=True)
     add.add_argument("--chapter", type=int, required=True)
-    add.add_argument("--verse", type=int, required=True)
+    add.add_argument("--verse", type=int)
+    add.add_argument("--scope", choices=['verse','chapter'], default='verse')
     add.add_argument("--file", type=Path, required=True)
     add.add_argument("--prompt-file", type=Path)
     return root
@@ -47,19 +47,19 @@ async def run(args):
             if not 1 <= args.limit <= 1000:
                 raise ValueError("Choose 1 to 1000 prompts")
             rows = await c.fetch(
-                """SELECT i.id,i.text_sha256,v.book_code,v.chapter,v.verse,v.text,t.title,j.prompt AS prepared_prompt
-                FROM verse_illustrations i JOIN verses v ON v.translation_id=i.translation_id
-                    AND v.book_code=i.book_code AND v.chapter=i.chapter AND v.verse=i.verse
+                """SELECT i.id,i.text_sha256,i.translation_id,i.book_code,i.chapter,i.verse,i.artwork_scope,t.title,j.prompt AS prepared_prompt
+                FROM verse_illustrations i
                 JOIN translations t ON t.id=i.translation_id
                 LEFT JOIN image_generation_jobs j ON j.image_id=i.id
                 WHERE i.status='pending' ORDER BY i.id LIMIT $1""",
                 args.limit,
             )
-            rows = [
-                r
-                for r in rows
-                if hashlib.sha256(r["text"].encode("utf-8")).hexdigest() == r["text_sha256"]
-            ]
+            verified = []
+            for image in rows:
+                source = await illustrations.source_row(c,image)
+                if source and illustrations.identity(source,{'id':image['translation_id']})[4] == image['text_sha256']:
+                    verified.append(dict(image,source_row=source))
+            rows = verified
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(
                 "".join(
@@ -67,7 +67,7 @@ async def run(args):
                         {
                             "id": r["id"],
                             "prompt": r["prepared_prompt"]
-                            or illustrations.prompt_for(r, r["title"]),
+                            or illustrations.prompt_for(r['source_row'], r["title"]),
                         },
                         ensure_ascii=False,
                     )
@@ -80,16 +80,12 @@ async def run(args):
         edition = await bible.find_translation(c, args.translation)
         if not edition:
             raise ValueError("Edition not found")
-        row = await c.fetchrow(
-            """SELECT book_code,chapter,verse,verse_end,text FROM verses
-            WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4 AND text<>'' AND NOT is_range_continuation""",
-            edition["id"],
-            args.book,
-            args.chapter,
-            args.verse,
-        )
+        if args.scope == 'verse' and args.verse is None:
+            raise ValueError('--verse is required for verse artwork')
+        row = await illustrations.source_row(c,dict(translation_id=edition['id'],book_code=args.book,
+            chapter=args.chapter,verse=args.verse,artwork_scope=args.scope))
         if not row:
-            raise ValueError("Verse not found")
+            raise ValueError('Source not found')
         prompt = (
             args.prompt_file.read_text(encoding="utf-8")
             if args.prompt_file
@@ -106,7 +102,7 @@ async def run(args):
             edition,
             args.file.read_bytes(),
             prompt,
-            prompt_version=2 if not args.prompt_file else 1,
+            prompt_version=(3 if args.scope=='chapter' else 2) if not args.prompt_file else 1,
         )
         return {"image_id": identifier, "status": "ready"}
     finally:

@@ -81,6 +81,10 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
             reference = await bible.next_chapter_reference(connection,edition['id'],sub['current_book_code'],sub['current_chapter'])
             if reference:
                 text = await bible.render_chapter(connection,edition,*reference,ui_language=locale)
+                if text:
+                    text = await illustrations.decorate_chapter(connection,text,edition,*reference,chat=chat,
+                        request_key=f"chapter-subscription:{sub['id']}:{sub['revision']}:{sub['next_run_at'].isoformat()}",
+                        thread_id=chat['message_thread_id'],max_length=max_length)
                 progress.update(book=reference[0],chapter=reference[1],completed=not bool(
                     await bible.next_chapter_reference(connection,edition['id'],*reference)))
             else:
@@ -138,6 +142,8 @@ async def enqueue_next(connection: Any, chat: Any, translation: Any, request_id:
         text = await bible.render_chapter(connection,translation,*reference,ui_language=chat['ui_language'])
         if not text:
             raise UserError('no_result')
+        text = await illustrations.decorate_chapter(connection,text,translation,*reference,chat=chat,
+            request_key=key,thread_id=chat['message_thread_id'],max_length=max_length)
         return await insert_payload(connection,chat,translation,text,key,'manual',
             {'kind':'manual','book':reference[0],'chapter':reference[1]},max_length=max_length)
 

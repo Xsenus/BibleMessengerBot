@@ -380,7 +380,11 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         result = await passage.lookup(connection,edition,' '.join(args))
         if result:
             text = await passage.render(connection,edition,result,locale)
-            if len(result[2])==1:
+            if result[0].first is None:
+                text = await illustrations.decorate_chapter(connection,text,edition,result[1],result[0].chapter,
+                    chat=chat,request_key=f"{message.chat.id}:{message.message_id}",
+                    thread_id=message.message_thread_id,max_length=settings.max_message_length,rows=result[2])
+            elif len(result[2])==1:
                 text = await illustrations.decorate(connection,text,result[2][0],edition,chat=chat,
                     request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id)
             return text,None
