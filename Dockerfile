@@ -5,6 +5,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system app && useradd --system --gid app --home-dir /app app
 COPY requirements.txt requirements-test.txt constraints-linux.txt ./
+RUN python -m pip install 'torch==2.10.0+cpu' --index-url https://download.pytorch.org/whl/cpu
+COPY requirements-neural.txt constraints-neural-linux.txt ./
+RUN python -m pip install -r requirements-neural.txt
 RUN python -m pip install -c constraints-linux.txt -r requirements.txt -r requirements-test.txt \
     && python -m pip check && python -m pip freeze > /app/BUILD-DEPENDENCIES.txt
 COPY . /app

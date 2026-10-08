@@ -1,0 +1,116 @@
+{
+  "rus": {
+    "engine": "piper",
+    "repository": "rhasspy/piper-voices",
+    "revision": "c10ece1aade47bb51c153c893d14e5bf8e5b7117",
+    "license": "CC0-1.0",
+    "files": [
+      {
+        "name": "ru_RU-denis-medium.onnx",
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx",
+        "bytes": 63201294,
+        "sha256": "15fab56e11a097858ee115545d0f697fc2a316c41a291a5362349fb870411b0a"
+      },
+      {
+        "name": "ru_RU-denis-medium.onnx.json",
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx.json",
+        "bytes": 4823,
+        "sha256": "831c860dac0b5073eaa81610a0a638ec23d90a6cf8e5f871b4485c2cec3767c8"
+      },
+      {
+        "name": "MODEL_CARD",
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/ru/ru_RU/denis/medium/MODEL_CARD",
+        "bytes": 276,
+        "sha256": "8b5d685dd80f8ad3f8dbbe1c56b16bb0809f00c144af3642dbcf3b707eb89c12"
+      }
+    ]
+  },
+  "lat": {
+    "engine": "mms",
+    "repository": "facebook/mms-tts-lat",
+    "revision": "a19c0ca7d0d3950bc504e9278847d43d52c52ef6",
+    "license": "CC-BY-NC-4.0",
+    "files": [
+      {
+        "name": "config.json",
+        "url": "https://huggingface.co/facebook/mms-tts-lat/resolve/a19c0ca7d0d3950bc504e9278847d43d52c52ef6/config.json",
+        "bytes": 1641,
+        "sha256": "d568b958d22fe39d7b83754e1687c2ce193c07fc404451282cf1560ae62c199f"
+      },
+      {
+        "name": "model.safetensors",
+        "url": "https://huggingface.co/facebook/mms-tts-lat/resolve/a19c0ca7d0d3950bc504e9278847d43d52c52ef6/model.safetensors",
+        "bytes": 145220600,
+        "sha256": "2098050c36eefa2fd5e0ddc49c5bb57fa33db2d103b1609b6aff48eff8d17354"
+      },
+      {
+        "name": "special_tokens_map.json",
+        "url": "https://huggingface.co/facebook/mms-tts-lat/resolve/a19c0ca7d0d3950bc504e9278847d43d52c52ef6/special_tokens_map.json",
+        "bytes": 47,
+        "sha256": "40088e72eb9b8813b0f1a9024122e605c131e561e3c7011760a23a3ab67e9b4f"
+      },
+      {
+        "name": "tokenizer_config.json",
+        "url": "https://huggingface.co/facebook/mms-tts-lat/resolve/a19c0ca7d0d3950bc504e9278847d43d52c52ef6/tokenizer_config.json",
+        "bytes": 287,
+        "sha256": "4d738d01610edaaa329df47f92082a23055fa200a2f2f18a391f72393a22f33a"
+      },
+      {
+        "name": "vocab.json",
+        "url": "https://huggingface.co/facebook/mms-tts-lat/resolve/a19c0ca7d0d3950bc504e9278847d43d52c52ef6/vocab.json",
+        "bytes": 316,
+        "sha256": "3743e42c27ff5ba3b62df9f6ff8885f98ff7558f1065e2602791ddc7f538bb41"
+      },
+      {
+        "name": "README.md",
+        "url": "https://huggingface.co/facebook/mms-tts-lat/resolve/a19c0ca7d0d3950bc504e9278847d43d52c52ef6/README.md",
+        "bytes": 3972,
+        "sha256": "e1899a155a2982fd350ba7e4624c7c5040b995eb75f722a487dfe834e2d0ec6b"
+      }
+    ]
+  },
+  "grc": {
+    "engine": "mms",
+    "repository": "facebook/mms-tts-grc",
+    "revision": "e14c6ba6ddcab46f44231aec2b7462485bfc989e",
+    "license": "CC-BY-NC-4.0",
+    "files": [
+      {
+        "name": "config.json",
+        "url": "https://huggingface.co/facebook/mms-tts-grc/resolve/e14c6ba6ddcab46f44231aec2b7462485bfc989e/config.json",
+        "bytes": 1642,
+        "sha256": "8798a8aec0da711a30a74f68526f357f9d25442ce08630ebdc7fefad32b5617f"
+      },
+      {
+        "name": "model.safetensors",
+        "url": "https://huggingface.co/facebook/mms-tts-grc/resolve/e14c6ba6ddcab46f44231aec2b7462485bfc989e/model.safetensors",
+        "bytes": 145289720,
+        "sha256": "e008ba6794025dd1e65c190a6db860bb5b6239d64c56b4b74e00ed76a9e4ea66"
+      },
+      {
+        "name": "special_tokens_map.json",
+        "url": "https://huggingface.co/facebook/mms-tts-grc/resolve/e14c6ba6ddcab46f44231aec2b7462485bfc989e/special_tokens_map.json",
+        "bytes": 49,
+        "sha256": "46611a4b533e10b659e1f5530ad0a903f1a18eccfe1954c6d3e973a7bf025bcf"
+      },
+      {
+        "name": "tokenizer_config.json",
+        "url": "https://huggingface.co/facebook/mms-tts-grc/resolve/e14c6ba6ddcab46f44231aec2b7462485bfc989e/tokenizer_config.json",
+        "bytes": 289,
+        "sha256": "c57b835a268d5652e37cb01d1c8386e7d647cbbbf112defd3a319987195438b1"
+      },
+      {
+        "name": "vocab.json",
+        "url": "https://huggingface.co/facebook/mms-tts-grc/resolve/e14c6ba6ddcab46f44231aec2b7462485bfc989e/vocab.json",
+        "bytes": 1515,
+        "sha256": "dd244e56ac77532fa162f8b267c5fc8a17b63c2b08b1d3686bcb85f0a05783e2"
+      },
+      {
+        "name": "README.md",
+        "url": "https://huggingface.co/facebook/mms-tts-grc/resolve/e14c6ba6ddcab46f44231aec2b7462485bfc989e/README.md",
+        "bytes": 3999,
+        "sha256": "1323fd56fba2008a7216ca732605070777a018ba41d98302f54f640615200b32"
+      }
+    ]
+  }
+}

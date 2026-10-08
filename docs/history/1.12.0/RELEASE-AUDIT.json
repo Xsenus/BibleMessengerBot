@@ -1,0 +1,166 @@
+{
+  "version": "1.12.0",
+  "status": "verified",
+  "verified_date": "2026-10-08",
+  "verified_code_commit": "5efabe04e71156e5a270b9386b75957dc8be5db8",
+  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37784428188",
+  "tests": {
+    "github_linux_postgres": {
+      "passed": 756,
+      "skipped": 0,
+      "seconds": 85.75
+    },
+    "vps_linux_disposable_postgres": {
+      "passed": 756,
+      "skipped": 0,
+      "seconds": 98.71
+    },
+    "vps_final_audio_postgres_regressions": {
+      "passed": 6,
+      "skipped": 0,
+      "seconds": 8.57
+    },
+    "windows": {
+      "passed": 626,
+      "skipped": 130,
+      "seconds": 9.93
+    },
+    "compile": "passed",
+    "shell_syntax": "passed",
+    "ruff_new_modules_F_E9": "passed",
+    "basic_secret_pattern_scan": "passed"
+  },
+  "real_speech_samples": [
+    {
+      "language": "deu",
+      "provider": "edge",
+      "voice": "de-DE-ConradNeural",
+      "duration": 3,
+      "bytes": 18432
+    },
+    {
+      "language": "ell",
+      "provider": "edge",
+      "voice": "el-GR-NestorasNeural",
+      "duration": 4,
+      "bytes": 21744
+    },
+    {
+      "language": "eng",
+      "provider": "edge",
+      "voice": "en-US-GuyNeural",
+      "duration": 3,
+      "bytes": 17568
+    },
+    {
+      "language": "fra",
+      "provider": "edge",
+      "voice": "fr-FR-HenriNeural",
+      "duration": 3,
+      "bytes": 17568
+    },
+    {
+      "language": "grc",
+      "provider": "espeak",
+      "voice": "grc",
+      "duration": 8,
+      "bytes": 63405
+    },
+    {
+      "language": "hbo",
+      "provider": "edge",
+      "voice": "he-IL-AvriNeural",
+      "duration": 2,
+      "bytes": 14544
+    },
+    {
+      "language": "ita",
+      "provider": "edge",
+      "voice": "it-IT-DiegoNeural",
+      "duration": 4,
+      "bytes": 22176
+    },
+    {
+      "language": "lat",
+      "provider": "espeak",
+      "voice": "la",
+      "duration": 2,
+      "bytes": 16749
+    },
+    {
+      "language": "rus",
+      "provider": "edge",
+      "voice": "ru-RU-DmitryNeural",
+      "duration": 3,
+      "bytes": 19728
+    },
+    {
+      "language": "spa",
+      "provider": "edge",
+      "voice": "es-ES-AlvaroNeural",
+      "duration": 3,
+      "bytes": 18720
+    },
+    {
+      "language": "ukr",
+      "provider": "edge",
+      "voice": "uk-UA-OstapNeural",
+      "duration": 3,
+      "bytes": 19872
+    },
+    {
+      "language": "zho",
+      "provider": "edge",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "duration": 4,
+      "bytes": 23760
+    }
+  ],
+  "production": {
+    "healthy_services": [
+      "postgres",
+      "bot",
+      "worker",
+      "admin",
+      "illustrator",
+      "speaker"
+    ],
+    "schema_migrations": 13,
+    "editions": 14,
+    "languages": 12,
+    "verse_rows": 414980,
+    "old_data_preservation": {
+      "canonical_sha256_tables": 14,
+      "all_equal": true,
+      "new_audio_columns_excluded": true
+    },
+    "pre_upgrade_encrypted_s3_backup_verified": true,
+    "backup_timer_active": true,
+    "telegram_same_message_photo_paragraph_audio_confirmed": true,
+    "telegram_inline_buttons_preserved": true,
+    "live_language_roundtrip": [
+      "rus",
+      "grc",
+      "rus"
+    ],
+    "live_audio_providers": [
+      "espeak",
+      "espeak",
+      "espeak"
+    ],
+    "return_to_russian_reused_original_audio": true,
+    "original_selection_restored": true,
+    "paid_audio_attempts": 0,
+    "audio_provider": "free",
+    "paid_audio_enabled": false,
+    "daily_image_attempt_limit_per_provider": 10,
+    "monthly_image_reserved_limit_usd": "10"
+  },
+  "limitations": [
+    "Edge can return NoAudioReceived; live Russian cards used the local fallback, while direct neural samples succeeded.",
+    "Local eSpeak is less natural; ancient-language pronunciation is synthetic, not an academic or liturgical guarantee.",
+    "OpenAI speech is optional, opt-in and tested with mocked HTTP; no real paid speech request was made.",
+    "Existing language cards are backfilled; arbitrary older Telegram messages are not reconstructed.",
+    "Group permissions are covered by automated tests; no live third-party group test or new complete restore was performed."
+  ]
+}

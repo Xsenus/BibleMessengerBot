@@ -151,3 +151,30 @@ async def test_unbound_audio_is_not_generated_and_invalid_output_never_attaches(
  invalid=AsyncMock(return_value=(b'empty',0,'edge','voice'))
  assert await speech.process(c,first['audio_id'],generator=invalid)=='retry'
  assert await speech.dispatch(c)==0
+
+
+async def test_existing_robotic_cache_is_upgraded_for_every_bound_card(db,monkeypatch):
+ c,settings,_,chat,row=await setup(db)
+ ru,_,_=await load_fixture(c,db[2],'rus')
+ _,first=await card(c,ru,chat,row)
+ chat2=await create_destination(c,202)
+ _,second=await card(c,ru,chat2,row)
+ old=first['audio_id']
+ await speech.process(c,old,generator=generator())
+ await c.execute("UPDATE reading_audio SET voice_profile='v1',cache_key='legacy-robotic',provider='espeak' WHERE id=$1",old)
+ await c.execute('UPDATE reading_cards SET audio_sent_id=$1',old)
+ before=await c.fetchrow('SELECT audio_data,source_text FROM reading_audio WHERE id=$1',old)
+ assert await speech.upgrade_profiles(c)==2
+ fresh=await c.fetchval('SELECT audio_id FROM reading_cards WHERE id=$1',first['id'])
+ assert fresh!=old and fresh==await c.fetchval('SELECT audio_id FROM reading_cards WHERE id=$1',second['id'])
+ assert await speech.upgrade_profiles(c)==0
+ assert dict(await c.fetchrow('SELECT audio_data,source_text FROM reading_audio WHERE id=$1',old))==dict(before)
+ assert await c.fetchval('SELECT selected_translation_id FROM reading_cards WHERE id=$1',first['id'])==ru['id']
+ await speech.process(c,fresh,generator=AsyncMock(return_value=(b'ID3'+b'q'*1000,12,'piper','neural-fixture')))
+ assert await speech.dispatch(c)==2
+ bot,transport=sender(c,settings,monkeypatch)
+ for edit in await c.fetch("SELECT id FROM delivery_log WHERE payload_key LIKE 'audio:%' ORDER BY id"):
+  assert await process_delivery(c,edit['id'],transport)=='sent'
+ assert await c.fetchval('SELECT count(*) FROM reading_cards WHERE audio_sent_id=audio_id')==2
+ assert await c.fetchval('SELECT count(*) FROM audio_generation_attempts')==0
+ bot.send_rich_message.assert_not_awaited()

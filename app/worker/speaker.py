@@ -35,6 +35,7 @@ async def worker():
    while True:
     if audio.enabled:
      async with pool.acquire() as c:
+      await speech.upgrade_profiles(c,audio)
       # Existing language cards gain audio; arbitrary historical messages are not guessed.
       pending=await c.fetch('SELECT id FROM reading_cards WHERE audio_id IS NULL ORDER BY id LIMIT 100')
       for item in pending:

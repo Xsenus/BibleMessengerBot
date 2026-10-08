@@ -1,0 +1,4 @@
+# CPU PyTorch is installed separately from the official CPU-only wheel index.
+-c constraints-neural-linux.txt
+transformers==4.57.6
+piper-tts==1.8.0

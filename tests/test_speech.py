@@ -97,10 +97,10 @@ async def test_free_neural_failure_falls_back_without_calling_paid_api(monkeypat
    raise TimeoutError()
    yield None
  monkeypatch.setattr(edge_tts,'Communicate',Unavailable)
- run=AsyncMock(return_value=b'Pty Language Name\n5 ru Russian\n')
+ run=AsyncMock(return_value=b'Pty Language Name\n5 en English\n')
  monkeypatch.setattr(speech,'run_process',run)
  monkeypatch.setattr(speech,'validate_audio',AsyncMock(return_value=(b'ID3'+b'a'*600,7)))
- result=await speech.synthesize('Русский текст.','rus',speech.SpeechSettings())
- assert result[2:]==('espeak','ru')
+ result=await speech.synthesize('English text.','eng',speech.SpeechSettings())
+ assert result[2:]==('espeak','en')
  assert any(call.args[0]=='espeak-ng' and '--stdin' in call.args for call in run.await_args_list)
  assert speech.SpeechSettings().paid_enabled is False

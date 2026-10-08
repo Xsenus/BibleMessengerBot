@@ -107,6 +107,7 @@ docker compose run --rm --no-deps bootstrap python -m app.cli audit \
   >runtime-evidence/database-audit.json
 docker compose run --rm --no-deps bootstrap python -m pip freeze >runtime-evidence/dependencies.txt
 log 'Starting only after successful tests and corpus audit.'
+docker compose run --rm --no-deps bootstrap python -m app.neural_audio_admin prepare
 docker compose up -d --no-deps bot worker admin illustrator speaker
 ready=false
 for _ in $(seq 1 90); do

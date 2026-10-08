@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import tempfile
+import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,7 +51,7 @@ class SpeechSettings:
  @classmethod
  def from_env(cls):
   provider=os.getenv('AUDIO_PROVIDER','free')
-  if provider not in {'free','edge','espeak','openai'}:
+  if provider not in {'free','neural','edge','espeak','openai'}:
    raise ValueError('Invalid AUDIO_PROVIDER')
   monthly=int(os.getenv('AUDIO_PAID_MONTHLY_MAX_CHARACTERS','0'))
   daily=int(os.getenv('AUDIO_PAID_DAILY_MAX_CHARACTERS','0'))
@@ -74,9 +75,14 @@ def spoken_text(html, edition, locale):
  return re.sub(r'\s+',' ',plain_text(html)).strip()
 
 
+def voice_profile(language, settings):
+ from app.services import neural_speech
+ return neural_speech.profile(language) if settings.provider in {'free','neural'} and language in neural_speech.LANGUAGES else 'v1'
+
+
 def identity(text, language, settings):
  mode=settings.provider
- signature=f'v1:{mode}:{settings.model if mode=="openai" else ""}:{settings.voice if mode=="openai" else ""}:{language}\0{text}'
+ signature=f'{voice_profile(language,settings)}:{mode}:{settings.model if mode=="openai" else ""}:{settings.voice if mode=="openai" else ""}:{language}\0{text}'
  return hashlib.sha256(signature.encode()).hexdigest()
 
 
@@ -95,9 +101,9 @@ async def attach(connection, card_id, settings=None):
  if not text:
   return None
  key=identity(text,edition['language_code'],settings)
- identifier=await connection.fetchval('''INSERT INTO reading_audio(cache_key,language_code,source_text,provider_mode)
-  VALUES($1,$2,$3,$4) ON CONFLICT(cache_key) DO UPDATE SET cache_key=EXCLUDED.cache_key RETURNING id''',
-  key,edition['language_code'],text,settings.provider)
+ identifier=await connection.fetchval('''INSERT INTO reading_audio(cache_key,language_code,source_text,provider_mode,voice_profile)
+  VALUES($1,$2,$3,$4,$5) ON CONFLICT(cache_key) DO UPDATE SET cache_key=EXCLUDED.cache_key RETURNING id''',
+  key,edition['language_code'],text,settings.provider,voice_profile(edition['language_code'],settings))
  await connection.execute('UPDATE reading_cards SET audio_id=$2 WHERE id=$1',card_id,identifier)
  return identifier
 
@@ -158,6 +164,16 @@ async def synthesize(text, language, settings, *, client=None):
  """Return validated MP3 bytes, duration and exact provider/voice provenance."""
  with tempfile.TemporaryDirectory(prefix='bible-audio-') as directory:
   root=Path(directory);output=root/'reading.mp3'
+  from app.services import neural_speech
+  if settings.provider in {'free','neural'} and language in neural_speech.LANGUAGES:
+   wav=root/'reading.wav'
+   await run_process(sys.executable,'-m','app.services.neural_speech',language,str(wav),stdin=text.encode(),timeout=600)
+   await run_process('ffmpeg','-v','error','-i',str(wav),'-threads','1','-ac','1','-ar','24000',
+    '-codec:a','libmp3lame','-b:a','96k',str(output))
+   data,duration=await validate_audio(output)
+   return data,duration,neural_speech.MODELS[language]['engine'],voice_profile(language,settings)
+  if settings.provider=='neural':
+   raise ValueError('unsupported_neural_language')
   if settings.provider=='openai':
    if not settings.paid_enabled or not settings.key or min(settings.monthly_characters,settings.daily_characters)<=0:
     raise ValueError('paid_audio_disabled')
@@ -257,7 +273,7 @@ async def process(connection, identifier, settings=None, *, generator=synthesize
    AND (retry_at IS NULL OR retry_at<=now())""",identifier)
   if not audio:
    return 'not_due'
-  if audio['provider_mode']!=settings.provider:
+  if audio['provider_mode']!=settings.provider or audio['voice_profile']!=voice_profile(audio['language_code'],settings):
    return 'configuration_changed'
   if not await connection.fetchval('SELECT EXISTS(SELECT 1 FROM reading_cards WHERE audio_id=$1 AND telegram_message_id IS NOT NULL)',identifier):
    return 'unbound'
@@ -294,6 +310,22 @@ async def process(connection, identifier, settings=None, *, generator=synthesize
    return status
  finally:
   await connection.execute('SELECT pg_advisory_unlock($1)',lock)
+
+
+async def upgrade_profiles(connection, settings=None):
+ """Rebind old cached voices without discarding their media or changing selections."""
+ from app.services import neural_speech
+ settings=settings or SpeechSettings.from_env()
+ if not settings.enabled or settings.provider not in {'free','neural'}:
+  return 0
+ profiles={language:voice_profile(language,settings) for language in neural_speech.LANGUAGES}
+ cards=await connection.fetch('''SELECT c.id,c.telegram_chat_id FROM reading_cards c
+  JOIN reading_audio a ON a.id=c.audio_id JOIN jsonb_each_text($1::jsonb) p ON p.key=a.language_code
+  WHERE a.provider_mode=$2 AND a.voice_profile<>p.value ORDER BY c.id LIMIT 100''',json.dumps(profiles),settings.provider)
+ for card in cards:
+  async with chat_lock(connection,card['telegram_chat_id']),connection.transaction():
+   await attach(connection,card['id'],settings)
+ return len(cards)
 
 
 async def dispatch(connection):

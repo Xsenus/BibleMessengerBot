@@ -15,6 +15,7 @@ trap 'echo "Restore stopped; services remain paused. Original backup is in backu
 docker compose exec -T postgres sh -c 'exec pg_restore --clean --if-exists --single-transaction --exit-on-error --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <"$file"
 docker compose run --rm --no-deps bootstrap python -m app.cli seed
 docker compose run --rm --no-deps bootstrap python -m app.cli audit
+docker compose run --rm --no-deps bootstrap python -m app.neural_audio_admin prepare
 if [[ "${3:-}" == '--start-services' ]]; then
   docker compose up -d --no-deps bot worker admin illustrator speaker
 else
