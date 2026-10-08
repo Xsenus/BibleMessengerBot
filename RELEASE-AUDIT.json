@@ -1,1 +1,101 @@
-{"version":"1.7.0","status":"in_preparation","previous_verified_release":"1.6.0"}
+{
+  "version": "1.7.0",
+  "status": "verified",
+  "verified_date": "2026-10-08",
+  "verified_code_commit": "5d9a8a9f627391dda67df84a3879bab1aaca30b8",
+  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37724547723",
+  "tests": {
+    "github_linux_postgres": {
+      "passed": 657,
+      "skipped": 0,
+      "seconds": 38.74
+    },
+    "vps_linux_postgres": {
+      "passed": 657,
+      "skipped": 0,
+      "seconds": 170.29
+    },
+    "windows": {
+      "passed": 589,
+      "skipped": 68,
+      "seconds": 8.86
+    }
+  },
+  "production": {
+    "healthy_services": [
+      "postgres",
+      "bot",
+      "worker",
+      "admin",
+      "illustrator"
+    ],
+    "verses": 414980,
+    "editions": 14,
+    "languages": 12,
+    "schema_migrations": 8,
+    "ready_images": 11,
+    "full_corpus_audit": "passed",
+    "schedules_preserved": true
+  },
+  "readings": {
+    "synodal_curated_units": 181,
+    "catalog_source_validation": "passed",
+    "catalog_boundary_review_remaining": 0,
+    "edition_samples": 5,
+    "sampled_editions": 14,
+    "roster_fragment_rejected": true
+  },
+  "telegram": {
+    "initial_messages_sent": 1,
+    "original_message_edited": true,
+    "full_text_utf16_units": 1354,
+    "full_source_text_preserved": true,
+    "repeat_edit_idempotent": true,
+    "separate_followups_sent": 0,
+    "new_paid_requests_for_probe": 0,
+    "human_client_visual_confirmation": false
+  },
+  "generation": {
+    "model": "gpt-image-2",
+    "quality": "medium",
+    "daily_attempt_limit": 10,
+    "monthly_reserved_limit_usd": "10",
+    "today_attempts_at_audit": 10,
+    "today_reserved_usd_at_audit": "1.0000",
+    "cache_calendar_months": 3,
+    "historical_versions_preserved": true
+  },
+  "upgrade_copy": {
+    "from_schema": 7,
+    "to_schema": 8,
+    "migration_replay": "passed",
+    "verses_preserved": 414980,
+    "prior_images_preserved": 10,
+    "prior_daily_plans_preserved": 4,
+    "production_database_untouched": true
+  },
+  "cloud_restore": {
+    "encrypted_upload_and_full_get_sha256": "passed",
+    "download_and_authenticated_decryption": "passed",
+    "separate_database_restore": "passed",
+    "verses": 414980,
+    "editions": 14,
+    "schema_migrations": 8,
+    "images": 11,
+    "all_image_sha256_match": true,
+    "legacy_and_v2_images_preserved": true,
+    "confirmed_same_message_edits": 1,
+    "frozen_devotional_readings_preserved": true,
+    "full_corpus_audit": "passed",
+    "production_database_untouched": true,
+    "daily_backup_timer_active": true
+  },
+  "limits": [
+    "Synodal automatic readings use a curated pool, not the entire corpus.",
+    "Other-language context rules have limited linguistic coverage.",
+    "New art waits at most 24 hours and depends on available budget.",
+    "Rich Messages require a compatible Telegram client.",
+    "Future natural evening delivery was not yet observed at audit time."
+  ],
+  "previous_verified_release": "1.6.0"
+}
