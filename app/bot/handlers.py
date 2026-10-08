@@ -218,7 +218,7 @@ async def change_language(connection: Any, chat: Any, actor_id: int, language: s
 
 
 async def run_command(connection: Any, bot: Any, settings: Any, message: Message,
-                      parsed: Any) -> tuple[str,Any]:
+                      parsed: Any) -> tuple[str | None,Any]:
     """Domain routing; every publishing/settings action resolves and authorizes a destination."""
     user = message.from_user
     args = list(parsed.arguments)
@@ -364,8 +364,9 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
     if name=='license':
         return bible.license_details(edition,locale),None
     if name=='next':
-        identifier = await enqueue_next(connection,chat,edition,f'{message.chat.id}:{message.message_id}',settings.max_message_length)
-        return tr(locale,'queued')+f' <code>#{identifier}</code>',None
+        await enqueue_next(connection,chat,edition,f'{message.chat.id}:{message.message_id}',settings.max_message_length)
+        # The delivery worker sends the reading; no separate queue receipt is needed.
+        return None,None
     local_date = datetime.now(ZoneInfo(chat['timezone'])).date()
     row = None
     if name=='today':
@@ -488,7 +489,7 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
         except Exception as error:
             LOGGER.error('Command failed: %s',type(error).__name__)
             text,markup = tr(locale,'not_ready'),None
-        if donation_command is None:
+        if donation_command is None and text is not None:
             if markup is None and enum_value(message.chat.type)=='private' and not isinstance(text,illustrations.ReadingText):
                 markup = main_keyboard(locale)
             await reply(bot,connection,settings,message.chat.id,text,markup,message.message_thread_id)
