@@ -1,9 +1,10 @@
-"""Stored artwork and generation queue. Reading never waits for image generation."""
+"""Append-only verse artwork, shared freshness and per-chat archive rotation."""
 
 from __future__ import annotations
 
 import hashlib
 import logging
+from contextlib import asynccontextmanager
 from typing import Any
 
 from app.services.formatting import plain_text, split_message, utf16_length
@@ -23,35 +24,131 @@ class IllustratedText(str):
         return instance
 
 
-async def lookup_or_queue(connection: Any, row: Any, translation: Any) -> int | None:
-    digest = hashlib.sha256(row["text"].encode("utf-8")).hexdigest()
-    record = await connection.fetchrow(
-        """INSERT INTO verse_illustrations(
-        translation_id,book_code,chapter,verse,text_sha256) VALUES($1,$2,$3,$4,$5)
-        ON CONFLICT(translation_id,book_code,chapter,verse,text_sha256)
-        DO NOTHING RETURNING id,status""",
+def identity(row, translation):
+    return (
         translation["id"],
         row["book_code"],
         row["chapter"],
         row["verse"],
-        digest,
+        hashlib.sha256(row["text"].encode("utf-8")).hexdigest(),
     )
-    if record is None:
-        record = await connection.fetchrow(
-            """SELECT id,status FROM verse_illustrations
-            WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4 AND text_sha256=$5""",
-            translation["id"],
-            row["book_code"],
-            row["chapter"],
-            row["verse"],
-            digest,
+
+
+@asynccontextmanager
+async def version_lock(connection, row, translation):
+    async with connection.transaction():
+        await connection.execute(
+            "SELECT pg_advisory_xact_lock($1)",
+            lock_key("illustration-verse", identity(row, translation)),
         )
-    return record["id"] if record["status"] == "ready" else None
+        yield
 
 
-async def decorate(connection: Any, text: str, row: Any, translation: Any) -> str:
+async def pending(connection, row, translation):
+    """One open version per exact source text, including concurrent callers."""
+    key = identity(row, translation)
+    await connection.execute(
+        """INSERT INTO verse_illustrations(translation_id,book_code,chapter,verse,text_sha256)
+        VALUES($1,$2,$3,$4,$5) ON CONFLICT(translation_id,book_code,chapter,verse,text_sha256)
+        WHERE status='pending' DO NOTHING""",
+        key[0],
+        key[1],
+        key[2],
+        key[3],
+        key[4],
+    )
+    return await connection.fetchrow(
+        """SELECT * FROM verse_illustrations WHERE translation_id=$1 AND book_code=$2
+        AND chapter=$3 AND verse=$4 AND text_sha256=$5 AND status='pending'""",
+        key[0],
+        key[1],
+        key[2],
+        key[3],
+        key[4],
+    )
+
+
+async def recent(connection, row, translation):
+    """Calendar months; Telegram cache updates never renew creation age."""
+    key = identity(row, translation)
+    return await connection.fetchval(
+        """SELECT id FROM verse_illustrations WHERE translation_id=$1 AND book_code=$2
+        AND chapter=$3 AND verse=$4 AND text_sha256=$5 AND status='ready'
+        AND generated_at > now()-interval '3 months'
+        ORDER BY generated_at DESC,id DESC LIMIT 1""",
+        key[0],
+        key[1],
+        key[2],
+        key[3],
+        key[4],
+    )
+
+
+async def lookup_or_queue(
+    connection: Any, row: Any, translation: Any, *, chat_id: int | None = None
+) -> int | None:
+    async with version_lock(connection, row, translation):
+        key = identity(row, translation)
+        record = await connection.fetchrow(
+            """SELECT i.id FROM verse_illustrations i
+            LEFT JOIN illustration_views h ON h.image_id=i.id AND h.telegram_chat_id=$6
+            WHERE i.translation_id=$1 AND i.book_code=$2 AND i.chapter=$3 AND i.verse=$4
+            AND i.text_sha256=$5 AND i.status='ready'
+            ORDER BY (h.image_id IS NULL) DESC,h.last_sent_at ASC NULLS FIRST,h.send_count ASC NULLS FIRST,
+            i.generated_at DESC,i.id DESC LIMIT 1""",
+            key[0],
+            key[1],
+            key[2],
+            key[3],
+            key[4],
+            chat_id,
+        )
+        if not await recent(connection, row, translation):
+            await pending(connection, row, translation)
+        return record["id"] if record else None
+
+
+async def record_view(connection, chat_id, image_id):
+    await connection.execute(
+        """INSERT INTO illustration_views(telegram_chat_id,image_id) VALUES($1,$2)
+        ON CONFLICT(telegram_chat_id,image_id) DO UPDATE SET last_sent_at=now(),
+        send_count=illustration_views.send_count+1""",
+        chat_id,
+        image_id,
+    )
+
+
+async def decorate(
+    connection: Any,
+    text: str,
+    row: Any,
+    translation: Any,
+    *,
+    chat=None,
+    request_key=None,
+    thread_id=None,
+) -> str:
     try:
-        image_id = await lookup_or_queue(connection, row, translation)
+        image_id = await lookup_or_queue(
+            connection, row, translation, chat_id=chat["telegram_chat_id"] if chat else None
+        )
+        if chat is not None and request_key is not None:
+            from app.services import artwork
+
+            queued = await artwork.request_image(
+                connection, row, translation, chat, str(text), request_key, thread_id
+            )
+            if not queued and image_id is None:
+                # A concurrent generator may have finished after the first lookup.
+                image_id = await lookup_or_queue(
+                    connection, row, translation, chat_id=chat["telegram_chat_id"]
+                )
+            if queued:
+                text += (
+                    "\n\n🎨 Новая иллюстрация в очереди. Пришлю её отдельно, если она будет готова в течение суток. Генерация зависит от доступного бюджета."
+                    if chat["ui_language"] == "ru"
+                    else "\n\n🎨 A new illustration is queued. I'll send it separately if it is ready within 24 hours, subject to the generation budget."
+                )
         return IllustratedText(text, image_id) if image_id else text
     except Exception as error:
         LOGGER.warning("Verse illustration unavailable (%s)", type(error).__name__)
@@ -79,51 +176,59 @@ def image_type(data: bytes) -> str:
     raise ValueError("Use a PNG, JPEG or WebP image")
 
 
-async def store(connection: Any, row: Any, translation: Any, data: bytes, prompt: str) -> int:
+async def store(
+    connection: Any,
+    row: Any,
+    translation: Any,
+    data: bytes,
+    prompt: str,
+    *,
+    image_id=None,
+    prompt_version=1,
+) -> int:
+    """Fill an explicit pending version; never replace any ready binary."""
     mime = image_type(data)
+    key = identity(row, translation)
     async with connection.transaction():
         await connection.execute(
             "SELECT pg_advisory_xact_lock($1)", lock_key("illustration-storage", 1)
         )
-        await lookup_or_queue(connection, row, translation)
-        digest = hashlib.sha256(row["text"].encode("utf-8")).hexdigest()
-        previous = await connection.fetchval(
-            """SELECT COALESCE(octet_length(image_data),0) FROM verse_illustrations
-            WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4 AND text_sha256=$5""",
-            translation["id"],
-            row["book_code"],
-            row["chapter"],
-            row["verse"],
-            digest,
+        await connection.execute(
+            "SELECT pg_advisory_xact_lock($1)", lock_key("illustration-verse", key)
         )
         total = await connection.fetchval(
             "SELECT COALESCE(sum(octet_length(image_data)),0) FROM verse_illustrations"
         )
-        if total - previous + len(data) > MAX_STORED_BYTES:
+        if total + len(data) > MAX_STORED_BYTES:
             raise ValueError(
                 "Illustration storage limit exceeded; configure external storage before expanding"
             )
-        return await connection.fetchval(
-            """UPDATE verse_illustrations SET status='ready',image_data=$6,
-            mime_type=$7,prompt=$8,telegram_file_id=NULL,telegram_bot_id=NULL,s3_key=NULL,s3_sha256=NULL,s3_backed_up_at=NULL,updated_at=now()
-            WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4 AND text_sha256=$5 RETURNING id""",
-            translation["id"],
-            row["book_code"],
-            row["chapter"],
-            row["verse"],
-            digest,
+        if image_id is None:
+            # A manual import is a new version if all current versions are ready.
+            target = await pending(connection, row, translation)
+            image_id = target["id"]
+        identifier = await connection.fetchval(
+            """UPDATE verse_illustrations SET status='ready',image_data=$7,mime_type=$8,
+            prompt=$9,generated_at=now(),prompt_version=$10,updated_at=now()
+            WHERE id=$6 AND translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4
+            AND text_sha256=$5 AND status='pending' RETURNING id""",
+            key[0],
+            key[1],
+            key[2],
+            key[3],
+            key[4],
+            image_id,
             data,
             mime,
             prompt[:10000],
+            prompt_version,
         )
+        if identifier is None:
+            raise ValueError("Image version is no longer pending; existing artwork preserved")
+        return identifier
 
 
 def prompt_for(row: Any, edition_title: str) -> str:
-    return (
-        f"Create a refined cinematic historical illustration for {edition_title}, "
-        f"{row['book_code']} {row['chapter']}:{row['verse']}. Biblical text: {row['text']}\n"
-        "Illustrate the meaning reverently, with historically plausible ancient surroundings. "
-        "Detailed painterly realism, natural light, blue and warm gold palette, readable on a phone. "
-        "No text, numbers, watermarks, modern objects, graphic violence or anthropomorphic depiction of God. "
-        "For abstract passages use a restrained symbolic landscape. Image only."
-    )
+    from app.services.artwork import prompt
+
+    return prompt(row, {"title": edition_title}, slot="on_demand", variant="symbolic")

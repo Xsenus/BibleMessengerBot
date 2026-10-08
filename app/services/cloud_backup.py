@@ -196,7 +196,7 @@ async def backup_images(connection, settings: CloudSettings, *, limit=20):
         return 0
     client = settings.client()
     rows = await connection.fetch(
-        """SELECT i.id,i.image_data,i.mime_type,i.text_sha256,i.translation_id,i.book_code,i.chapter,i.verse,i.prompt,
+        """SELECT i.id,i.image_data,i.mime_type,i.text_sha256,i.translation_id,i.book_code,i.chapter,i.verse,i.prompt,i.generated_at,i.prompt_version,
         t.source_name,t.source_translation_id,t.source_sha256 FROM verse_illustrations i JOIN translations t ON t.id=i.translation_id
         WHERE i.status='ready' AND i.s3_backed_up_at IS NULL ORDER BY i.id LIMIT $1""",
         limit,
@@ -226,6 +226,8 @@ async def backup_images(connection, settings: CloudSettings, *, limit=20):
             ]
         }
         manifest.update(receipt)
+        manifest["generated_at"] = row["generated_at"].isoformat() if row["generated_at"] else None
+        manifest["prompt_version"] = row["prompt_version"]
         await asyncio.to_thread(
             upload_checked,
             client,

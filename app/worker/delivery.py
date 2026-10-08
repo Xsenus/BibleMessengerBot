@@ -73,7 +73,7 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
             if not row:
                 raise UserError('no_result')
             text = f"<b>{tr(locale,mode)}</b>\n\n"+await bible.render_verse(connection,row,edition,ui_language=locale)
-            image_id = await illustrations.lookup_or_queue(connection,row,edition)
+            image_id = await illustrations.lookup_or_queue(connection,row,edition,chat_id=chat["telegram_chat_id"])
         elif mode=='sequential':
             reference = await bible.next_chapter_reference(connection,edition['id'],sub['current_book_code'],sub['current_chapter'])
             if reference:

@@ -13,6 +13,15 @@ from app.bot.commands import mode_name, parse_command
 from app.services import artwork, cloud_backup, devotionals
 
 
+def test_configuration_diagnostics_do_not_include_credentials(monkeypatch):
+    from app.config import Settings
+
+    for name in ["BOT_TOKEN", "OWNER_CLAIM_CODE", "DATABASE_URL", "ADMIN_API_KEY"]:
+        monkeypatch.setenv(name, "private-fixture-" + name)
+    settings = Settings.from_env(require_bot_token=False)
+    assert "private-fixture-" not in repr(settings)
+
+
 def jpeg():
     stream = BytesIO()
     Image.new("RGB", (256, 256), "blue").save(stream, format="JPEG")

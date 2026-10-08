@@ -378,7 +378,8 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         if result:
             text = await passage.render(connection,edition,result,locale)
             if len(result[2])==1:
-                text = await illustrations.decorate(connection,text,result[2][0],edition)
+                text = await illustrations.decorate(connection,text,result[2][0],edition,chat=chat,
+                    request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id)
             return text,None
         if name=='read':
             return search_prompt(locale),None
@@ -388,7 +389,8 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         raise UserError('invalid')
     if row:
         text = await bible.render_verse(connection,row,edition,ui_language=locale)
-        return await illustrations.decorate(connection,text,row,edition),None
+        return await illustrations.decorate(connection,text,row,edition,chat=chat,
+            request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id),None
     return tr(locale,'no_result'),None
 
 

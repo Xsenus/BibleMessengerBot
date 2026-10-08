@@ -115,4 +115,10 @@ class TelegramSender:
                 )
             except Exception as error:
                 LOGGER.warning("Illustration file cache deferred (%s)", type(error).__name__)
+        try:
+            from app.services.illustrations import record_view
+
+            await record_view(self.connection, chat_id, identifier)
+        except Exception as error:
+            LOGGER.warning("Illustration view history deferred (%s)", type(error).__name__)
         return sent

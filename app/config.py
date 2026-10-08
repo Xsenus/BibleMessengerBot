@@ -6,7 +6,7 @@ import os
 import math
 import re
 from app.services.scheduling import parse_hhmm, validate_timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -33,10 +33,10 @@ def _float(name: str, default: float, minimum: float = 0.0) -> float:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
-    bot_token: str
-    owner_claim_code: str
-    database_url: str
-    admin_api_key: str
+    bot_token: str = field(repr=False)
+    owner_claim_code: str = field(repr=False)
+    database_url: str = field(repr=False)
+    admin_api_key: str = field(repr=False)
     admin_bind: str
     admin_port: int
     bible_profile: str

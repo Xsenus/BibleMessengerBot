@@ -12,7 +12,7 @@ import asyncpg
 
 from app.config import Settings
 from app.db import normalize_asyncpg_dsn
-from app.services import bible, illustrations
+from app.services import artwork, bible, illustrations
 
 
 def parser():
@@ -64,7 +64,11 @@ async def run(args):
             args.output.write_text(
                 "".join(
                     json.dumps(
-                        {"id": r["id"], "prompt": r['prepared_prompt'] or illustrations.prompt_for(r, r["title"])},
+                        {
+                            "id": r["id"],
+                            "prompt": r["prepared_prompt"]
+                            or illustrations.prompt_for(r, r["title"]),
+                        },
                         ensure_ascii=False,
                     )
                     + "\n"
@@ -89,9 +93,21 @@ async def run(args):
         prompt = (
             args.prompt_file.read_text(encoding="utf-8")
             if args.prompt_file
-            else illustrations.prompt_for(row, bible.display_title(edition))
+            else artwork.prompt(
+                row,
+                edition,
+                slot="on_demand",
+                context=await artwork.source_context(c, row, edition),
+            )
         )
-        identifier = await illustrations.store(c, row, edition, args.file.read_bytes(), prompt)
+        identifier = await illustrations.store(
+            c,
+            row,
+            edition,
+            args.file.read_bytes(),
+            prompt,
+            prompt_version=2 if not args.prompt_file else 1,
+        )
         return {"image_id": identifier, "status": "ready"}
     finally:
         await c.close()
