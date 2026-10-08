@@ -15,6 +15,7 @@ from PIL import Image
 
 from app.services import bible, devotionals, illustrations, readings
 from app.services.locks import lock_key
+from app.services.image_providers import GenerationError
 
 
 @dataclass(frozen=True)
@@ -27,17 +28,25 @@ class ArtSettings:
     monthly_usd: Decimal = Decimal("10")
     reservation_usd: Decimal = Decimal("0.10")
     daily_requests: int = 10
+    extra_keys: dict = field(default_factory=dict, repr=False)
+    provider_order: tuple = ('openai', 'gemini', 'bfl', 'ideogram', 'stability')
 
     @classmethod
     def from_env(cls):
+        from app.services.image_providers import KEY_ENV, NAMES
         result = cls(
             provider=os.getenv("ILLUSTRATION_PROVIDER", "manual"),
             key=os.getenv("OPENAI_API_KEY", ""),
             monthly_usd=Decimal(os.getenv("IMAGE_MONTHLY_BUDGET_USD", "10")),
             daily_requests=int(os.getenv("IMAGE_DAILY_MAX_REQUESTS", "10")),
+            extra_keys={name: os.getenv(env, '').strip() for name, env in KEY_ENV.items() if name != 'openai'},
+            provider_order=tuple(x.strip() for x in os.getenv('IMAGE_PROVIDER_ORDER', ','.join(NAMES)).split(',')),
         )
         if (
-            result.provider not in {"manual", "openai"}
+            result.provider not in {"manual", "openai", "auto"}
+            or not result.provider_order
+            or len(set(result.provider_order)) != len(result.provider_order)
+            or any(name not in NAMES for name in result.provider_order)
             or not result.monthly_usd.is_finite()
             or not Decimal("0") <= result.monthly_usd <= Decimal("1000")
             or not 1 <= result.daily_requests <= 100
@@ -125,12 +134,6 @@ async def source_context(connection, row, edition):
     return "\n".join(f"{r['verse']}: {r['text'][:420]}" for r in neighbors)[:1800]
 
 
-class GenerationError(Exception):
-    def __init__(self, code, uncertain=False, retry=False):
-        self.code, self.uncertain, self.retry = code, uncertain, retry
-        super().__init__(code)
-
-
 def validate_image(data):
     illustrations.image_type(data)
     with Image.open(BytesIO(data)) as image:
@@ -164,17 +167,8 @@ async def generate(settings: ArtSettings, text: str, *, client=None):
             )
         except httpx.TransportError as e:
             raise GenerationError("transport_uncertain", uncertain=True) from e
-        if r.status_code != 200:
-            code = (
-                "auth"
-                if r.status_code in {401, 403}
-                else "rate_limited"
-                if r.status_code == 429
-                else "rejected"
-                if r.status_code < 500
-                else "server_uncertain"
-            )
-            raise GenerationError(code, uncertain=r.status_code >= 500, retry=r.status_code == 429)
+        from app.services.image_providers import check_status
+        check_status(r)
         try:
             payload = r.json()
             data = base64.b64decode(payload["data"][0]["b64_json"], validate=True)
@@ -462,7 +456,7 @@ async def reserve(connection, job_id, settings: ArtSettings):
         return identifier
 
 
-async def due_jobs(connection, maximum=6):
+async def due_jobs(connection, maximum=6, *, max_attempts=3):
     """One shared job remains eligible while any acknowledged active card waits."""
     return await connection.fetch("""WITH eligible AS (
         SELECT j.id,min(t.scheduled_for) AS needed_at,0 AS priority
@@ -484,9 +478,10 @@ async def due_jobs(connection, maximum=6):
         WHERE r.state='waiting' AND r.telegram_message_id IS NOT NULL AND c.is_active
         GROUP BY j.id)
         SELECT j.id FROM eligible e JOIN image_generation_jobs j ON j.id=e.id
-        WHERE j.state IN ('queued','retry') AND j.attempts<3
+        WHERE j.state IN ('queued','retry') AND (j.attempts<$2 OR EXISTS
+        (SELECT 1 FROM image_generation_attempts a WHERE a.job_id=j.id AND a.state='reserved' AND a.polling_url IS NOT NULL))
         AND (j.retry_at IS NULL OR j.retry_at<=now())
-        GROUP BY j.id ORDER BY min(e.priority),min(e.needed_at),j.id LIMIT $1""",maximum)
+        GROUP BY j.id ORDER BY min(e.priority),min(e.needed_at),j.id LIMIT $1""",maximum,max_attempts)
 
 
 async def process_job(connection, job_id, settings: ArtSettings, *, generator=generate):

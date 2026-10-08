@@ -82,7 +82,7 @@ async def acquire_corpus(root: Path,options: ImportOptions,*,store: Any=None,dis
         raise ValueError('An import needs a persistence store; use --download-only explicitly')
     started=time.monotonic()
     run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid4().hex[:8]
-    report={'format_version':1,'application_version':'1.9.0','run_id':run_id,'status':'running',
+    report={'format_version':1,'application_version':'1.10.0','run_id':run_id,'status':'running',
         'started_at':datetime.now(timezone.utc).isoformat(),'options':asdict(options),
         'scope':'Configured sources and explicit open licenses only; not all Bibles worldwide',
         'items':[],'sources':{},'source_errors':[]}

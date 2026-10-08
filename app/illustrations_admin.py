@@ -18,6 +18,7 @@ def parser():
     root = argparse.ArgumentParser(description="Bible verse illustration queue")
     sub = root.add_subparsers(dest="command", required=True)
     sub.add_parser("stats")
+    sub.add_parser("providers")
     export = sub.add_parser("export")
     export.add_argument("--limit", type=int, default=20)
     export.add_argument("--output", type=Path, required=True)
@@ -37,6 +38,18 @@ async def run(args):
         normalize_asyncpg_dsn(Settings.from_env(require_bot_token=False).database_url)
     )
     try:
+        if args.command == 'providers':
+            from app.services import image_router, image_providers
+            settings = artwork.ArtSettings.from_env()
+            configured = {p.name for p in image_router.providers(settings)}
+            health = {r['provider']: dict(r) for r in await c.fetch(
+                'SELECT provider,failures,blocked_until,error_code FROM image_provider_health')}
+            return {'mode': settings.provider, 'order': settings.provider_order,
+                    'daily_max_requests': settings.daily_requests,
+                    'monthly_reserved_limit_usd': str(settings.monthly_usd),
+                    'providers': [{'provider': name, 'model': image_providers.MODELS[name],
+                                   'configured': name in configured, **health.get(name, {})}
+                                  for name in settings.provider_order]}
         if args.command == "stats":
             return [
                 dict(r)

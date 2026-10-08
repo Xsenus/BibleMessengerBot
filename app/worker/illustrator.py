@@ -10,7 +10,7 @@ import logging
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
 from app.logging import configure_logging
-from app.services import artwork, cloud_backup
+from app.services import artwork, cloud_backup, image_router
 from app.services.locks import lock_key
 
 LOGGER = logging.getLogger(__name__)
@@ -50,12 +50,9 @@ async def worker():
                 "SELECT pg_try_advisory_lock($1)", lock_key("singleton-illustrator", 1)
             ):
                 raise RuntimeError("Another illustrator is running")
-            await owner.execute(
-                "UPDATE image_generation_jobs SET state='uncertain',error_code='worker_interrupted',updated_at=now() WHERE state='running'"
-            )
-            await owner.execute(
-                "UPDATE image_generation_attempts SET state='uncertain' WHERE state='reserved'"
-            )
+            await image_router.recover(owner)
+            if art.provider == 'auto':
+                await image_router.configure(owner, art)
             fingerprint = hashlib.sha256(art.key.encode()).hexdigest()
             previous = await owner.fetchval(
                 "SELECT value FROM app_settings WHERE key='imagegen-key-fingerprint'"
@@ -75,6 +72,12 @@ async def worker():
                     await artwork.upgrade_queued_prompts(c)
                     await artwork.plan_ahead(c)
                     await artwork.dispatch_requests(c)
+                    if art.provider == 'auto':
+                        jobs = await artwork.due_jobs(c, max_attempts=5)
+                        for job in jobs:
+                            outcome = await image_router.process_job(c, job['id'], art)
+                            LOGGER.info('Artwork job %s: %s', job['id'], outcome)
+                            await artwork.dispatch_requests(c)
                     if art.provider == "openai" and art.key:
                         # Pause after authentication failure until the key is changed.
                         auth_blocked = await c.fetchval(
