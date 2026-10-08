@@ -1,29 +1,29 @@
 {
-  "version": "1.13.0",
+  "version": "1.14.0",
   "status": "verified",
   "verified_date": "2026-10-08",
-  "verified_code_commit": "92c730143b84dd219184279abad8d8b49e7e1cee",
-  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37788720718",
+  "verified_code_commit": "acdcdeeb2c0c612d2c7784b3e20bcfbf7c2c4cd3",
+  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37804410810",
   "tests": {
     "github_linux_postgres": {
-      "passed": 767,
+      "passed": 787,
       "skipped": 0,
-      "seconds": 83.45
+      "seconds": 134.19
     },
-    "vps_linux_postgres": {
-      "passed": 767,
+    "vps_before_final_legacy_guard": {
+      "passed": 786,
       "skipped": 0,
-      "seconds": 115.86
+      "seconds": 123.14
     },
-    "vps_final_voice_regressions": {
-      "passed": 17,
+    "vps_final_pool_router_database_regressions": {
+      "passed": 83,
       "skipped": 0,
-      "seconds": 27.49
+      "seconds": 37.12
     },
-    "windows_before_final_normalization": {
-      "passed": 632,
-      "skipped": 134,
-      "seconds": 10.05
+    "windows_before_final_legacy_guard": {
+      "passed": 644,
+      "skipped": 142,
+      "seconds": 17.02
     },
     "compile": "passed",
     "ruff_F_E9": "passed",
@@ -31,7 +31,6 @@
     "basic_secret_scan": "passed"
   },
   "production": {
-    "schema_migrations": 14,
     "healthy_services": [
       "postgres",
       "bot",
@@ -42,55 +41,42 @@
     ],
     "editions": 14,
     "languages": 12,
-    "verse_rows": 414980,
-    "original_tables_preserved": 16,
+    "original_tables_preserved": 39,
     "all_preservation_hashes_equal": true,
-    "new_voice_profile_column_excluded": true,
+    "preservation_excludes": [
+      "schema_migrations",
+      "service_heartbeats"
+    ],
     "encrypted_s3_backup_before_and_after_verified": true,
     "backup_timer_active": true,
-    "local_models_ready": [
-      "rus",
-      "lat",
-      "grc"
+    "auth": [
+      {
+        "key_number": 1,
+        "status": 200,
+        "image_model_listed": true
+      },
+      {
+        "key_number": 2,
+        "status": 200,
+        "image_model_listed": true
+      }
     ],
-    "telegram_existing_message_roundtrip": [
-      "rus",
-      "lat",
-      "grc",
-      "rus"
-    ],
-    "actual_audio_providers": [
-      "piper",
-      "mms",
-      "mms",
-      "piper"
-    ],
-    "same_message_photo_audio_buttons_confirmed": true,
-    "russian_cache_reused": true,
-    "original_selection_restored": true,
-    "selected_quality_cards_upgraded": 3,
-    "all_quality_cards_acknowledged": true,
-    "old_cached_quality_recordings_preserved": 4,
-    "paid_audio_attempts": 0,
-    "paid_audio_enabled": false,
-    "latin_letter_coverage": {
-      "verse_rows": 35809,
-      "unsupported_letters": 0
-    },
-    "ancient_greek_letter_coverage": {
-      "verse_rows": 7939,
-      "unsupported_letters": 0
-    }
-  },
-  "voice_models": {
-    "rus": "Piper ru_RU-denis-medium",
-    "lat": "facebook/mms-tts-lat",
-    "grc": "facebook/mms-tts-grc"
+    "configured_openai_keys": 2,
+    "daily_scope": "provider",
+    "openai_attempts_today": 10,
+    "openai_remaining": 0,
+    "monthly_reserved_usd": "2.4000",
+    "monthly_limit_usd": "10",
+    "production_daily_guard_checked_without_submission": true,
+    "schema_migrations": 15,
+    "legacy_uncertain_jobs": 1,
+    "new_key_paid_image_attempts": 0
   },
   "limitations": [
-    "Synthetic voices do not guarantee correct stress for every name or a particular historical/liturgical pronunciation.",
-    "Meta MMS checkpoints are CC BY-NC 4.0; the application MIT license does not replace model terms.",
-    "MP3 decoding and letter coverage were verified; no human MOS or full-corpus listening test was performed.",
-    "Group permissions are covered by existing automated tests; no live third-party group test or new full restore was performed."
+    "New key passed read-only authentication/model-list checks; no paid image was submitted because the daily OpenAI allowance was exhausted.",
+    "Fallback/races/errors are verified with real PostgreSQL and simulated image API responses, not paid failing requests.",
+    "OpenAI project/organization limits may be shared between keys; the pool does not create independent balances.",
+    "The $10 control reserves internal estimates across providers; it is not a billing reconciliation.",
+    "No new full database restore or live third-party group test was performed."
   ]
 }
