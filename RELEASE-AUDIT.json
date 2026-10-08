@@ -1,32 +1,46 @@
 {
-  "version": "1.10.1",
+  "version": "1.11.0",
   "status": "verified",
   "verified_date": "2026-10-08",
-  "verified_code_commit": "bbb492d693118c1c87bc6e74847adeef982867a4",
-  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37744469278",
+  "verified_code_commit": "200324ae952031f35748b3390cf6231ceb5d15e4",
+  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37775149483",
   "tests": {
     "github_linux_postgres": {
-      "passed": 725,
+      "passed": 740,
       "skipped": 0,
-      "seconds": 109.35
+      "seconds": 106.56
     },
-    "vps_daily_limits_postgres": {
-      "passed": 49,
+    "vps_linux_disposable_postgres": {
+      "passed": 740,
       "skipped": 0,
-      "seconds": 35.8
+      "seconds": 93.16
     },
-    "vps_final_provider_adapters_and_router": {
-      "passed": 45,
-      "skipped": 0,
-      "seconds": 16.61
-    },
-    "windows": {
-      "passed": 619,
-      "skipped": 106,
-      "seconds": 10.83
-    },
-    "ruff": "passed"
+    "compile": "passed",
+    "ruff_new_modules_F_E9": "passed",
+    "basic_secret_pattern_scan": "passed"
   },
+  "coverage": [
+    "single_verse",
+    "contextual_readings",
+    "reference_ranges",
+    "word_search",
+    "whole_chapters",
+    "chapter_continuations",
+    "sequential_subscription",
+    "daily_subscription",
+    "topic_subscription",
+    "morning_subscription",
+    "evening_subscription",
+    "reading_plans",
+    "language_paging",
+    "long_text_paging",
+    "late_artwork_retains_selection",
+    "stale_edits_use_latest_selection",
+    "persistent_edit_recovery",
+    "private_and_group_authorization",
+    "exact_chat_and_message_binding",
+    "incomplete_editions_excluded"
+  ],
   "production": {
     "healthy_services": [
       "postgres",
@@ -35,32 +49,37 @@
       "admin",
       "illustrator"
     ],
-    "schema_migrations": 11,
+    "schema_migrations": 12,
     "editions": 14,
     "languages": 12,
-    "provider_mode": "auto",
+    "old_data_preservation": {
+      "canonical_sha256_tables": 13,
+      "all_equal": true,
+      "includes_all_verses": true
+    },
+    "pre_upgrade_encrypted_s3_backup_verified": true,
+    "backup_timer_active": true,
+    "telegram_existing_message_language_edits_confirmed": true,
+    "telegram_inline_language_buttons_confirmed": true,
+    "telegram_photo_preserved": true,
+    "telegram_language_paging_confirmed": true,
+    "original_language_restored": true,
+    "live_sample_available_languages": 11,
+    "live_sample_language_pages": 2,
+    "live_test_paid_generations": 0,
+    "chat_preferences_preserved": true,
     "configured_providers": [
       "openai",
-      "ideogram"
+      "ideogram",
+      "stability"
     ],
     "daily_attempt_limit_per_provider": 10,
-    "monthly_reserved_limit_usd": "10",
-    "snapshot_monthly_reserved_usd": "1.4000",
-    "snapshot_attempts_today": {
-      "openai": 10,
-      "ideogram": 4
-    },
-    "snapshot_ready_images": 14,
-    "live_ideogram_generations_succeeded": 3,
-    "acknowledged_waiting_cards_updated": 3,
-    "telegram_edits_confirmed": true,
-    "legacy_uncertain_job_preserved": true,
-    "schema_change": false
+    "monthly_reserved_limit_usd": "10"
   },
   "limitations": [
-    "Gemini, BFL and Stability live credentials/results are not verified.",
-    "One Ideogram response could not be processed; its paid reservation remains uncertain and is not retried with the same provider/key.",
-    "The monthly reserve is an internal bound, not a provider invoice.",
-    "No new full database restore was performed."
+    "Cross-edition addresses use each edition numbering; alternate versification is not automatically remapped.",
+    "Historical messages are not bulk-backfilled; one existing owner card was used for live acceptance.",
+    "Group/channel permission checks are automated with fake Telegram members; no live third-party group test.",
+    "No new paid image generation or complete database restore was required for this feature."
   ]
 }
