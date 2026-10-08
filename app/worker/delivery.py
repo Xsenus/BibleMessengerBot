@@ -198,13 +198,18 @@ class SqlCheckpoints:
             chunk = envelope.chunks[envelope.next_chunk]
             if isinstance(chunk,dict) and chunk.get('kind')=='rich':
                 await illustrations.bind_message(self.connection,envelope.chat_id,chunk.get('request_id'),message_id)
+            if final and delivery['mode']=='illustration_edit':
+                await self.connection.execute("UPDATE illustration_requests SET state='delivered' WHERE delivery_id=$1 AND telegram_message_id=$2",envelope.id,message_id)
 
     async def fail(self, envelope: Envelope, kind: str, retry_after: float) -> None:
         """Known rejection is retryable; ambiguity blocks automation until reviewed."""
         async with self.connection.transaction():
             row = await self.connection.fetchrow('SELECT * FROM delivery_log WHERE id=$1 FOR UPDATE',envelope.id)
             failures = row['consecutive_failures']+1
-            status = 'retry' if kind=='retry' and failures<=10 else 'uncertain' if kind=='uncertain' else 'failed'
+            editing = row['mode']=='illustration_edit'
+            status = 'retry' if (editing and kind in {'retry','forbidden','uncertain'}) or kind=='retry' and failures<=10 else 'uncertain' if kind=='uncertain' else 'failed'
+            if editing and status=='retry':
+                retry_after=max(retry_after,min(3600,3*2**min(failures,11)))
             retry_at = datetime.now(timezone.utc)+timedelta(seconds=max(retry_after,3)) if status=='retry' else None
             await self.connection.execute('''UPDATE delivery_log SET status=$2,error_code=$3,error_message=$3,
                 retry_at=$4,consecutive_failures=$5,sending_chunk=CASE WHEN $2='uncertain' THEN sending_chunk ELSE NULL END,
@@ -214,6 +219,8 @@ class SqlCheckpoints:
                 await self.connection.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE id=$1',row['subscription_id'])
             if kind=='forbidden':
                 await self.connection.execute('UPDATE telegram_chats SET is_active=false WHERE telegram_chat_id=$1',envelope.chat_id)
+            if editing and status=='failed':
+                await self.connection.execute("UPDATE illustration_requests SET state='unavailable' WHERE delivery_id=$1",envelope.id)
 
 
 async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> str:
@@ -230,7 +237,15 @@ async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> st
             return 'not_due'
         if not row['is_active'] or row['subscription_id'] and not row['is_enabled']:
             return 'paused'
-        valid = row['chat_revision']==row['current_chat_revision'] and (
+        editing = row['mode']=='illustration_edit'
+        if editing:
+            request = await connection.fetchrow('SELECT * FROM illustration_requests WHERE delivery_id=$1',delivery_id)
+            if request and not await illustrations.valid_request_source(connection,request):
+                async with connection.transaction():
+                    await connection.execute("UPDATE illustration_requests SET state='cancelled' WHERE id=$1",request['id'])
+                    await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='source_changed',updated_at=now() WHERE id=$1",delivery_id)
+                return 'source_changed'
+        valid = editing or row['chat_revision']==row['current_chat_revision'] and (
             not row['subscription_id'] or row['subscription_revision']==row['current_subscription_revision'])
         if not valid:
             await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='stale_configuration',updated_at=now() WHERE id=$1",delivery_id)

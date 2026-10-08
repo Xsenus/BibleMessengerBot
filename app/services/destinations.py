@@ -11,16 +11,16 @@ from app.services.scheduling import next_occurrence, validate_timezone
 
 async def ensure_resolved(connection: Any, chat_id: int) -> None:
     """Do not abandon ambiguous or partly delivered payloads during a settings change."""
-    if await connection.fetchval("SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND (status IN ('uncertain','sending') OR (status='failed' AND next_chunk>0)))",chat_id):
+    if await connection.fetchval("SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND mode<>'illustration_edit' AND (status IN ('uncertain','sending') OR (status='failed' AND next_chunk>0)))",chat_id):
         raise UserError('pending_review')
-    if await connection.fetchval("SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND status IN ('pending','retry') AND next_chunk>0)",chat_id):
+    if await connection.fetchval("SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND mode<>'illustration_edit' AND status IN ('pending','retry') AND next_chunk>0)",chat_id):
         raise UserError('busy')
 
 
 async def cancel_queued(connection: Any, chat_id: int) -> None:
     """Cancel only known-unsent/retry jobs; preserve the delivery history."""
     await connection.execute("""UPDATE delivery_log SET status='cancelled',updated_at=now(),
-        error_code='configuration_changed' WHERE telegram_chat_id=$1 AND status IN ('pending','retry')""",chat_id)
+        error_code='configuration_changed' WHERE telegram_chat_id=$1 AND mode<>'illustration_edit' AND status IN ('pending','retry')""",chat_id)
 
 
 async def configure_chat(connection: Any, chat_id: int, *, actor_id: int | None,

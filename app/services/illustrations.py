@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
@@ -59,6 +60,31 @@ async def source_row(connection, image):
     return await connection.fetchrow(
         "SELECT book_code,chapter,verse,verse_end,text FROM verses WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4 AND text<>'' AND NOT is_range_continuation",
         image['translation_id'], image['book_code'], image['chapter'], image['verse'])
+
+
+async def valid_request_source(connection, request, *, image=None, edition=None):
+    """Validate every frozen verse both when queueing and just before editing."""
+    from app.services import bible
+
+    image = image or await connection.fetchrow('SELECT * FROM verse_illustrations WHERE id=$1',request['image_id'])
+    if not image or image['status']!='ready':
+        return False
+    edition = edition or await bible.find_translation(connection,image['translation_id'])
+    if not edition:
+        return False
+    source = await source_row(connection,image)
+    if not source or identity(source,edition)[4]!=image['text_sha256']:
+        return False
+    snapshot=request['source_snapshot']
+    snapshot=json.loads(snapshot) if isinstance(snapshot,str) else snapshot
+    if not snapshot:
+        return False
+    for item in snapshot:
+        native=await connection.fetchrow('SELECT text,verse_end FROM verses WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4',
+            image['translation_id'],image['book_code'],image['chapter'],item['verse'])
+        if not native or hashlib.sha256(native['text'].encode()).hexdigest()!=item['sha256'] or (native['verse_end'] or item['verse'])!=item['verse_end']:
+            return False
+    return True
 
 
 async def decorate_chapter(connection, text, translation, book_code, chapter, *, chat,

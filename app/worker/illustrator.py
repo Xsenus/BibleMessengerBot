@@ -81,29 +81,7 @@ async def worker():
                             "SELECT EXISTS(SELECT 1 FROM image_generation_jobs WHERE state='failed' AND error_code='auth')"
                         )
                         if not auth_blocked:
-                            jobs = await c.fetch("""WITH eligible AS (
-                                SELECT j.id,min(t.scheduled_for) AS needed_at,0 AS priority
-                                FROM image_generation_jobs j
-                                JOIN image_generation_targets t ON t.image_id=j.image_id
-                                JOIN subscriptions s ON s.id=t.subscription_id
-                                JOIN telegram_chats c ON c.telegram_chat_id=s.telegram_chat_id
-                                JOIN verse_illustrations i ON i.id=j.image_id
-                                WHERE s.is_enabled AND NOT s.completed AND s.next_run_at IS NOT NULL
-                                AND c.is_active AND s.translation_id=i.translation_id
-                                AND extract(isodow from t.local_date)::int=ANY(s.days_of_week)
-                                AND t.local_date >= (now() AT TIME ZONE s.timezone)::date
-                                GROUP BY j.id
-                                UNION ALL
-                                SELECT j.id,min(r.created_at),1
-                                FROM image_generation_jobs j
-                                JOIN illustration_requests r ON r.image_id=j.image_id
-                                JOIN telegram_chats c ON c.telegram_chat_id=r.telegram_chat_id
-                                WHERE r.state='waiting' AND r.telegram_message_id IS NOT NULL AND r.expires_at>now() AND c.is_active
-                                AND r.chat_revision=c.revision GROUP BY j.id)
-                                SELECT j.id FROM eligible e JOIN image_generation_jobs j ON j.id=e.id
-                                WHERE j.state IN ('queued','retry') AND j.attempts<3
-                                AND (j.retry_at IS NULL OR j.retry_at<=now())
-                                GROUP BY j.id ORDER BY min(e.priority),min(e.needed_at),j.id LIMIT 6""")
+                            jobs = await artwork.due_jobs(c)
                             for job in jobs:
                                 outcome = await artwork.process_job(c, job["id"], art)
                                 LOGGER.info("Artwork job %s: %s", job["id"], outcome)

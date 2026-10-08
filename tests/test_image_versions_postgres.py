@@ -136,9 +136,9 @@ async def test_concurrent_readings_share_one_job_and_edit_each_acknowledged_mess
 
 
 @pytest.mark.parametrize(
-    "change,state", [("revision", "cancelled"), ("source", "cancelled"), ("expiry", "expired")]
+    "change,state", [("revision", "queued"), ("source", "cancelled"), ("expiry", "queued")]
 )
-async def test_late_images_do_not_send_to_changed_or_expired_requests(
+async def test_late_images_keep_old_targets_but_reject_changed_source(
     db, monkeypatch, change, state
 ):
     provider(monkeypatch)
@@ -155,9 +155,9 @@ async def test_late_images_do_not_send_to_changed_or_expired_requests(
         )
     else:
         await c.execute("UPDATE illustration_requests SET expires_at=now()-interval '1 second'")
-    assert await artwork.dispatch_requests(c) == 0
+    assert await artwork.dispatch_requests(c) == int(state=='queued')
     assert await c.fetchval("SELECT state FROM illustration_requests") == state
-    assert await c.fetchval("SELECT count(*) FROM delivery_log") == 0
+    assert await c.fetchval("SELECT count(*) FROM delivery_log") == int(state=='queued')
 
 
 async def test_random_handler_is_fast_then_cached_and_ack_advances_rotation(db, monkeypatch):

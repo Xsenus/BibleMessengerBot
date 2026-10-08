@@ -227,9 +227,6 @@ async def request_image(connection, row, edition, chat, caption, request_key, th
     from app.services.locks import chat_lock
     import json
 
-    settings = ArtSettings.from_env()
-    if settings.provider != "openai" or not settings.key:
-        return False
     async with chat_lock(connection, chat["telegram_chat_id"]), connection.transaction():
         if await illustrations.recent(connection, row, edition):
             return False
@@ -268,25 +265,29 @@ async def dispatch_requests(connection, maximum=100):
     from app.worker.delivery import insert_payload
 
     await connection.execute(
-        "UPDATE illustration_requests SET state='expired' WHERE state='waiting' AND expires_at<=now()"
-    )
-    await connection.execute(
         """UPDATE image_generation_jobs j SET state='ready',updated_at=now()
         FROM verse_illustrations i WHERE i.id=j.image_id AND i.status='ready'
         AND j.state IN ('queued','retry')"""
     )
     rows = await connection.fetch(
-        """SELECT r.id,r.telegram_chat_id FROM illustration_requests r
-        JOIN verse_illustrations i ON i.id=r.image_id
+        """SELECT r.id,r.telegram_chat_id,ready.id AS ready_image_id FROM illustration_requests r
+        JOIN telegram_chats c ON c.telegram_chat_id=r.telegram_chat_id AND c.is_active
+        JOIN verse_illustrations original ON original.id=r.image_id
+        JOIN LATERAL (SELECT i.id FROM verse_illustrations i
+            WHERE i.translation_id=original.translation_id AND i.book_code=original.book_code
+            AND i.chapter=original.chapter AND i.verse=original.verse
+            AND i.text_sha256=original.text_sha256 AND i.artwork_scope=original.artwork_scope
+            AND i.status='ready' AND (i.id=original.id OR i.generated_at>=original.created_at)
+            ORDER BY (i.id=original.id) DESC,i.generated_at DESC,i.id DESC LIMIT 1) ready ON true
         WHERE r.state='waiting' AND r.telegram_message_id IS NOT NULL
-        AND i.status='ready' ORDER BY r.id LIMIT $1""",
+        ORDER BY r.id LIMIT $1""",
         maximum,
     )
     count = 0
     for hint in rows:
         async with chat_lock(connection, hint["telegram_chat_id"]), connection.transaction():
             request = await connection.fetchrow(
-                "SELECT * FROM illustration_requests WHERE id=$1 AND state='waiting' AND expires_at>now() FOR UPDATE",
+                "SELECT * FROM illustration_requests WHERE id=$1 AND state='waiting' FOR UPDATE",
                 hint["id"],
             )
             if not request:
@@ -295,13 +296,10 @@ async def dispatch_requests(connection, maximum=100):
                 "SELECT * FROM telegram_chats WHERE telegram_chat_id=$1",
                 request["telegram_chat_id"],
             )
-            if not chat["is_active"] or chat["revision"] != request["chat_revision"]:
-                await connection.execute(
-                    "UPDATE illustration_requests SET state='cancelled' WHERE id=$1", request["id"]
-                )
+            if not chat["is_active"]:
                 continue
             image = await connection.fetchrow(
-                "SELECT * FROM verse_illustrations WHERE id=$1", request["image_id"]
+                "SELECT * FROM verse_illustrations WHERE id=$1", hint["ready_image_id"]
             )
             edition = await bible.find_translation(connection, image["translation_id"])
             if not edition:
@@ -309,33 +307,7 @@ async def dispatch_requests(connection, maximum=100):
                     "UPDATE illustration_requests SET state='cancelled' WHERE id=$1", request["id"]
                 )
                 continue
-            source = await illustrations.source_row(connection, image)
-            if not source or illustrations.identity(source, edition)[4] != image["text_sha256"]:
-                await connection.execute(
-                    "UPDATE illustration_requests SET state='cancelled' WHERE id=$1", request["id"]
-                )
-                continue
-            import json
-
-            snapshot = request["source_snapshot"]
-            snapshot = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
-            valid = True
-            for item in snapshot:
-                native = await connection.fetchrow(
-                    "SELECT text,verse_end FROM verses WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4",
-                    image["translation_id"],
-                    image["book_code"],
-                    image["chapter"],
-                    item["verse"],
-                )
-                if (
-                    not native
-                    or hashlib.sha256(native["text"].encode()).hexdigest() != item["sha256"]
-                    or (native["verse_end"] or item["verse"]) != item["verse_end"]
-                ):
-                    valid = False
-                    break
-            if not valid:
+            if not await illustrations.valid_request_source(connection,request,image=image,edition=edition):
                 await connection.execute(
                     "UPDATE illustration_requests SET state='cancelled' WHERE id=$1", request["id"]
                 )
@@ -353,16 +325,17 @@ async def dispatch_requests(connection, maximum=100):
                 frozen_chunks=[
                     {
                         "kind": "rich_edit",
-                        "image_id": request["image_id"],
+                        "image_id": image["id"],
                         "text": request["caption"],
                         "message_id": request["telegram_message_id"],
                     }
                 ],
             )
             await connection.execute(
-                "UPDATE illustration_requests SET state='queued',delivery_id=$2 WHERE id=$1",
+                "UPDATE illustration_requests SET state='queued',delivery_id=$2,image_id=$3 WHERE id=$1",
                 request["id"],
                 delivery,
+                image["id"],
             )
             count += 1
     return count
@@ -487,6 +460,33 @@ async def reserve(connection, job_id, settings: ArtSettings):
             job_id,
         )
         return identifier
+
+
+async def due_jobs(connection, maximum=6):
+    """One shared job remains eligible while any acknowledged active card waits."""
+    return await connection.fetch("""WITH eligible AS (
+        SELECT j.id,min(t.scheduled_for) AS needed_at,0 AS priority
+        FROM image_generation_jobs j
+        JOIN image_generation_targets t ON t.image_id=j.image_id
+        JOIN subscriptions s ON s.id=t.subscription_id
+        JOIN telegram_chats c ON c.telegram_chat_id=s.telegram_chat_id
+        JOIN verse_illustrations i ON i.id=j.image_id
+        WHERE s.is_enabled AND NOT s.completed AND s.next_run_at IS NOT NULL
+        AND c.is_active AND s.translation_id=i.translation_id
+        AND extract(isodow from t.local_date)::int=ANY(s.days_of_week)
+        AND t.local_date >= (now() AT TIME ZONE s.timezone)::date
+        GROUP BY j.id
+        UNION ALL
+        SELECT j.id,min(r.created_at),1
+        FROM image_generation_jobs j
+        JOIN illustration_requests r ON r.image_id=j.image_id
+        JOIN telegram_chats c ON c.telegram_chat_id=r.telegram_chat_id
+        WHERE r.state='waiting' AND r.telegram_message_id IS NOT NULL AND c.is_active
+        GROUP BY j.id)
+        SELECT j.id FROM eligible e JOIN image_generation_jobs j ON j.id=e.id
+        WHERE j.state IN ('queued','retry') AND j.attempts<3
+        AND (j.retry_at IS NULL OR j.retry_at<=now())
+        GROUP BY j.id ORDER BY min(e.priority),min(e.needed_at),j.id LIMIT $1""",maximum)
 
 
 async def process_job(connection, job_id, settings: ArtSettings, *, generator=generate):
