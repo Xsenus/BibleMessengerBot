@@ -2,9 +2,113 @@
   "project": "BibleMessengerBot",
   "version": "1.6.0",
   "date": "2026-10-08",
-  "status": "verification_in_progress",
-  "schema_upgrade_copy_verified": true,
-  "old_ready_images_preserved": 7,
-  "daily_api_attempt_limit": 10,
-  "monthly_reservation_limit_usd": 10
+  "status": "LIVE_ON_DEMAND_ARTWORK_CACHE_AND_ENCRYPTED_RESTORE_VALIDATED",
+  "tested_code_commit": "f779ee4e4d9e9910285a7de98c76f665a10de051",
+  "tests": {
+    "github_linux_postgresql": {
+      "passed": 639,
+      "skipped": 0,
+      "seconds": 47.98,
+      "url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37720881231"
+    },
+    "vps_linux_postgresql": {
+      "passed": 639,
+      "skipped": 0,
+      "seconds": 156.42
+    },
+    "windows": {
+      "passed": 576,
+      "skipped": 63,
+      "note": "PostgreSQL cases skipped locally; executed on Linux above."
+    }
+  },
+  "runtime": {
+    "healthy_services": [
+      "postgres",
+      "bot",
+      "worker",
+      "admin",
+      "illustrator"
+    ],
+    "schema_migrations": 7,
+    "editions": 14,
+    "languages": 12,
+    "verse_rows": 414980,
+    "schedules_retained": [
+      "09:00",
+      "09:38",
+      "21:13"
+    ],
+    "schedule_timezone": "Asia/Novosibirsk",
+    "first_natural_evening_delivery": "not_observed_yet; scheduled 2026-10-08T14:13:00Z"
+  },
+  "live_on_demand": {
+    "reference": "2ES 1:34",
+    "prompt_version": 2,
+    "handler_seconds_excluding_telegram": 0.209,
+    "text_telegram_acknowledged": true,
+    "followup_telegram_acknowledged": true,
+    "followup_sent_at": "2026-10-08T03:11:07.571015Z",
+    "repeat_read_photo_acknowledged": true,
+    "repeat_seconds_including_telegram": 0.218,
+    "same_saved_image_reused": true,
+    "api_attempts_for_this_image": 1,
+    "paid_duplicate_on_repeat": false
+  },
+  "image_policy": {
+    "shared_by_exact_edition_coordinates_and_text_sha256": true,
+    "freshness_calendar_months": 3,
+    "age_field": "generated_at",
+    "db_timezone": "UTC",
+    "boundary_is_stale": true,
+    "archive_preserved": true,
+    "rotation": "unseen newest first, then least recently acknowledged per chat",
+    "single_version_is_reused_without_extra_paid_variant": true,
+    "multi_version_rotation_and_calendar_boundaries": "verified in isolated real PostgreSQL; production live sample has one version",
+    "one_pending_job_for_concurrent_requests": true,
+    "on_demand_wait_hours": 24,
+    "daily_scheduled_jobs_have_priority": true
+  },
+  "artwork": {
+    "model": "gpt-image-2",
+    "quality": "medium",
+    "size": "1536x1024",
+    "format": "jpeg",
+    "prompt_version": 2,
+    "neighboring_context": "up to two verses each side, same edition and chapter; bounded volume",
+    "ready_images": 9,
+    "legacy_images_retained": 7,
+    "reviewed_v2_examples": [
+      "2ES 1:34",
+      "2CO 7:6"
+    ],
+    "daily_api_attempt_limit": 10,
+    "monthly_reservation_limit_usd": 10,
+    "utc_day_attempts_at_verification": 8,
+    "reserved_usd_at_verification": "0.80",
+    "reservation_is_not_provider_invoice": true,
+    "old_uncertain_attempt_not_automatically_retried": true
+  },
+  "backup": {
+    "all_9_ready_images_s3_mirrored_and_full_get_sha256_checked": true,
+    "schema6_to7_full_copy_upgrade_preserved_old_bytes_ids_prompts_and_file_ids": true,
+    "encrypted_s3_snapshot_downloaded_decrypted_and_restored": true,
+    "restored_verse_rows": 414980,
+    "restored_editions": 14,
+    "restored_migrations": 7,
+    "restored_images": 9,
+    "legacy_and_v2_images_retained": true,
+    "restored_request_count": 1,
+    "restored_view_rows": 4,
+    "confirmed_followup_history_retained": true,
+    "full_restored_corpus_audit": "passed",
+    "temporary_databases_removed": true,
+    "production_database_replaced_for_test": false
+  },
+  "limits": [
+    "Generative images are artistic interpretations; universal theological or historical accuracy is not guaranteed.",
+    "No complete illustrated Bible corpus was generated.",
+    "Expired waiting requests are not delivered late; user can ask again.",
+    "Telegram API acknowledgement does not prove a human viewed the message."
+  ]
 }
