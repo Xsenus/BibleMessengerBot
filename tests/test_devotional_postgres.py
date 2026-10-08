@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import asyncpg
 import pytest
 
-from app.services import artwork, bible, devotionals
+from app.services import artwork, bible, devotionals,readings
 from app.services.subscriptions import create_or_update_subscription
 from app.worker.delivery import decoded, prepare_subscription, process_delivery
 from tests.test_devotional_artwork import jpeg
@@ -49,7 +49,7 @@ async def test_selection_call_order_persistence_and_repeat_exclusion(db):
     day = date(2026, 10, 8)
     evening = await devotionals.selection(c, edition, 101, day, "evening_verse")
     morning = await devotionals.selection(c, edition, 101, day, "morning_verse")
-    daily = await bible.verse_of_day(c, edition, "101", day)
+    daily = await readings.daily(c, edition, "101", day)
     assert len({devotionals.coordinates(r) for r in [evening, morning, daily]}) == 3
     assert (await devotionals.selection(c, edition, 101, day, "evening_verse"))["id"] == evening[
         "id"
@@ -97,7 +97,7 @@ async def test_prefetch_job_image_persistence_and_same_photo_delivery(db):
     generator.assert_awaited_once()
     delivery = await prepare_subscription(c, sub["id"])
     queued = await c.fetchrow("SELECT * FROM delivery_log WHERE id=$1", delivery)
-    assert decoded(queued["chunks"])[0]["kind"] == "photo"
+    assert decoded(queued["chunks"])[0]["kind"] == "rich"
     assert escape(row["text"]) in queued["payload_preview"]
     assert (
         await process_delivery(

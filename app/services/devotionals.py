@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
 
-from app.services import bible
+from app.services import readings
 from app.services.locks import chat_lock
 
 SLOTS = ("morning_verse", "evening_verse")
@@ -97,20 +97,27 @@ async def selection(connection, edition, chat_id: int, day: date, slot: str):
             if existing:
                 result = existing
                 continue
-            blocked = {
-                coordinates(r)
-                for r in await connection.fetch(
-                    """SELECT book_code,chapter,verse FROM daily_verse_selections
+            blocked = set()
+            for past in await connection.fetch(
+                """SELECT book_code,chapter,verse,verse_text AS text,reading_snapshot FROM daily_verse_selections
                 WHERE telegram_chat_id=$1 AND translation_id=$2 AND local_date BETWEEN $3 AND $4""",
-                    chat_id,
-                    edition["id"],
-                    day - timedelta(days=30),
-                    day,
+                chat_id,
+                edition["id"],
+                day - timedelta(days=30),
+                day,
+            ):
+                snapshot = past["reading_snapshot"]
+                snapshot = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+                expanded = (
+                    None if snapshot else await readings.contextual(connection, edition, past)
                 )
-            }
-            daily = await bible.verse_of_day(connection, edition, str(chat_id), day)
+                blocked.update(
+                    coordinates(r)
+                    for r in (snapshot or (expanded["reading_rows"] if expanded else [past]))
+                )
+            daily = await readings.daily(connection, edition, str(chat_id), day)
             if daily:
-                blocked.add(coordinates(daily))
+                blocked.update(coordinates(r) for r in daily["reading_rows"])
             theme = theme_for(day, current)
             # Pick from actual text, not canonical-coordinate thematic mappings.
             candidates = await connection.fetch(
@@ -138,14 +145,24 @@ async def selection(connection, edition, chat_id: int, day: date, slot: str):
                 }
             if not available:
                 raise ValueError("No distinct devotional verse available")
-            row = min(available, key=lambda r: rank(seed, r))
+            row = reading = None
+            for candidate in sorted(available, key=lambda r: rank(seed, r))[:64]:
+                complete_reading = await readings.contextual(connection, edition, candidate)
+                if complete_reading and not any(
+                    coordinates(r) in blocked for r in complete_reading["reading_rows"]
+                ):
+                    row = candidate
+                    reading = complete_reading
+                    break
+            if row is None:
+                raise ValueError("No complete devotional reading available")
             variant = VARIANTS[
                 int.from_bytes(hashlib.sha256(seed.encode()).digest()[:2], "big") % len(VARIANTS)
             ]
             result = await connection.fetchrow(
                 """INSERT INTO daily_verse_selections
-                (telegram_chat_id,translation_id,local_date,slot,book_code,chapter,verse,verse_text,text_sha256,theme,prompt_variant)
-                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *""",
+                (telegram_chat_id,translation_id,local_date,slot,book_code,chapter,verse,verse_text,text_sha256,theme,prompt_variant,reading_snapshot)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb) RETURNING *""",
                 chat_id,
                 edition["id"],
                 day,
@@ -157,6 +174,7 @@ async def selection(connection, edition, chat_id: int, day: date, slot: str):
                 hashlib.sha256(row["text"].encode()).hexdigest(),
                 theme["name"],
                 variant,
+                json.dumps(reading["reading_rows"], ensure_ascii=False),
             )
         return result
 
@@ -173,4 +191,40 @@ async def selected_verse(connection, edition, chat_id, day, slot):
     )
     if not row or hashlib.sha256(row["text"].encode()).hexdigest() != chosen["text_sha256"]:
         raise ValueError("Prepared devotional source text changed; operator review required")
-    return row, chosen
+    snapshot = chosen["reading_snapshot"]
+    snapshot = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+    if snapshot:
+        for frozen in snapshot:
+            native = await connection.fetchrow(
+                "SELECT text,verse_end FROM verses WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4",
+                edition["id"],
+                frozen["book_code"],
+                frozen["chapter"],
+                frozen["verse"],
+            )
+            if (
+                not native
+                or native["text"] != frozen["text"]
+                or (native["verse_end"] or frozen["verse"])
+                != (frozen.get("verse_end") or frozen["verse"])
+            ):
+                raise ValueError("Prepared reading source changed; operator review required")
+        frozen_anchor = next(
+            (r for r in snapshot if coordinates(r) == coordinates(row)), snapshot[0]
+        )
+        return readings.attach(frozen_anchor, snapshot), chosen
+    reading = await readings.contextual(connection, edition, row)
+    if not reading:
+        # Old plans can contain a roster fragment. A stable replacement is
+        # shared by prefetch and delivery; historic anchor records remain intact.
+        reading = await readings.choose(
+            connection, edition, seed=f"legacy-reading:{chat_id}:{day}:{slot}"
+        )
+    if not reading:
+        raise ValueError("No complete devotional reading available")
+    await connection.execute(
+        "UPDATE daily_verse_selections SET reading_snapshot=$2::jsonb WHERE id=$1 AND reading_snapshot IS NULL",
+        chosen["id"],
+        json.dumps(reading["reading_rows"], ensure_ascii=False),
+    )
+    return reading, chosen

@@ -12,7 +12,7 @@ import pytest
 from app.bot import handlers
 from app.bot.commands import parse_command
 from app.bot.transport import TelegramSender
-from app.services import artwork, bible, illustrations
+from app.services import artwork, bible, illustrations,readings
 from app.services.destinations import configure_chat
 from app.worker.delivery import decoded, process_delivery
 from tests.test_devotional_artwork import jpeg
@@ -94,7 +94,7 @@ async def test_calendar_month_boundary_and_telegram_cache_do_not_reset_age(db, a
         )
 
 
-async def test_concurrent_chats_share_one_job_and_receive_one_followup_each(db, monkeypatch):
+async def test_concurrent_readings_share_one_job_and_edit_each_acknowledged_message(db, monkeypatch):
     provider(monkeypatch)
     c, settings, edition, chat, row = await setup(db)
     second_chat = await create_destination(c, 202)
@@ -107,7 +107,7 @@ async def test_concurrent_chats_share_one_job_and_receive_one_followup_each(db, 
     finally:
         await other.close()
     await artwork.request_image(c, row, edition, chat, "duplicate", "another-key")
-    assert await c.fetchval("SELECT count(*) FROM illustration_requests") == 2
+    assert await c.fetchval("SELECT count(*) FROM illustration_requests") == 3
     assert await c.fetchval("SELECT count(*) FROM image_generation_jobs") == 1
     job = await c.fetchval("SELECT id FROM image_generation_jobs")
     generate = AsyncMock(return_value=(jpeg(), {}, "fixture"))
@@ -116,14 +116,16 @@ async def test_concurrent_chats_share_one_job_and_receive_one_followup_each(db, 
         == "ready"
     )
     generate.assert_awaited_once()
-    assert await artwork.dispatch_requests(c) == 2
+    assert await artwork.dispatch_requests(c) == 0  # No original Telegram ACK yet.
+    for request in await c.fetch('SELECT * FROM illustration_requests'):
+        await illustrations.bind_message(c,request['telegram_chat_id'],request['id'],300+request['id'])
+    assert await artwork.dispatch_requests(c) == 3
     assert await artwork.dispatch_requests(c) == 0
     deliveries = await c.fetch("SELECT * FROM delivery_log ORDER BY id")
-    assert len(deliveries) == 2
-    assert {r["telegram_chat_id"]: decoded(r["chunks"])[0]["caption"] for r in deliveries} == {
-        101: "first text",
-        202: "second text",
-    }
+    assert len(deliveries) == 3
+    assert {decoded(r['chunks'])[0]['text'] for r in deliveries}=={'first text','second text','duplicate'}
+    assert all(decoded(r['chunks'])[0]['kind']=='rich_edit' for r in deliveries)
+    assert len({decoded(r['chunks'])[0]['message_id'] for r in deliveries})==3
     image_ids = {decoded(r["chunks"])[0]["image_id"] for r in deliveries}
     assert len(image_ids) == 1
     sender = SimpleNamespace(send=AsyncMock(return_value=300))
@@ -142,6 +144,7 @@ async def test_late_images_do_not_send_to_changed_or_expired_requests(
     provider(monkeypatch)
     c, _, edition, chat, row = await setup(db)
     await artwork.request_image(c, row, edition, chat, "caption", "request")
+    await c.execute('UPDATE illustration_requests SET telegram_message_id=321')
     await illustrations.store(c, row, edition, jpeg(), "manual")
     if change == "revision":
         await c.execute("UPDATE telegram_chats SET revision=revision+1 WHERE telegram_chat_id=101")
@@ -161,7 +164,7 @@ async def test_random_handler_is_fast_then_cached_and_ack_advances_rotation(db, 
     provider(monkeypatch)
     c, settings, edition, chat, row = await setup(db)
     monkeypatch.setattr(handlers, "destination", AsyncMock(return_value=chat))
-    monkeypatch.setattr(bible, "random_verse", AsyncMock(return_value=row))
+    monkeypatch.setattr(readings, "choose", AsyncMock(return_value=row))
     message = SimpleNamespace(
         from_user=SimpleNamespace(id=101),
         chat=SimpleNamespace(id=101, type="private"),
@@ -170,7 +173,7 @@ async def test_random_handler_is_fast_then_cached_and_ack_advances_rotation(db, 
     )
     text, _ = await handlers.run_command(c, None, settings, message, parse_command("/random"))
     assert "SYNTHETIC" in text and not isinstance(text, illustrations.IllustratedText)
-    assert "queued" in text
+    assert 'queued' not in text and isinstance(text,illustrations.ReadingText) and text.request_id
     assert await c.fetchval("SELECT count(*) FROM image_generation_attempts") == 0
     identifier = await illustrations.store(c, row, edition, jpeg(), "new")
     text, _ = await handlers.run_command(c, None, settings, message, parse_command("/random"))
@@ -178,8 +181,8 @@ async def test_random_handler_is_fast_then_cached_and_ack_advances_rotation(db, 
     monkeypatch.setattr("app.bot.transport.wait_send_slot", AsyncMock())
     bot = SimpleNamespace(
         id=123,
-        send_photo=AsyncMock(
-            return_value=SimpleNamespace(message_id=999, photo=[SimpleNamespace(file_id="cached")])
+        send_rich_message=AsyncMock(
+            return_value=SimpleNamespace(message_id=999, rich_message=SimpleNamespace(blocks=[SimpleNamespace(type='photo',photo=[SimpleNamespace(file_id="cached")])]))
         ),
     )
     sender = TelegramSender(bot, c, settings)
@@ -192,7 +195,7 @@ async def test_random_handler_is_fast_then_cached_and_ack_advances_rotation(db, 
         await c.fetchval("SELECT telegram_file_id FROM verse_illustrations WHERE id=$1", identifier)
         == "cached"
     )
-    bot.send_photo.side_effect = OSError("network")
+    bot.send_rich_message.side_effect = OSError("network")
     from app.services.errors import SendError
 
     with pytest.raises(SendError):

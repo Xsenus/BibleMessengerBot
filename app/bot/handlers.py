@@ -18,7 +18,7 @@ from app.bot.transport import TelegramSender
 from app.bot.ui import main_keyboard,keyboard_command,welcome_text,menu_hint,search_prompt,onboarding_help,send_welcome
 from app.catalog.profiles import normalize_language_code
 from app.services import bible
-from app.services import passage,illustrations
+from app.services import passage,illustrations,readings
 from app.services.accounts import upsert_user,upsert_chat,claim_owner
 from app.services.destinations import configure_chat,ensure_resolved,cancel_queued
 from app.services.errors import UserError,SendError
@@ -95,7 +95,9 @@ async def reply(bot: Any, connection: Any, settings: Any, chat_id: int, text: st
     sender = TelegramSender(bot,connection,settings)
     for index,part in enumerate(parts):
         try:
-            await sender.send(chat_id,part,thread,reply_markup=markup if index==len(parts)-1 else None)
+            message_id = await sender.send(chat_id,part,thread,reply_markup=markup if index==len(parts)-1 else None)
+            if isinstance(part,dict) and part.get('kind')=='rich':
+                await illustrations.bind_message(connection,chat_id,part.get('request_id'),message_id)
         except SendError as error:
             LOGGER.warning('UI response to %s stopped: %s',chat_id,error.kind)
             return
@@ -367,12 +369,12 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
     local_date = datetime.now(ZoneInfo(chat['timezone'])).date()
     row = None
     if name=='today':
-        row = await bible.verse_of_day(connection,edition,str(chat['telegram_chat_id']),local_date)
+        row = await readings.daily(connection,edition,str(chat['telegram_chat_id']),local_date)
     elif name=='random':
-        row = await bible.random_verse(connection,edition)
+        row = await readings.choose(connection,edition)
     elif name=='topic':
         result = await bible.topic_verse(connection,edition,args[0] if args else None,str(chat['telegram_chat_id']),local_date)
-        row = result[1] if result else None
+        row = await readings.contextual(connection,edition,result[1]) if result else None
     elif name in {'search','read'}:
         result = await passage.lookup(connection,edition,' '.join(args))
         if result:
@@ -487,7 +489,7 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
             LOGGER.error('Command failed: %s',type(error).__name__)
             text,markup = tr(locale,'not_ready'),None
         if donation_command is None:
-            if markup is None and enum_value(message.chat.type)=='private':
+            if markup is None and enum_value(message.chat.type)=='private' and not isinstance(text,illustrations.ReadingText):
                 markup = main_keyboard(locale)
             await reply(bot,connection,settings,message.chat.id,text,markup,message.message_thread_id)
     if donation_command is not None:

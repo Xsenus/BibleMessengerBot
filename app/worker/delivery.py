@@ -6,7 +6,7 @@ from datetime import datetime,timezone,timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 from app.services import bible
-from app.services import illustrations,devotionals
+from app.services import illustrations,devotionals,readings
 from app.services.errors import UserError
 from app.services.i18n import tr
 from app.services.locks import chat_lock
@@ -22,9 +22,9 @@ def decoded(value: Any) -> Any:
 
 async def insert_payload(connection: Any, chat: Any, translation: Any, text: str,
                          key: str, mode: str, progress: dict[str,Any], *,
-                         subscription: Any = None, max_length: int = 3900, image_id: int | None = None) -> int:
+                         subscription: Any = None, max_length: int = 3900, image_id: int | None = None, frozen_chunks=None) -> int:
     """Persist content and references atomically before the first send request."""
-    chunks = illustrations.chunks(text,image_id,max_length)
+    chunks = frozen_chunks if frozen_chunks is not None else illustrations.chunks(text,image_id,max_length)
     if not chunks:
         raise ValueError('An empty payload cannot enter the delivery queue')
     identifier = await connection.fetchval('''INSERT INTO delivery_log(
@@ -64,16 +64,19 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
         mode = sub['mode']
         image_id = None
         if mode in {'verse_of_day','topic_of_day','morning_verse','evening_verse'}:
-            row = await bible.verse_of_day(connection,edition,str(chat['telegram_chat_id']),local_date) if mode=='verse_of_day' else None
+            row = await readings.daily(connection,edition,str(chat['telegram_chat_id']),local_date) if mode=='verse_of_day' else None
             if mode=='topic_of_day':
                 result = await bible.topic_verse(connection,edition,sub['topic_code'],str(chat['telegram_chat_id']),local_date)
-                row = result[1] if result else None
+                row = await readings.contextual(connection,edition,result[1]) if result else None
             if mode in devotionals.SLOTS:
                 row,_ = await devotionals.selected_verse(connection,edition,chat['telegram_chat_id'],local_date,mode)
             if not row:
                 raise UserError('no_result')
             text = f"<b>{tr(locale,mode)}</b>\n\n"+await bible.render_verse(connection,row,edition,ui_language=locale)
-            image_id = await illustrations.lookup_or_queue(connection,row,edition,chat_id=chat["telegram_chat_id"])
+            text = await illustrations.decorate(connection,text,row,edition,chat=chat,
+                request_key=f"subscription:{sub['id']}:{sub['revision']}:{sub['next_run_at'].isoformat()}",
+                thread_id=chat['message_thread_id'])
+            image_id = getattr(text,'image_id',None)
         elif mode=='sequential':
             reference = await bible.next_chapter_reference(connection,edition['id'],sub['current_book_code'],sub['current_chapter'])
             if reference:
@@ -186,6 +189,9 @@ class SqlCheckpoints:
                 envelope.id,'sent' if final else 'pending',message_id,final)
             if final:
                 await commit_progress(self.connection,delivery)
+            chunk = envelope.chunks[envelope.next_chunk]
+            if isinstance(chunk,dict) and chunk.get('kind')=='rich':
+                await illustrations.bind_message(self.connection,envelope.chat_id,chunk.get('request_id'),message_id)
 
     async def fail(self, envelope: Envelope, kind: str, retry_after: float) -> None:
         """Known rejection is retryable; ambiguity blocks automation until reviewed."""
@@ -230,6 +236,9 @@ async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> st
 async def recover_ambiguous(connection: Any) -> int:
     """Only run after acquiring the singleton-worker lock, never using an arbitrary lease."""
     async with connection.transaction():
+        await connection.execute("""UPDATE delivery_log SET status='retry',sending_chunk=NULL,
+            retry_at=now(),error_code='edit_interrupted',updated_at=now()
+            WHERE status='sending' AND progress->>'kind'='illustration_edit'""")
         result = await connection.execute("UPDATE delivery_log SET status='uncertain',error_code='worker_interrupted',updated_at=now() WHERE status='sending'")
         await connection.execute("UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE id IN (SELECT subscription_id FROM delivery_log WHERE status='uncertain')")
     return int(result.split()[-1])

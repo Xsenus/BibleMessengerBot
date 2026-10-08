@@ -24,6 +24,28 @@ class IllustratedText(str):
         return instance
 
 
+class ReadingText(str):
+    """One editable reading card, including text while its artwork is pending."""
+
+    def __new__(cls, text, image_id=None, request_id=None):
+        instance = super().__new__(cls, text)
+        instance.image_id, instance.request_id = image_id, request_id
+        return instance
+
+
+async def bind_message(connection, chat_id, request_id, message_id):
+    """Only a confirmed initial send may give a background edit its target."""
+    if request_id is not None:
+        await connection.execute(
+            """UPDATE illustration_requests SET telegram_message_id=$3
+            WHERE id=$1 AND telegram_chat_id=$2 AND state='waiting'
+            AND (telegram_message_id IS NULL OR telegram_message_id=$3)""",
+            request_id,
+            chat_id,
+            message_id,
+        )
+
+
 def identity(row, translation):
     return (
         translation["id"],
@@ -128,6 +150,7 @@ async def decorate(
     request_key=None,
     thread_id=None,
 ) -> str:
+    request_id = None
     try:
         image_id = await lookup_or_queue(
             connection, row, translation, chat_id=chat["telegram_chat_id"] if chat else None
@@ -144,11 +167,13 @@ async def decorate(
                     connection, row, translation, chat_id=chat["telegram_chat_id"]
                 )
             if queued:
-                text += (
-                    "\n\n🎨 Новая иллюстрация в очереди. Пришлю её отдельно, если она будет готова в течение суток. Генерация зависит от доступного бюджета."
-                    if chat["ui_language"] == "ru"
-                    else "\n\n🎨 A new illustration is queued. I'll send it separately if it is ready within 24 hours, subject to the generation budget."
+                request_id = await connection.fetchval(
+                    "SELECT id FROM illustration_requests WHERE telegram_chat_id=$1 AND request_key=$2 AND state='waiting'",
+                    chat["telegram_chat_id"],
+                    request_key,
                 )
+        if chat is not None:
+            return ReadingText(text, image_id, request_id)
         return IllustratedText(text, image_id) if image_id else text
     except Exception as error:
         LOGGER.warning("Verse illustration unavailable (%s)", type(error).__name__)
@@ -156,6 +181,12 @@ async def decorate(
 
 
 def chunks(text: str, image_id: int | None, max_length: int = 3900) -> list:
+    if isinstance(text, ReadingText):
+        if len(text.encode("utf-8")) > 24000:
+            raise ValueError("Reading card exceeds the bounded rich-message size")
+        return [
+            {"kind": "rich", "text": str(text), "image_id": image_id, "request_id": text.request_id}
+        ]
     parts = split_message(text, max_length)
     if not image_id:
         return parts

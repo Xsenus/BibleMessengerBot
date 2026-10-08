@@ -13,7 +13,7 @@ from io import BytesIO
 import httpx
 from PIL import Image
 
-from app.services import bible, devotionals, illustrations
+from app.services import bible, devotionals, illustrations, readings
 from app.services.locks import lock_key
 
 
@@ -91,6 +91,8 @@ def prompt(
 
 
 async def source_context(connection, row, edition):
+    if row.get("reading_rows"):
+        return "\n".join(f"{r['verse']}: {r['text']}" for r in row["reading_rows"])[:1800]
     neighbors = await connection.fetch(
         """SELECT verse,text FROM verses WHERE translation_id=$1 AND book_code=$2 AND chapter=$3
         AND verse BETWEEN $4 AND $5 AND verse<>$6 AND NOT is_range_continuation
@@ -204,6 +206,7 @@ async def enqueue(connection, row, edition, *, subscription=None, **context):
 async def request_image(connection, row, edition, chat, caption, request_key, thread_id=None):
     """Deduplicate on-demand requests without reserving or spending API budget here."""
     from app.services.locks import chat_lock
+    import json
 
     settings = ArtSettings.from_env()
     if settings.provider != "openai" or not settings.key:
@@ -219,19 +222,29 @@ async def request_image(connection, row, edition, chat, caption, request_key, th
             return False
         await connection.execute(
             """INSERT INTO illustration_requests(telegram_chat_id,image_id,request_key,caption,
-            chat_revision,message_thread_id) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING""",
+            chat_revision,message_thread_id,source_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) ON CONFLICT DO NOTHING""",
             chat["telegram_chat_id"],
             image_id,
             request_key,
             caption,
             chat["revision"],
             thread_id,
+            json.dumps(
+                [
+                    {
+                        "verse": r["verse"],
+                        "verse_end": r.get("verse_end") or r["verse"],
+                        "sha256": hashlib.sha256(r["text"].encode()).hexdigest(),
+                    }
+                    for r in row.get("reading_rows") or [row]
+                ]
+            ),
         )
         return True
 
 
 async def dispatch_requests(connection, maximum=100):
-    """Freeze ready follow-up photos in the existing crash-safe Telegram outbox."""
+    """Edit only the original acknowledged card; never send a second message."""
     from app.services.locks import chat_lock
     from app.worker.delivery import insert_payload
 
@@ -246,7 +259,8 @@ async def dispatch_requests(connection, maximum=100):
     rows = await connection.fetch(
         """SELECT r.id,r.telegram_chat_id FROM illustration_requests r
         JOIN verse_illustrations i ON i.id=r.image_id
-        WHERE r.state='waiting' AND i.status='ready' ORDER BY r.id LIMIT $1""",
+        WHERE r.state='waiting' AND r.telegram_message_id IS NOT NULL
+        AND i.status='ready' ORDER BY r.id LIMIT $1""",
         maximum,
     )
     count = 0
@@ -288,6 +302,31 @@ async def dispatch_requests(connection, maximum=100):
                     "UPDATE illustration_requests SET state='cancelled' WHERE id=$1", request["id"]
                 )
                 continue
+            import json
+
+            snapshot = request["source_snapshot"]
+            snapshot = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+            valid = True
+            for item in snapshot:
+                native = await connection.fetchrow(
+                    "SELECT text,verse_end FROM verses WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4",
+                    image["translation_id"],
+                    image["book_code"],
+                    image["chapter"],
+                    item["verse"],
+                )
+                if (
+                    not native
+                    or hashlib.sha256(native["text"].encode()).hexdigest() != item["sha256"]
+                    or (native["verse_end"] or item["verse"]) != item["verse_end"]
+                ):
+                    valid = False
+                    break
+            if not valid:
+                await connection.execute(
+                    "UPDATE illustration_requests SET state='cancelled' WHERE id=$1", request["id"]
+                )
+                continue
             chat = dict(chat)
             chat["message_thread_id"] = request["message_thread_id"]
             delivery = await insert_payload(
@@ -296,9 +335,16 @@ async def dispatch_requests(connection, maximum=100):
                 edition,
                 request["caption"],
                 f"illustration-request:{request['id']}",
-                "manual",
-                {"kind": "illustration"},
-                image_id=request["image_id"],
+                "illustration_edit",
+                {"kind": "illustration_edit"},
+                frozen_chunks=[
+                    {
+                        "kind": "rich_edit",
+                        "image_id": request["image_id"],
+                        "text": request["caption"],
+                        "message_id": request["telegram_message_id"],
+                    }
+                ],
             )
             await connection.execute(
                 "UPDATE illustration_requests SET state='queued',delivery_id=$2 WHERE id=$1",
@@ -372,9 +418,7 @@ async def plan_ahead(connection, *, now=None, horizon=1):
             if not edition:
                 continue
             if sub["mode"] == "verse_of_day":
-                row = await bible.verse_of_day(
-                    connection, edition, str(sub["telegram_chat_id"]), day
-                )
+                row = await readings.daily(connection, edition, str(sub["telegram_chat_id"]), day)
                 context = {"variant": "symbolic", "slot": "verse_of_day", "day": day}
             else:
                 row, chosen = await devotionals.selected_verse(
@@ -387,7 +431,16 @@ async def plan_ahead(connection, *, now=None, horizon=1):
                     "theme": chosen["theme"],
                 }
             if row:
-                await enqueue(connection, row, edition, subscription=sub, **context)
+                image_id = await enqueue(connection, row, edition, subscription=sub, **context)
+                # A new reading algorithm can replace an old unconsumed daily
+                # plan. Preserve paid jobs/artwork but stop spending on obsolete
+                # targets for the same subscription/date.
+                await connection.execute(
+                    "DELETE FROM image_generation_targets WHERE subscription_id=$1 AND local_date=$2 AND image_id<>$3",
+                    sub["id"],
+                    day,
+                    image_id,
+                )
 
 
 async def reserve(connection, job_id, settings: ArtSettings):

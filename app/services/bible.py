@@ -215,6 +215,9 @@ def license_details(translation: Any, ui_language: str) -> str:
 async def render_verse(connection: Any, row: Any, translation: Any,
                        *, ui_language: str = 'ru') -> str:
     """Escape verse text verbatim and retain the source reference range."""
+    if row.get('reading_rows'):
+        from app.services.readings import render
+        return await render(connection,row,translation,ui_language)
     name = await _book_name(connection,row['book_code'],translation['language_code'],translation['id'])
     return (f"<blockquote>{escape(row['text'])}</blockquote>\n"
             f"<b>{escape(name)} {row['chapter']}:{verse_label(row)}</b>\n"+attribution(translation,ui_language))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Any
 
 from aiogram.exceptions import (
@@ -13,7 +14,12 @@ from aiogram.exceptions import (
     TelegramRetryAfter,
     TelegramServerError,
 )
-from aiogram.types import BufferedInputFile
+from aiogram.types import (
+    BufferedInputFile,
+    InputMediaPhoto,
+    InputRichMessage,
+    InputRichMessageMedia,
+)
 
 from app.services.errors import SendError
 from app.services.formatting import plain_text, utf16_length
@@ -40,7 +46,10 @@ class TelegramSender:
         )
         try:
             if isinstance(text, dict):
-                message = await self._photo(chat_id, text, thread_id, reply_markup)
+                if text.get("kind") in {"rich", "rich_edit"}:
+                    message = await self._rich(chat_id, text, thread_id, reply_markup)
+                else:
+                    message = await self._photo(chat_id, text, thread_id, reply_markup)
             else:
                 message = await self.bot.send_message(
                     chat_id,
@@ -58,7 +67,109 @@ class TelegramSender:
         except TelegramBadRequest:
             raise SendError("rejected") from None
         except (TelegramNetworkError, TelegramServerError, TelegramAPIError, TimeoutError, OSError):
+            if isinstance(text, dict) and text.get("kind") == "rich_edit":
+                # Editing a frozen target is idempotent: a lost ACK cannot create
+                # another message or consume another generation request.
+                raise SendError("retry", 3) from None
             raise SendError("uncertain") from None
+
+    async def _rich(self, chat_id, chunk, thread_id, markup):
+        text, identifier = chunk.get("text"), chunk.get("image_id")
+        editing = chunk["kind"] == "rich_edit"
+        target = chunk.get("message_id")
+        if (
+            not isinstance(text, str)
+            or not text
+            or len(text.encode("utf-8")) > 24000
+            or (editing and (type(target) is not int or target <= 0))
+            or (identifier is not None and (type(identifier) is not int or identifier <= 0))
+        ):
+            raise SendError("rejected")
+        # Reply keyboards make Telegram messages non-editable. The persistent
+        # navigation keyboard established by /start remains available.
+        if markup is not None and not hasattr(markup, "inline_keyboard"):
+            raise SendError("rejected")
+        html = text.replace("\n", "<br>")
+        image = cached = None
+        if identifier is not None:
+            image = await self.connection.fetchrow(
+                "SELECT mime_type,telegram_file_id,telegram_bot_id,image_data FROM verse_illustrations WHERE id=$1 AND status='ready'",
+                identifier,
+            )
+            if not image:
+                raise SendError("rejected")
+            cached = image["telegram_file_id"] if image["telegram_bot_id"] == self.bot.id else None
+
+        async def perform(use_cache):
+            media = []
+            if image is not None:
+                suffix = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[
+                    image["mime_type"]
+                ]
+                photo = (
+                    cached
+                    if use_cache
+                    else BufferedInputFile(
+                        bytes(image["image_data"]), filename=f"reading-{identifier}.{suffix}"
+                    )
+                )
+                media = [InputRichMessageMedia(id="artwork", media=InputMediaPhoto(media=photo))]
+            rich = InputRichMessage(
+                html=('<img src="tg://photo?id=artwork"/>' if image else "") + html,
+                media=media or None,
+            )
+            if editing:
+                return await self.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=target,
+                    rich_message=rich,
+                    parse_mode=None,
+                    reply_markup=markup,
+                    request_timeout=20,
+                )
+            return await self.bot.send_rich_message(
+                chat_id=chat_id,
+                rich_message=rich,
+                message_thread_id=thread_id,
+                reply_markup=markup,
+                request_timeout=20,
+            )
+
+        try:
+            try:
+                sent = await perform(bool(cached))
+            except TelegramBadRequest as error:
+                if editing and "message is not modified" in error.message.lower():
+                    return SimpleNamespace(message_id=target)
+                # Retry only a definite stale-file rejection. Deleted/non-editable
+                # messages must never turn into replacement sends.
+                if not cached or not any(
+                    s in error.message.lower()
+                    for s in ("file identifier", "file_id", "wrong remote file")
+                ):
+                    raise
+                sent = await perform(False)
+        except TelegramBadRequest as error:
+            if editing and "message is not modified" in error.message.lower():
+                return SimpleNamespace(message_id=target)
+            raise
+        if image is not None:
+            try:
+                for block in sent.rich_message.blocks:
+                    if getattr(block, "type", None) == "photo" and block.photo:
+                        await self.connection.execute(
+                            "UPDATE verse_illustrations SET telegram_file_id=$2,telegram_bot_id=$3,updated_at=now() WHERE id=$1",
+                            identifier,
+                            block.photo[-1].file_id,
+                            self.bot.id,
+                        )
+                        break
+                from app.services.illustrations import record_view
+
+                await record_view(self.connection, chat_id, identifier)
+            except Exception as error:
+                LOGGER.warning("Reading artwork cache deferred (%s)", type(error).__name__)
+        return sent
 
     async def _photo(self, chat_id: int, chunk: dict, thread_id: int | None, markup: Any) -> Any:
         identifier, caption = chunk.get("image_id"), chunk.get("caption")

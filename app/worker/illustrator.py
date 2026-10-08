@@ -98,7 +98,7 @@ async def worker():
                                 FROM image_generation_jobs j
                                 JOIN illustration_requests r ON r.image_id=j.image_id
                                 JOIN telegram_chats c ON c.telegram_chat_id=r.telegram_chat_id
-                                WHERE r.state='waiting' AND r.expires_at>now() AND c.is_active
+                                WHERE r.state='waiting' AND r.telegram_message_id IS NOT NULL AND r.expires_at>now() AND c.is_active
                                 AND r.chat_revision=c.revision GROUP BY j.id)
                                 SELECT j.id FROM eligible e JOIN image_generation_jobs j ON j.id=e.id
                                 WHERE j.state IN ('queued','retry') AND j.attempts<3

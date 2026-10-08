@@ -80,11 +80,13 @@ async def test_daily_photo_is_queued_once_and_progress_commits_only_after_delive
         "UPDATE subscriptions SET next_run_at=now()-interval '1 minute' WHERE id=$1", sub["id"]
     )
     date = (await c.fetchval("SELECT next_run_at FROM subscriptions WHERE id=$1", sub["id"])).date()
-    row = await bible.verse_of_day(c, edition, "101", date)
+    from app.services import readings
+    row = await readings.daily(c, edition, "101", date)
     await illustrations.store(c, row, edition, PNG, "fixture prompt")
     delivery = await prepare_subscription(c, sub["id"])
     frozen = await c.fetchrow("SELECT * FROM delivery_log WHERE id=$1", delivery)
-    assert decoded(frozen["chunks"])[0]["kind"] == "photo"
+    assert decoded(frozen["chunks"])[0]["kind"] == "rich"
+    assert decoded(frozen['chunks'])[0]['image_id'] is not None
     assert await prepare_subscription(c, sub["id"]) is None
     assert await c.fetchval("SELECT last_run_at FROM subscriptions WHERE id=$1", sub["id"]) is None
     sender = type("Sender", (), {"send": AsyncMock(return_value=987)})()
