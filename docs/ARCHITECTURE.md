@@ -46,3 +46,6 @@ Compose ждёт healthy PostgreSQL и успешного bootstrap для шт�
 ## Границы инфраструктуры
 
 PostgreSQL не публикуется на хосте. Admin доступен через loopback и SSH-туннель. Приложение работает под непривилегированным пользователем контейнера, без capabilities, с `no-new-privileges`. Compose задаёт лимиты ресурсов и ротацию Docker-логов. Это одна установка на одном хосте, без заявленной высокой доступности или автоматического масштабирования. Подробности — [SECURITY.md](SECURITY.md) и [LIMITATIONS.md](LIMITATIONS.md).
+
+
+В 1.5.0 отдельный `illustrator` готовит сегодняшний и завтрашний планы, вызывает OpenAI вне отправки Telegram и зеркалирует изображения в S3. Пять постоянных служб: postgres, bot, worker, admin, illustrator. `backup` — одноразовый maintenance-контейнер; снимки БД шифруются до S3. См. [DAILY_ARTWORK.md](DAILY_ARTWORK.md) и [S3_BACKUP.md](S3_BACKUP.md).

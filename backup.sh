@@ -12,3 +12,9 @@ docker compose exec -T postgres sh -c 'exec pg_dump --format=custom --no-owner -
 mv "$tmp" "$name"
 sha256sum "$name" >"${name}.sha256"
 printf 'Database backup: %s\n' "$name"
+if [[ ${BACKUP_LOCAL_ONLY:-0} != 1 ]]; then
+  docker compose --profile maintenance run --rm -T --no-deps backup \
+    python -m app.backup_admin upload-db --file "/app/$name"
+  docker compose --profile maintenance run --rm -T --no-deps backup \
+    python -m app.backup_admin prune-local
+fi

@@ -4,9 +4,9 @@ from dataclasses import dataclass
 import re
 from app.services.errors import UserError
 
-MANAGEMENT = {'settings','language','ui','translation','translations','register','subscribe','channel','daily','read',
+MANAGEMENT = {'settings','language','ui','translation','translations','register','subscribe','channel','daily','read','devotions',
     'pause','resume','unsubscribe','status','next','reset','resolve','thread','time','license','topics'}
-MODE_ALIASES = {'order':'sequential','порядок':'sequential','verse':'verse_of_day','стих':'verse_of_day',
+MODE_ALIASES = {'morning':'morning_verse','evening':'evening_verse','утро':'morning_verse','вечер':'evening_verse','order':'sequential','порядок':'sequential','verse':'verse_of_day','стих':'verse_of_day',
     'topic':'topic_of_day','тема':'topic_of_day','plan':'reading_plan','план':'reading_plan'}
 
 
@@ -37,7 +37,7 @@ def parse_command(text: str) -> ParsedCommand:
 def mode_name(value: str) -> str:
     """Keep stable machine command names while accepting familiar short aliases."""
     name = MODE_ALIASES.get(value.lower(),value.lower())
-    if name not in {'sequential','verse_of_day','topic_of_day','reading_plan'}:
+    if name not in {'sequential','verse_of_day','topic_of_day','reading_plan','morning_verse','evening_verse'}:
         raise UserError('invalid')
     return name
 

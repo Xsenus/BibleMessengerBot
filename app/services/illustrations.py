@@ -105,7 +105,7 @@ async def store(connection: Any, row: Any, translation: Any, data: bytes, prompt
             )
         return await connection.fetchval(
             """UPDATE verse_illustrations SET status='ready',image_data=$6,
-            mime_type=$7,prompt=$8,telegram_file_id=NULL,telegram_bot_id=NULL,updated_at=now()
+            mime_type=$7,prompt=$8,telegram_file_id=NULL,telegram_bot_id=NULL,s3_key=NULL,s3_sha256=NULL,s3_backed_up_at=NULL,updated_at=now()
             WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4 AND text_sha256=$5 RETURNING id""",
             translation["id"],
             row["book_code"],

@@ -47,10 +47,11 @@ async def run(args):
             if not 1 <= args.limit <= 1000:
                 raise ValueError("Choose 1 to 1000 prompts")
             rows = await c.fetch(
-                """SELECT i.id,i.text_sha256,v.book_code,v.chapter,v.verse,v.text,t.title
+                """SELECT i.id,i.text_sha256,v.book_code,v.chapter,v.verse,v.text,t.title,j.prompt AS prepared_prompt
                 FROM verse_illustrations i JOIN verses v ON v.translation_id=i.translation_id
                     AND v.book_code=i.book_code AND v.chapter=i.chapter AND v.verse=i.verse
                 JOIN translations t ON t.id=i.translation_id
+                LEFT JOIN image_generation_jobs j ON j.image_id=i.id
                 WHERE i.status='pending' ORDER BY i.id LIMIT $1""",
                 args.limit,
             )
@@ -63,7 +64,7 @@ async def run(args):
             args.output.write_text(
                 "".join(
                     json.dumps(
-                        {"id": r["id"], "prompt": illustrations.prompt_for(r, r["title"])},
+                        {"id": r["id"], "prompt": r['prepared_prompt'] or illustrations.prompt_for(r, r["title"])},
                         ensure_ascii=False,
                     )
                     + "\n"

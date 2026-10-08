@@ -57,3 +57,6 @@ ORDER BY l.code, t.source_translation_id;
 ## Иллюстрации стихов
 
 Миграция `005_illustrations.sql`: `verse_illustrations` связывает издание/книгу/главу/стих с SHA-256 текста, состоянием `pending/ready/failed`, бинарным изображением, MIME, заданием и Telegram file_id/ID бота. Старые миграции не изменены. [Хранение и эксплуатация](ILLUSTRATIONS.md).
+
+
+Миграция `006_daily_content_and_cloud.sql` добавляет morning_verse/evening_verse, фиксированные `daily_verse_selections`, задания/попытки/цели генерации, квитанции S3 и поля облачной копии изображения. Резерв бюджета сериализуется общей PostgreSQL advisory-блокировкой. Исторические миграции 001–005 не изменены.

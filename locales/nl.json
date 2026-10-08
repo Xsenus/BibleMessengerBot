@@ -60,5 +60,7 @@
   "choose": "Kiezen",
   "_name": "Nederlands",
   "_direction": "ltr",
-  "_review": "assistant-translated; not independently native-speaker reviewed"
+  "_review": "assistant-translated; not independently native-speaker reviewed",
+  "morning_verse": "🌅 Morning verse",
+  "evening_verse": "🌙 Evening verse"
 }

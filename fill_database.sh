@@ -63,7 +63,7 @@ done
 bash backup.sh
 PREVIOUS=()
 while IFS= read -r service; do
-  case "$service" in bot|worker|admin) PREVIOUS+=("$service");; esac
+  case "$service" in bot|worker|admin|illustrator) PREVIOUS+=("$service");; esac
 done < <(docker compose ps --services --status running)
 RESUME=false
 finish() {

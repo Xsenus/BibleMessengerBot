@@ -13,7 +13,7 @@ async def cancel_subscription_jobs(connection: Any, subscription_id: int) -> Non
     await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='subscription_changed',updated_at=now() WHERE subscription_id=$1 AND status IN ('pending','retry')", subscription_id)
 
 
-VALID_MODES = {'sequential','verse_of_day','topic_of_day','reading_plan'}
+VALID_MODES = {'sequential','verse_of_day','topic_of_day','reading_plan','morning_verse','evening_verse'}
 
 
 async def create_or_update_subscription(connection: Any, *, chat_id: int, created_by: int | None,

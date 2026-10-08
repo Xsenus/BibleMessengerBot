@@ -60,5 +60,7 @@
   "choose": "Выберите",
   "_name": "Русский",
   "_direction": "ltr",
-  "_review": "assistant-translated; not independently native-speaker reviewed"
+  "_review": "assistant-translated; not independently native-speaker reviewed",
+  "morning_verse": "🌅 Утренний стих",
+  "evening_verse": "🌙 Вечерний стих"
 }

@@ -6,7 +6,7 @@ from datetime import datetime,timezone,timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 from app.services import bible
-from app.services import illustrations
+from app.services import illustrations,devotionals
 from app.services.errors import UserError
 from app.services.i18n import tr
 from app.services.locks import chat_lock
@@ -63,11 +63,13 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
         progress: dict[str,Any] = {'kind':'subscription','completed':False}
         mode = sub['mode']
         image_id = None
-        if mode in {'verse_of_day','topic_of_day'}:
+        if mode in {'verse_of_day','topic_of_day','morning_verse','evening_verse'}:
             row = await bible.verse_of_day(connection,edition,str(chat['telegram_chat_id']),local_date) if mode=='verse_of_day' else None
             if mode=='topic_of_day':
                 result = await bible.topic_verse(connection,edition,sub['topic_code'],str(chat['telegram_chat_id']),local_date)
                 row = result[1] if result else None
+            if mode in devotionals.SLOTS:
+                row,_ = await devotionals.selected_verse(connection,edition,chat['telegram_chat_id'],local_date,mode)
             if not row:
                 raise UserError('no_result')
             text = f"<b>{tr(locale,mode)}</b>\n\n"+await bible.render_verse(connection,row,edition,ui_language=locale)

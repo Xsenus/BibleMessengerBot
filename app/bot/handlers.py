@@ -114,6 +114,7 @@ def settings_keyboard(chat: Any) -> InlineKeyboardMarkup:
         [button(tr(locale,'pause'),'pause',identifier),button(tr(locale,'resume'),'resume',identifier)],
         [button(tr(locale,'status'),'status',identifier),button(tr(locale,'time'),'timehelp',identifier)]]
     rows.append([button('🔔 Стих каждый день' if locale=='ru' else '🔔 Daily verse','daily',identifier)])
+    rows.append([button('🌅 Утро и вечер' if locale=='ru' else '🌅 Morning and evening','devotions',identifier)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -123,6 +124,18 @@ def daily_confirmation(subscription: Any, locale: str) -> str:
     if locale=='ru':
         return f'🔔 <b>Ежедневный стих включён</b>\nКаждый день в <b>{clock}</b> · {zone}\n\nИзменить время: /time · Отключить: /daily off'
     return f'🔔 <b>Daily verse enabled</b>\nEvery day at <b>{clock}</b> · {zone}\n\nChange schedule: /time · Turn off: /daily off'
+
+
+async def enable_devotions(connection: Any,chat: Any,actor_id:int) -> str:
+    edition=await bible.chat_translation(connection,chat['telegram_chat_id'])
+    if not edition:raise UserError('not_ready')
+    async with chat_lock(connection,chat['telegram_chat_id']),connection.transaction():
+        for mode,clock in [('morning_verse','09:38'),('evening_verse','21:13')]:
+            await create_or_update_subscription(connection,chat_id=chat['telegram_chat_id'],created_by=actor_id,
+                translation_id=edition['id'],mode=mode,send_time=parse_hhmm(clock),timezone_name=chat['timezone'])
+    if chat['ui_language']=='ru':
+        return f"🌅 <b>Утро и вечер включены</b>\n09:38 и 21:13 · {escape(chat['timezone'])}\nРазные стихи по дате и времени суток.\nОтключить: /devotions off"
+    return f"🌅 <b>Morning and evening enabled</b>\n09:38 and 21:13 · {escape(chat['timezone'])}\nDistinct verses selected by date and time of day.\nTurn off: /devotions off"
 
 
 async def settings_text(connection: Any, chat: Any) -> str:
@@ -223,6 +236,13 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         return search_prompt(locale),None
     if name=='read' and not args:
         return search_prompt(locale),None
+    if name=='devotions':
+        if args==['off']:
+            for mode in ['morning_verse','evening_verse']:
+                await set_enabled(connection,chat['telegram_chat_id'],False,mode)
+            return ('Утренние и вечерние стихи отключены.' if locale=='ru' else 'Morning and evening verses disabled.'),settings_keyboard(chat)
+        if args:raise UserError('invalid')
+        return await enable_devotions(connection,chat,user.id),settings_keyboard(chat)
     if name=='daily':
         if args==['off']:
             await set_enabled(connection,chat['telegram_chat_id'],False,'verse_of_day')
@@ -300,8 +320,8 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             chat = await configure_chat(connection,chat_id=chat['telegram_chat_id'],actor_id=user.id,timezone_name=tz)
             rows = await list_subscriptions(connection,chat['telegram_chat_id'])
             for row in rows:
-                await connection.execute('UPDATE subscriptions SET send_time=$2,next_run_at=$3,revision=revision+1 WHERE id=$1',row['id'],clock,
-                    next_occurrence(clock,tz,list(row['days_of_week'])) if row['is_enabled'] else None)
+                await connection.execute('UPDATE subscriptions SET send_time=$2,next_run_at=$3,revision=revision+1 WHERE id=$1',row['id'],row['send_time'] if row['mode'] in {'morning_verse','evening_verse'} else clock,
+                    next_occurrence(row['send_time'] if row['mode'] in {'morning_verse','evening_verse'} else clock,tz,list(row['days_of_week'])) if row['is_enabled'] else None)
         return tr(locale,'saved'),settings_keyboard(chat)
     if name in {'subscribe','channel'}:
         if not args:
@@ -541,6 +561,8 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
                 text,markup = modes_menu(chat)
             elif action=='status':
                 text,markup = await status_text(connection,chat),settings_keyboard(chat)
+            elif action=='devotions':
+                text,markup = await enable_devotions(connection,chat,callback.from_user.id),settings_keyboard(chat)
             elif action=='daily':
                 edition = await bible.chat_translation(connection,chat_id)
                 if not edition:

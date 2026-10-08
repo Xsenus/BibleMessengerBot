@@ -1,6 +1,6 @@
 name: bible-messenger-bot
 x-app: &app
-  image: bible-messenger-bot:1.4.0
+  image: bible-messenger-bot:1.5.0
   build:
     context: .
     dockerfile: Dockerfile
@@ -93,6 +93,29 @@ services:
       interval: 15s
       timeout: 10s
       retries: 10
+
+  illustrator:
+    <<: *app
+    mem_limit: 384m
+    cpus: 0.5
+    command: [python, -m, app.worker.illustrator]
+    depends_on: *ready
+    healthcheck:
+      test: [CMD, python, -m, app.healthcheck, illustrator]
+      start_period: 60s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backup:
+    <<: *app
+    profiles: [maintenance]
+    user: '0:0'
+    mem_limit: 256m
+    cpus: 0.5
+    restart: 'no'
+    command: [python, -m, app.backup_admin, status]
+    volumes: ['./backups:/app/backups']
 
 volumes:
   postgres_data:
