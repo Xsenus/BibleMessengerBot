@@ -99,6 +99,11 @@ async def test_prefetch_job_image_persistence_and_same_photo_delivery(db):
     queued = await c.fetchrow("SELECT * FROM delivery_log WHERE id=$1", delivery)
     assert decoded(queued["chunks"])[0]["kind"] == "rich"
     assert escape(row["text"]) in queued["payload_preview"]
+    # Scheduled delivery now requires the whole prepared bundle. The generator
+    # here is synthetic; real MP3 generation is exercised by neural runtime tests.
+    from app.services import speech
+    for item in await c.fetch('SELECT DISTINCT audio_id FROM reading_card_tracks'):
+        assert await speech.process(c,item['audio_id'],generator=AsyncMock(return_value=(b'ID3'+b'x'*700,3,'fixture','fixture'))) == 'ready'
     assert (
         await process_delivery(
             c, delivery, type("Sender", (), {"send": AsyncMock(return_value=321)})()
@@ -108,7 +113,7 @@ async def test_prefetch_job_image_persistence_and_same_photo_delivery(db):
     after = await c.fetchrow("SELECT * FROM subscriptions WHERE id=$1", sub["id"])
     assert after["next_run_at"].astimezone(
         __import__("zoneinfo").ZoneInfo("Asia/Novosibirsk")
-    ).time() == time(9, 38)
+    ).time() == time(9)
 
 
 async def test_budget_reservation_and_uncertainty_block_paid_duplicate(db):

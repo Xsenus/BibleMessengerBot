@@ -89,6 +89,9 @@ async def test_daily_photo_is_queued_once_and_progress_commits_only_after_delive
     assert decoded(frozen['chunks'])[0]['image_id'] is not None
     assert await prepare_subscription(c, sub["id"]) is None
     assert await c.fetchval("SELECT last_run_at FROM subscriptions WHERE id=$1", sub["id"]) is None
+    from app.services import speech
+    for item in await c.fetch('SELECT DISTINCT audio_id FROM reading_card_tracks'):
+        assert await speech.process(c,item['audio_id'],generator=AsyncMock(return_value=(b'ID3'+b'x'*700,3,'fixture','fixture'))) == 'ready'
     sender = type("Sender", (), {"send": AsyncMock(return_value=987)})()
     assert await process_delivery(c, delivery, sender) == "sent"
     after = await c.fetchrow("SELECT * FROM subscriptions WHERE id=$1", sub["id"])

@@ -240,6 +240,9 @@ async def outgoing(connection, chat_id, chunk):
         raise SendError('rejected')
     content = pages(card['current_html'])
     result = dict(chunk, text=content[min(card['text_page'], len(content) - 1)], image_id=card['image_id'])
+    if card.get('prayer_at'):
+        from app.services.prayers import reminder
+        result['text']=reminder(card['prayer_at'],card['ui_language'])+'\n\n'+result['text']
     from app.services.speech import media
     audio = await media(connection,card)
     result['audio_id'] = audio['id'] if audio else None

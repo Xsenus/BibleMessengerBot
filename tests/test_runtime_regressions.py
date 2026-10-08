@@ -141,9 +141,9 @@ async def test_status_resolution_commands_are_copyable_in_private_and_group_chat
     from app.bot.commands import parse_command
     monkeypatch.setattr(handlers, 'settings_text', AsyncMock(return_value='fixture'))
     monkeypatch.setattr(handlers, 'list_subscriptions', AsyncMock(return_value=[]))
-    connection = SimpleNamespace(fetch=AsyncMock(return_value=[{
+    connection = SimpleNamespace(fetch=AsyncMock(side_effect=[[{
         'id': 7, 'status': 'uncertain', 'next_chunk': 0, 'total': 1,
-    }]))
+    }],[]]))
     text = await handlers.status_text(connection, {'telegram_chat_id': chat_id, 'ui_language': 'en'})
     commands = re.findall(r'<code>(/resolve.*?)</code>', text)
     assert len(commands) == 3

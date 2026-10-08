@@ -4,7 +4,6 @@ Groups and channels never inherit the latest administrator's language. Remote
 management uses a private dialog with the bot, and permissions are rechecked.
 """
 from __future__ import annotations
-import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -22,10 +21,10 @@ from app.services import passage,illustrations,readings
 from app.services.accounts import upsert_user,upsert_chat,claim_owner
 from app.services.destinations import configure_chat,ensure_resolved,cancel_queued
 from app.services.errors import UserError,SendError
-from app.services.formatting import escape,split_message
+from app.services.formatting import escape
 from app.services.i18n import available_ui,initial_ui,native_ui_name,tr,ui_for_language
 from app.services.locks import chat_lock
-from app.services.scheduling import parse_hhmm,next_occurrence,validate_timezone
+from app.services.scheduling import parse_hhmm,next_reading,validate_timezone
 from app.services.subscriptions import create_or_update_subscription,set_enabled,delete_subscriptions,list_subscriptions
 from app.worker.delivery import enqueue_next,resolve_uncertain
 
@@ -141,8 +140,8 @@ async def enable_devotions(connection: Any,chat: Any,actor_id:int) -> str:
             await create_or_update_subscription(connection,chat_id=chat['telegram_chat_id'],created_by=actor_id,
                 translation_id=edition['id'],mode=mode,send_time=parse_hhmm(clock),timezone_name=chat['timezone'])
     if chat['ui_language']=='ru':
-        return f"🌅 <b>Утро и вечер включены</b>\n09:38 и 21:13 · {escape(chat['timezone'])}\nРазные стихи по дате и времени суток.\nОтключить: /devotions off"
-    return f"🌅 <b>Morning and evening enabled</b>\n09:38 and 21:13 · {escape(chat['timezone'])}\nDistinct verses selected by date and time of day.\nTurn off: /devotions off"
+        return f"🌅 <b>Утро и вечер включены</b>\nЧтение: 09:00 и 21:00\n🕊 Молитва: 09:38 и 21:13 · {escape(chat['timezone'])}\nКартинка и все доступные озвучки готовятся заранее.\nОтключить: /devotions off"
+    return f"🌅 <b>Morning and evening enabled</b>\nReading: 09:00 and 21:00\n🕊 Prayer: 09:38 and 21:13 · {escape(chat['timezone'])}\nArtwork and all available narrations are prepared in advance.\nTurn off: /devotions off"
 
 
 async def settings_text(connection: Any, chat: Any) -> str:
@@ -172,6 +171,9 @@ async def status_text(connection: Any, chat: Any) -> str:
         lines += [f"<b>{tr(locale,sub['mode'])}</b>: {state}",
             f"{sub['send_time'].strftime('%H:%M')} {escape(sub['timezone'])} · {escape(bible.display_title({'title':sub['translation_title'],'source_translation_id':sub['source_translation_id'],'source_name':sub.get('translation_source_name')}))}",
             f"{tr(locale,'progress')}: {escape(sub['current_book_code'] or '—')} {sub['current_chapter'] or 0} · {sub['plan_day']}"]
+        if sub['mode'] in {'morning_verse','evening_verse'}:
+            hour=sub['send_time'].replace(minute=0).strftime('%H:%M')
+            lines.append(('Чтение: ' if locale=='ru' else 'Reading: ')+hour+(' · указанное выше время — молитва' if locale=='ru' else ' · time above is prayer'))
     if not subs:
         lines.append(tr(locale,'no_subscriptions'))
     jobs = await connection.fetch("SELECT id,status,next_chunk,jsonb_array_length(chunks) AS total,telegram_message_ids FROM delivery_log WHERE telegram_chat_id=$1 AND status IN ('pending','retry','sending','uncertain','failed') ORDER BY id DESC LIMIT 10",chat['telegram_chat_id'])
@@ -185,6 +187,10 @@ async def status_text(connection: Any, chat: Any) -> str:
             lines += [tr(locale,'pending_review'),f"<code>/resolve {job['id']} sent{target}</code>",
                 f"<code>/resolve {job['id']} retry-duplicate-risk{target}</code>",
                 f"<code>/resolve {job['id']} cancel{target}</code>"]
+    preparations=await connection.fetch("""SELECT r.state,count(*) AS count FROM scheduled_readings r JOIN delivery_log d ON d.id=r.delivery_id
+        WHERE d.telegram_chat_id=$1 AND d.status IN ('pending','retry') GROUP BY r.state""",chat['telegram_chat_id'])
+    for prepared in preparations:
+        lines.append(('Подготовка чтений: ' if locale=='ru' else 'Reading preparation: ')+f"{prepared['state']} · {prepared['count']}")
     return '\n'.join(lines)
 
 
@@ -328,7 +334,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             rows = await list_subscriptions(connection,chat['telegram_chat_id'])
             for row in rows:
                 await connection.execute('UPDATE subscriptions SET send_time=$2,next_run_at=$3,revision=revision+1 WHERE id=$1',row['id'],row['send_time'] if row['mode'] in {'morning_verse','evening_verse'} else clock,
-                    next_occurrence(row['send_time'] if row['mode'] in {'morning_verse','evening_verse'} else clock,tz,list(row['days_of_week'])) if row['is_enabled'] else None)
+                    next_reading(row['mode'],row['send_time'] if row['mode'] in {'morning_verse','evening_verse'} else clock,tz,list(row['days_of_week'])) if row['is_enabled'] else None)
         return tr(locale,'saved'),settings_keyboard(chat)
     if name in {'subscribe','channel'}:
         if not args:

@@ -7,6 +7,7 @@ from app.config import Settings
 from app.db import acquire_runtime_guard,close_pool,create_pool,wait_for_database
 from app.logging import configure_logging
 from app.services import speech
+from app.services.scheduled_media import AUDIO_ELIGIBILITY
 from app.services.locks import lock_key
 
 LOGGER=logging.getLogger(__name__)
@@ -42,9 +43,8 @@ async def worker():
        await speech.attach(c,item['id'],audio)
       await speech.dispatch(c)
       jobs=await c.fetch("""SELECT a.id FROM reading_audio a WHERE state IN ('queued','retry')
-       AND provider_mode=$1 AND (retry_at IS NULL OR retry_at<=now()) AND EXISTS (
-        SELECT 1 FROM reading_cards c WHERE c.audio_id=a.id AND c.telegram_message_id IS NOT NULL)
-       ORDER BY a.id LIMIT 3""",audio.provider)
+       AND provider_mode=$1 AND (retry_at IS NULL OR retry_at<=now()) AND """+AUDIO_ELIGIBILITY+
+       ' ORDER BY a.id LIMIT 3',audio.provider)
       for job in jobs:
        result=await speech.process(c,job['id'],audio)
        LOGGER.info('Speech job %s: %s',job['id'],result)

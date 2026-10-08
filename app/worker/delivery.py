@@ -12,7 +12,7 @@ from app.services.i18n import tr
 from app.services.locks import chat_lock
 from app.services.outbox import Envelope,dispatch_chunk
 from app.services.plans import PLANS,plan_window,validate_plan
-from app.services.scheduling import next_occurrence
+from app.services.scheduling import next_reading
 
 
 def decoded(value: Any) -> Any:
@@ -44,14 +44,14 @@ async def insert_payload(connection: Any, chat: Any, translation: Any, text: str
     return identifier
 
 
-async def prepare_subscription(connection: Any, subscription_id: int, max_length: int = 3900) -> int | None:
+async def prepare_subscription(connection: Any, subscription_id: int, max_length: int = 3900, *, lead_seconds: int = 0) -> int | None:
     """Freeze one due occurrence, using its original local date, not a retry date."""
     row = await connection.fetchrow('SELECT telegram_chat_id FROM subscriptions WHERE id=$1',subscription_id)
     if not row:
         return None
     async with chat_lock(connection,row['telegram_chat_id']),connection.transaction():
         sub = await connection.fetchrow('SELECT * FROM subscriptions WHERE id=$1 FOR UPDATE',subscription_id)
-        if not sub or not sub['is_enabled'] or sub['completed'] or not sub['next_run_at'] or sub['next_run_at']>datetime.now(timezone.utc):
+        if not sub or not sub['is_enabled'] or sub['completed'] or not sub['next_run_at'] or sub['next_run_at']>datetime.now(timezone.utc)+timedelta(seconds=lead_seconds):
             return None
         chat = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1',sub['telegram_chat_id'])
         if not chat or not chat['is_active']:
@@ -117,7 +117,11 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
         if not text:
             raise UserError('no_result')
         key = hashlib.sha256(f"{sub['id']}:{sub['revision']}:{sub['next_run_at'].isoformat()}".encode()).hexdigest()
-        return await insert_payload(connection,chat,edition,text,key,mode,progress,subscription=sub,max_length=max_length,image_id=image_id)
+        identifier=await insert_payload(connection,chat,edition,text,key,mode,progress,subscription=sub,max_length=max_length,image_id=image_id)
+        if mode in {'verse_of_day','topic_of_day','morning_verse','evening_verse'}:
+            from app.services import scheduled_media
+            await scheduled_media.prepare(connection,identifier,row,edition,sub,chat,local_date)
+        return identifier
 
 
 async def enqueue_next(connection: Any, chat: Any, translation: Any, request_id: str,
@@ -161,12 +165,12 @@ async def commit_progress(connection: Any, delivery: Any) -> None:
             VALUES($1,$2,$3,$4) ON CONFLICT(telegram_chat_id,translation_id) DO UPDATE SET
             book_code=EXCLUDED.book_code,chapter=EXCLUDED.chapter,updated_at=now()''',delivery['telegram_chat_id'],
             delivery['translation_id'],progress['book'],progress['chapter'])
-    elif delivery['subscription_id']:
+    elif delivery['subscription_id'] and progress.get('kind')=='subscription':
         sub = await connection.fetchrow('SELECT * FROM subscriptions WHERE id=$1 FOR UPDATE',delivery['subscription_id'])
         if not sub or sub['revision']!=delivery['subscription_revision']:
             raise RuntimeError('Subscription changed during an acknowledged send')
         completed = progress.get('completed',False)
-        next_run = None if completed else next_occurrence(sub['send_time'],sub['timezone'],list(sub['days_of_week']))
+        next_run = None if completed else next_reading(sub['mode'],sub['send_time'],sub['timezone'],list(sub['days_of_week']))
         await connection.execute('''UPDATE subscriptions SET current_book_code=COALESCE($2,current_book_code),
             current_chapter=COALESCE($3,current_chapter),plan_day=COALESCE($4,plan_day),completed=$5,
             is_enabled=CASE WHEN $5 THEN false ELSE is_enabled END,next_run_at=$6,last_run_at=now(),
@@ -258,6 +262,19 @@ async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> st
         if not valid:
             await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='stale_configuration',updated_at=now() WHERE id=$1",delivery_id)
             return 'stale'
+        if row['scheduled_for']>datetime.now(timezone.utc):
+            return 'not_due'
+        from app.services import scheduled_media, prayers
+        if row['mode']=='prayer' and datetime.now(timezone.utc)>row['scheduled_for']+timedelta(minutes=3):
+            await connection.execute("UPDATE delivery_log SET status='skipped',error_code='prayer_expired',updated_at=now() WHERE id=$1",delivery_id)
+            return 'expired'
+        readiness=await scheduled_media.ready(connection,row)
+        if readiness!='ready':
+            return readiness
+        if row['mode']=='prayer' and row['next_chunk']==0 and row['attempt_count']==0:
+            parts=await prayers.artwork_for_send(connection,row)
+            await connection.execute('UPDATE delivery_log SET chunks=$2::jsonb WHERE id=$1',delivery_id,json.dumps(parts))
+            row=dict(row,chunks=parts)
         return await dispatch_chunk(Envelope(row['id'],row['telegram_chat_id'],tuple(decoded(row['chunks'])),
             row['next_chunk'],row['message_thread_id']),SqlCheckpoints(connection),sender)
 

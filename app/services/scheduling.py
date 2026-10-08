@@ -6,6 +6,24 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
+def reading_time(mode: str, clock: time) -> time:
+    """Devotional clock denotes prayer; the reading begins at the hour."""
+    return clock.replace(minute=0) if mode in {'morning_verse','evening_verse'} else clock
+
+
+def next_reading(mode: str, clock: time, timezone_name: str, days=None, *, now=None):
+    return next_occurrence(reading_time(mode,clock),timezone_name,days,now=now)
+
+
+def on_date(day, clock: time, timezone_name: str) -> datetime:
+    """Use exactly the same gap/fold policy as the regular scheduler."""
+    start=datetime.combine(day,time(),tzinfo=ZoneInfo(timezone_name)).astimezone(timezone.utc)
+    candidate=next_occurrence(clock,timezone_name,now=start-timedelta(microseconds=1))
+    if candidate.astimezone(ZoneInfo(timezone_name)).date()!=day:
+        raise ValueError('Schedule date does not exist in this timezone')
+    return candidate
+
+
 def validate_timezone(value: str) -> str:
     """Require an IANA timezone, not a host-dependent abbreviation/offset."""
     try:

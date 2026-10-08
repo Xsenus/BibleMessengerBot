@@ -205,11 +205,8 @@ async def enqueue(connection, row, edition, *, subscription=None, **context):
             3 if row.get('artwork_scope') == 'chapter' else 2,
         )
         if subscription:
-            from zoneinfo import ZoneInfo
-
-            scheduled = datetime.combine(
-                context["day"], subscription["send_time"], tzinfo=ZoneInfo(subscription["timezone"])
-            )
+            from app.services.scheduling import on_date, reading_time
+            scheduled = on_date(context['day'],reading_time(subscription['mode'],subscription['send_time']),subscription['timezone'])
             await connection.execute(
                 """INSERT INTO image_generation_targets(image_id,subscription_id,local_date,scheduled_for)
                 VALUES($1,$2,$3,$4) ON CONFLICT(image_id,subscription_id,local_date)

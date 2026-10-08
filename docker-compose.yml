@@ -1,6 +1,6 @@
 name: bible-messenger-bot
 x-app: &app
-  image: bible-messenger-bot:1.14.0
+  image: bible-messenger-bot:1.15.0
   build:
     context: .
     dockerfile: Dockerfile
@@ -23,6 +23,52 @@ x-ready: &ready
     condition: service_completed_successfully
 
 services:
+  prayer-ai-bootstrap:
+    <<: *app
+    profiles: [prayers]
+    mem_limit: 256m
+    cpus: 0.5
+    restart: "no"
+    volumes: [prayer_models:/app/cache/prayer-ai]
+    command: [python, -m, app.prayer_ai_admin]
+
+  prayer-ai:
+    image: ghcr.io/ggml-org/llama.cpp@sha256:33868c035b21dc63f7c60b7438774283fd99215bc319114eb03de5df4ce7cd6b
+    profiles: [prayers]
+    restart: unless-stopped
+    mem_limit: 1280m
+    cpus: 1.0
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [internal]
+    volumes: [prayer_models:/models:ro]
+    command: ["-m", /models/Qwen3-0.6B-Q8_0.gguf, "--host", "0.0.0.0", "--port", "8080", "-c", "2048", "-t", "2", "-b", "128", "-ub", "64", "-n", "128", "--parallel", "1", "--alias", local-prayer, "--no-webui"]
+    depends_on:
+      prayer-ai-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8080/health]
+      start_period: 90s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  composer:
+    <<: *app
+    mem_limit: 256m
+    cpus: 0.5
+    command: [python, -m, app.worker.composer]
+    depends_on: *ready
+    healthcheck:
+      test: [CMD, python, -m, app.healthcheck, composer]
+      start_period: 45s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   speaker:
     <<: *app
     mem_limit: 1536m
@@ -132,6 +178,7 @@ services:
     volumes: ['./backups:/app/backups']
 
 volumes:
+  prayer_models:
   postgres_data:
   source_cache:
 networks:

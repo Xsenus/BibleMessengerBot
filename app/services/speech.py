@@ -100,12 +100,16 @@ async def attach(connection, card_id, settings=None):
  text=spoken_text(content[min(card['text_page'],len(content)-1)],edition,card['ui_language'])
  if not text:
   return None
- key=identity(text,edition['language_code'],settings)
- identifier=await connection.fetchval('''INSERT INTO reading_audio(cache_key,language_code,source_text,provider_mode,voice_profile)
-  VALUES($1,$2,$3,$4,$5) ON CONFLICT(cache_key) DO UPDATE SET cache_key=EXCLUDED.cache_key RETURNING id''',
-  key,edition['language_code'],text,settings.provider,voice_profile(edition['language_code'],settings))
+ identifier=await ensure_audio(connection,text,edition['language_code'],settings)
  await connection.execute('UPDATE reading_cards SET audio_id=$2 WHERE id=$1',card_id,identifier)
  return identifier
+
+
+async def ensure_audio(connection, text, language, settings):
+ key=identity(text,language,settings)
+ return await connection.fetchval('''INSERT INTO reading_audio(cache_key,language_code,source_text,provider_mode,voice_profile)
+  VALUES($1,$2,$3,$4,$5) ON CONFLICT(cache_key) DO UPDATE SET cache_key=EXCLUDED.cache_key RETURNING id''',
+  key,language,text,settings.provider,voice_profile(language,settings))
 
 
 async def media(connection, card):
@@ -275,7 +279,8 @@ async def process(connection, identifier, settings=None, *, generator=synthesize
    return 'not_due'
   if audio['provider_mode']!=settings.provider or audio['voice_profile']!=voice_profile(audio['language_code'],settings):
    return 'configuration_changed'
-  if not await connection.fetchval('SELECT EXISTS(SELECT 1 FROM reading_cards WHERE audio_id=$1 AND telegram_message_id IS NOT NULL)',identifier):
+  from app.services.scheduled_media import AUDIO_ELIGIBILITY
+  if not await connection.fetchval('SELECT '+AUDIO_ELIGIBILITY+' FROM reading_audio a WHERE a.id=$1',identifier):
    return 'unbound'
   if await connection.fetchval("SELECT COALESCE(sum(octet_length(audio_data)),0) FROM reading_audio")>=MAX_CACHE_BYTES:
    return 'storage_limit'

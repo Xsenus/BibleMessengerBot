@@ -2,7 +2,7 @@
 from __future__ import annotations
 from datetime import time
 from typing import Any
-from app.services.scheduling import next_occurrence, validate_timezone
+from app.services.scheduling import next_reading, validate_timezone
 from app.services.plans import PLANS, validate_plan
 from app.services.errors import UserError
 from app.services.locks import chat_lock
@@ -29,7 +29,7 @@ async def create_or_update_subscription(connection: Any, *, chat_id: int, create
             raise UserError('invalid')
     else:
         plan_code = None
-    next_run = next_occurrence(send_time,timezone_name)
+    next_run = next_reading(mode,send_time,timezone_name)
     async with chat_lock(connection,chat_id), connection.transaction():
         await ensure_resolved(connection,chat_id)
         translation = await connection.fetchrow("""SELECT * FROM translations WHERE id=$1
@@ -80,7 +80,7 @@ async def set_enabled(connection: Any, chat_id: int, enabled: bool, mode: str | 
         for row in rows:
             if enabled and row['completed']:
                 continue
-            next_run = next_occurrence(row['send_time'],row['timezone'],list(row['days_of_week'])) if enabled else None
+            next_run = next_reading(row['mode'],row['send_time'],row['timezone'],list(row['days_of_week'])) if enabled else None
             await connection.execute('''UPDATE subscriptions SET is_enabled=$2,next_run_at=$3,
                 updated_at=now() WHERE id=$1''',row['id'],enabled,next_run)
             count += 1

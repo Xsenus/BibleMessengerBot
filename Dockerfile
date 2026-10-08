@@ -11,7 +11,7 @@ RUN python -m pip install -r requirements-neural.txt
 RUN python -m pip install -c constraints-linux.txt -r requirements.txt -r requirements-test.txt \
     && python -m pip check && python -m pip freeze > /app/BUILD-DEPENDENCIES.txt
 COPY . /app
-RUN mkdir -p /app/cache /app/backups && chown -R app:app /app
+RUN mkdir -p /app/cache/prayer-ai /app/backups && chown -R app:app /app
 USER app
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python", "-m", "app.bot.main"]

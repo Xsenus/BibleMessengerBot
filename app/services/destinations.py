@@ -6,7 +6,7 @@ from app.services.errors import UserError
 from app.services.i18n import available_ui
 from app.services.locks import chat_lock
 from app.services.plans import validate_plan
-from app.services.scheduling import next_occurrence, validate_timezone
+from app.services.scheduling import next_reading, validate_timezone
 
 
 async def ensure_resolved(connection: Any, chat_id: int) -> None:
@@ -76,7 +76,7 @@ async def configure_chat(connection: Any, chat_id: int, *, actor_id: int | None,
         schedules = await connection.fetch('SELECT * FROM subscriptions WHERE telegram_chat_id=$1 AND is_enabled',chat_id)
         for sub in schedules:
             next_run = (sub['next_run_at'] if timezone_name is None and sub['next_run_at'] is not None
-                else next_occurrence(sub['send_time'],sub['timezone'],list(sub['days_of_week'])))
+                else next_reading(sub['mode'],sub['send_time'],sub['timezone'],list(sub['days_of_week'])))
             await connection.execute('UPDATE subscriptions SET next_run_at=$2 WHERE id=$1',sub['id'],next_run)
         await connection.execute('''INSERT INTO operator_events(actor_id,chat_id,action,details)
             VALUES($1,$2,'chat_settings',$3::jsonb)''',actor_id,chat_id,json.dumps({

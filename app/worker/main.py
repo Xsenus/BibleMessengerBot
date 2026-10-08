@@ -32,18 +32,25 @@ async def worker() -> None:
                 async with pool.acquire() as connection:
                     due = await connection.fetch('''SELECT s.id FROM subscriptions s JOIN telegram_chats c
                         ON c.telegram_chat_id=s.telegram_chat_id WHERE s.is_enabled AND NOT s.completed AND c.is_active
-                        AND s.next_run_at<=now() AND NOT EXISTS(SELECT 1 FROM delivery_log d
+                        AND s.next_run_at<=now()+interval '24 hours' AND NOT EXISTS(SELECT 1 FROM delivery_log d
                             WHERE d.subscription_id=s.id AND d.status IN ('pending','sending','retry','uncertain'))
                         ORDER BY s.next_run_at LIMIT 10''')
                     for item in due:
                         try:
-                            await prepare_subscription(connection,item['id'],settings.max_message_length)
+                            await prepare_subscription(connection,item['id'],settings.max_message_length,lead_seconds=86400)
                         except (ValueError,KeyError) as error:
                             # Permanent content/configuration errors need operator attention, not a retry loop.
                             await connection.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE id=$1',item['id'])
                             await connection.execute("INSERT INTO operator_events(action,details) VALUES('schedule_blocked',jsonb_build_object('subscription_id',$1::bigint,'error',$2::text))",item['id'],type(error).__name__)
                             LOGGER.warning('Schedule %s paused: %s',item['id'],type(error).__name__)
-                    jobs = await connection.fetch("SELECT d.id FROM delivery_log d JOIN telegram_chats c ON c.telegram_chat_id=d.telegram_chat_id LEFT JOIN subscriptions s ON s.id=d.subscription_id WHERE d.status IN ('pending','retry') AND (d.retry_at IS NULL OR d.retry_at<=now()) AND c.is_active AND (d.subscription_id IS NULL OR s.is_enabled) ORDER BY d.updated_at,d.id LIMIT 20")
+                    from app.services import scheduled_media
+                    assembling=await connection.fetch("""SELECT d.* FROM delivery_log d JOIN scheduled_readings r ON r.delivery_id=d.id
+                        JOIN subscriptions s ON s.id=d.subscription_id JOIN telegram_chats c ON c.telegram_chat_id=d.telegram_chat_id
+                        WHERE r.state='preparing' AND d.status IN ('pending','retry') AND s.is_enabled AND c.is_active
+                        AND s.revision=d.subscription_revision AND c.revision=d.chat_revision ORDER BY d.scheduled_for LIMIT 20""")
+                    for prepared in assembling:
+                        await scheduled_media.ready(connection,prepared)
+                    jobs = await connection.fetch("SELECT d.id FROM delivery_log d JOIN telegram_chats c ON c.telegram_chat_id=d.telegram_chat_id LEFT JOIN subscriptions s ON s.id=d.subscription_id WHERE d.status IN ('pending','retry') AND d.scheduled_for<=now() AND (d.retry_at IS NULL OR d.retry_at<=now()) AND c.is_active AND (d.subscription_id IS NULL OR s.is_enabled) ORDER BY (d.mode='prayer') DESC,d.scheduled_for,d.id LIMIT 20")
                     for job in jobs:
                         await process_delivery(connection,job['id'],TelegramSender(bot,connection,settings))
                 await asyncio.sleep(0.25 if jobs else settings.worker_poll_seconds)
