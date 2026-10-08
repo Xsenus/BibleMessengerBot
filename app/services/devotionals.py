@@ -13,6 +13,42 @@ from app.services.locks import chat_lock
 
 SLOTS = ("morning_verse", "evening_verse")
 VARIANTS = ("historical", "symbolic", "watercolor")
+DEVOTIONAL_BOOKS = frozenset(
+    [
+        "PSA",
+        "PRO",
+        "MAT",
+        "MRK",
+        "LUK",
+        "JHN",
+        "ROM",
+        "1CO",
+        "2CO",
+        "GAL",
+        "EPH",
+        "PHP",
+        "COL",
+        "1TH",
+        "2TH",
+        "1TI",
+        "2TI",
+        "TIT",
+        "PHM",
+        "HEB",
+        "JAS",
+        "1PE",
+        "2PE",
+        "1JN",
+        "2JN",
+        "3JN",
+    ]
+)
+
+
+def thematic_candidates(candidates, blocked):
+    available = [r for r in candidates if coordinates(r) not in blocked]
+    preferred = [r for r in available if r["book_code"] in DEVOTIONAL_BOOKS]
+    return preferred or available
 
 
 @lru_cache(maxsize=1)
@@ -87,7 +123,7 @@ async def selection(connection, edition, chat_id: int, day: date, slot: str):
                 theme["keywords"],
             )
             seed = f"devotional-v1:{chat_id}:{edition['id']}:{day.isoformat()}:{day.weekday()}:{current}"
-            available = [r for r in candidates if coordinates(r) not in blocked]
+            available = thematic_candidates(candidates, blocked)
             if not available:
                 # Languages without curated keywords still get a native-language verse.
                 candidates = await connection.fetch(

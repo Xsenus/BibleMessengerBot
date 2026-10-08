@@ -154,3 +154,21 @@ def test_local_retention_leaves_foreign_files_and_newest(tmp_path):
     assert prune_local(tmp_path, keep=1) == 2
     assert foreign.read_bytes() == b"foreign"
     assert (tmp_path / "biblebot-20261003T000000Z-123.dump").exists()
+
+
+def test_thematic_pool_prefers_devotional_books_without_borrowing_coordinates():
+    from app.services.devotionals import thematic_candidates
+
+    narrative = {"book_code": "JDG", "chapter": 19, "verse": 6}
+    wisdom = {"book_code": "PRO", "chapter": 3, "verse": 5}
+    assert thematic_candidates([narrative, wisdom], set()) == [wisdom]
+    assert thematic_candidates([narrative, wisdom], {("PRO", 3, 5)}) == [narrative]
+
+
+def test_new_provider_secrets_are_redacted(monkeypatch):
+    from app.logging import redact
+
+    for key in ["OPENAI_API_KEY", "S3_ACCESS_KEY", "S3_SECRET_KEY", "BACKUP_ENCRYPTION_KEY"]:
+        secret = "private-value-" + key
+        monkeypatch.setenv(key, secret)
+        assert secret not in redact("provider error " + secret)
