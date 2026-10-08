@@ -1,0 +1,82 @@
+{
+  "version": "1.14.0",
+  "status": "verified",
+  "verified_date": "2026-10-08",
+  "verified_code_commit": "acdcdeeb2c0c612d2c7784b3e20bcfbf7c2c4cd3",
+  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37804410810",
+  "tests": {
+    "github_linux_postgres": {
+      "passed": 787,
+      "skipped": 0,
+      "seconds": 134.19
+    },
+    "vps_before_final_legacy_guard": {
+      "passed": 786,
+      "skipped": 0,
+      "seconds": 123.14
+    },
+    "vps_final_pool_router_database_regressions": {
+      "passed": 83,
+      "skipped": 0,
+      "seconds": 37.12
+    },
+    "windows_before_final_legacy_guard": {
+      "passed": 644,
+      "skipped": 142,
+      "seconds": 17.02
+    },
+    "compile": "passed",
+    "ruff_F_E9": "passed",
+    "shell_syntax": "passed",
+    "basic_secret_scan": "passed"
+  },
+  "production": {
+    "healthy_services": [
+      "postgres",
+      "bot",
+      "worker",
+      "admin",
+      "illustrator",
+      "speaker"
+    ],
+    "editions": 14,
+    "languages": 12,
+    "original_tables_preserved": 39,
+    "all_preservation_hashes_equal": true,
+    "preservation_excludes": [
+      "schema_migrations",
+      "service_heartbeats"
+    ],
+    "encrypted_s3_backup_before_and_after_verified": true,
+    "backup_timer_active": true,
+    "auth": [
+      {
+        "key_number": 1,
+        "status": 200,
+        "image_model_listed": true
+      },
+      {
+        "key_number": 2,
+        "status": 200,
+        "image_model_listed": true
+      }
+    ],
+    "configured_openai_keys": 2,
+    "daily_scope": "provider",
+    "openai_attempts_today": 10,
+    "openai_remaining": 0,
+    "monthly_reserved_usd": "2.4000",
+    "monthly_limit_usd": "10",
+    "production_daily_guard_checked_without_submission": true,
+    "schema_migrations": 15,
+    "legacy_uncertain_jobs": 1,
+    "new_key_paid_image_attempts": 0
+  },
+  "limitations": [
+    "New key passed read-only authentication/model-list checks; no paid image was submitted because the daily OpenAI allowance was exhausted.",
+    "Fallback/races/errors are verified with real PostgreSQL and simulated image API responses, not paid failing requests.",
+    "OpenAI project/organization limits may be shared between keys; the pool does not create independent balances.",
+    "The $10 control reserves internal estimates across providers; it is not a billing reconciliation.",
+    "No new full database restore or live third-party group test was performed."
+  ]
+}
