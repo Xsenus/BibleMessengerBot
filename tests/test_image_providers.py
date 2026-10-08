@@ -1,8 +1,11 @@
 import base64
 import json
+import random
+from io import BytesIO
 
 import httpx
 import pytest
+from PIL import Image
 
 from app.logging import redact
 from app.services import artwork, image_router
@@ -178,11 +181,39 @@ def test_image_urls_cannot_exfiltrate_keys_or_access_private_services(url):
 @pytest.mark.asyncio
 async def test_unsafe_result_or_oversized_download_is_not_accepted():
     def handler(request):
-        return httpx.Response(200, content=b"x" * (5 * 1024 * 1024 + 1))
+        return httpx.Response(200, content=b"x" * (20 * 1024 * 1024 + 1))
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(api.GenerationError):
             await api.download(client, "https://ideogram.ai/sample", "ideogram")
+
+
+@pytest.mark.asyncio
+async def test_large_provider_png_is_saved_as_jpeg_without_another_generation():
+    original = Image.frombytes('RGB', (1600, 1200), random.Random(0).randbytes(1600 * 1200 * 3))
+    png = BytesIO()
+    original.save(png, format='PNG')
+    assert 5 * 1024 * 1024 < png.tell() < 20 * 1024 * 1024
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, content=png.getvalue())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        converted = await api.download(client, 'https://ideogram.ai/sample', 'ideogram')
+    artwork.validate_image(converted)
+    assert len(converted) <= 5 * 1024 * 1024
+    with Image.open(BytesIO(converted)) as image:
+        assert image.format == 'JPEG' and image.size == original.size
+    assert len(calls) == 1 and calls[0].method == 'GET'
+
+
+def test_provider_normalization_rejects_excessive_dimensions_before_decode():
+    png = BytesIO()
+    Image.new('1', (4000, 4000)).save(png, format='PNG')
+    with pytest.raises(api.GenerationError, match='response_invalid'):
+        api.normalize_download(png.getvalue())
 
 
 @pytest.mark.asyncio

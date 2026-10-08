@@ -5,9 +5,11 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass, field
 from decimal import Decimal
+from io import BytesIO
 from urllib.parse import urlsplit
 
 import httpx
+from PIL import Image
 
 NAMES = ("openai", "gemini", "bfl", "ideogram", "stability")
 MODELS = dict(
@@ -123,10 +125,39 @@ async def download(client, url, provider):
         chunks, size = [], 0
         async for chunk in response.aiter_bytes():
             size += len(chunk)
-            if size > 5 * 1024 * 1024:
+            if size > 20 * 1024 * 1024:
                 raise GenerationError("response_invalid", uncertain=True)
             chunks.append(chunk)
-        return b"".join(chunks)
+        return normalize_download(b"".join(chunks))
+
+
+def normalize_download(data):
+    """Bound provider PNGs before converting oversized files for storage/Telegram."""
+    try:
+        with Image.open(BytesIO(data)) as image:
+            if (
+                image.format not in {'PNG', 'JPEG', 'WEBP'}
+                or image.width * image.height > 9_000_000
+                or image.width < 256
+                or image.height < 256
+            ):
+                raise ValueError('Unexpected generated dimensions or format')
+            image.verify()
+        if len(data) <= 5 * 1024 * 1024:
+            return data
+        with Image.open(BytesIO(data)) as image:
+            # Preserve resolution; flatten alpha against white for the JPEG card.
+            rgba = image.convert('RGBA')
+            rgb = Image.new('RGB', image.size, 'white')
+            rgb.paste(rgba, mask=rgba.getchannel('A'))
+            for quality in (95, 92, 85, 80):
+                output = BytesIO()
+                rgb.save(output, format='JPEG', quality=quality, optimize=True)
+                if output.tell() <= 5 * 1024 * 1024:
+                    return output.getvalue()
+            raise ValueError('Generated image exceeds storage limit')
+    except (ValueError, OSError) as error:
+        raise GenerationError('response_invalid', uncertain=True) from error
 
 
 async def generate(provider, prompt, *, client=None, accepted=None, resume=None):
