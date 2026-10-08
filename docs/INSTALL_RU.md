@@ -67,7 +67,7 @@ docker compose build --pull bootstrap
 docker compose up -d postgres
 ```
 
-Дождитесь статуса `healthy` у PostgreSQL в `docker compose ps`. На существующей установке перед следующими командами сделайте backup и остановите `bot worker admin`.
+Дождитесь статуса `healthy` у PostgreSQL в `docker compose ps`. На существующей установке перед следующими командами сделайте backup и остановите `bot worker admin illustrator speaker composer`.
 
 ```bash
 docker compose run --rm --no-deps -e RUN_DB_TESTS=1 bootstrap python -m pytest -o addopts= -q
@@ -78,10 +78,12 @@ docker compose run --rm --no-deps bootstrap python -m app.cli audit
 Продолжайте только после успешных тестов, bootstrap и аудита:
 
 ```bash
-docker compose up -d --no-deps bot worker admin illustrator
+docker compose up -d --no-deps bot worker admin illustrator speaker composer
 docker compose ps
 curl --fail http://127.0.0.1:8080/ready
 ```
+
+Для бесплатного подбора молитв по текущим новостям добавьте `COMPOSE_PROFILES=prayers` в приватный `.env` и запустите `docker compose up -d prayer-ai composer`. Однократный bootstrap скачает закреплённую модель с проверкой SHA-256; дождитесь `healthy` у `prayer-ai`. Без профиля используются общие молитвы. Подготовка картинки и всех озвучек, отдельные часы чтения/молитвы и ресурсы модели описаны в [PREPARED_SCHEDULES.md](PREPARED_SCHEDULES.md).
 
 Если токена пока нет, допустимо подготовить БД, выполнить импорт и запустить только admin. Для этого оставьте `BOT_TOKEN` пустым, выполните ручные этапы до аудита и затем `docker compose up -d --no-deps admin`. Это не запущенный Telegram-бот: процессы `bot` и `worker` включаются после добавления действительного токена и проверки команд в Telegram.
 

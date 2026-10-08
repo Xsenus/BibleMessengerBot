@@ -95,6 +95,14 @@ def test_script_does_not_start_services_that_were_not_running(tmp_path):
     assert not any('up' in c and '--no-deps' in c for c in calls)
 
 
+def test_import_pauses_audio_and_prayer_writers_but_keeps_database_and_model(tmp_path):
+    writers=['bot','worker','admin','illustrator','speaker','composer']
+    proc,calls,_=invoke(tmp_path,FAKE_RUNNING='\n'.join([*writers,'postgres','prayer-ai']))
+    assert proc.returncode==0,proc.stderr
+    assert [c for c in calls if 'stop' in c]==[['compose','stop',*writers]]
+    assert [c for c in calls if 'up' in c and '--no-deps' in c]==[['compose','up','-d','--no-deps',*writers]]
+
+
 def test_script_rejects_invalid_config_before_acquisition(tmp_path):
     proc,calls,_=invoke(tmp_path,FAKE_CONFIG_EXIT='2')
     assert proc.returncode==2

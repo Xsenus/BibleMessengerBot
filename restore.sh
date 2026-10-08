@@ -10,15 +10,15 @@ file="$(readlink -f "$1")"
 docker compose up -d postgres
 docker compose exec -T postgres pg_restore --list <"$file" >/dev/null
 bash backup.sh
-docker compose stop bot worker admin illustrator speaker
+docker compose stop bot worker admin illustrator speaker composer
 trap 'echo "Restore stopped; services remain paused. Original backup is in backups/." >&2' ERR
 docker compose exec -T postgres sh -c 'exec pg_restore --clean --if-exists --single-transaction --exit-on-error --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <"$file"
 docker compose run --rm --no-deps bootstrap python -m app.cli seed
 docker compose run --rm --no-deps bootstrap python -m app.cli audit
 docker compose run --rm --no-deps bootstrap python -m app.neural_audio_admin prepare
 if [[ "${3:-}" == '--start-services' ]]; then
-  docker compose up -d --no-deps bot worker admin illustrator speaker
+  docker compose up -d --no-deps bot worker admin illustrator speaker composer
 else
   echo 'Restore and audit passed. Delivery remains stopped: review restored outbox/history before starting bot and worker.'
-  echo 'Resume after review: docker compose up -d --no-deps bot worker admin illustrator speaker'
+  echo 'Resume after review: docker compose up -d --no-deps bot worker admin illustrator speaker composer'
 fi
