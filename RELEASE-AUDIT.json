@@ -1,122 +1,37 @@
 {
-  "version": "1.12.0",
+  "version": "1.13.0",
   "status": "verified",
   "verified_date": "2026-10-08",
-  "verified_code_commit": "5efabe04e71156e5a270b9386b75957dc8be5db8",
-  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37784428188",
+  "verified_code_commit": "92c730143b84dd219184279abad8d8b49e7e1cee",
+  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37788720718",
   "tests": {
     "github_linux_postgres": {
-      "passed": 756,
+      "passed": 767,
       "skipped": 0,
-      "seconds": 85.75
+      "seconds": 83.45
     },
-    "vps_linux_disposable_postgres": {
-      "passed": 756,
+    "vps_linux_postgres": {
+      "passed": 767,
       "skipped": 0,
-      "seconds": 98.71
+      "seconds": 115.86
     },
-    "vps_final_audio_postgres_regressions": {
-      "passed": 6,
+    "vps_final_voice_regressions": {
+      "passed": 17,
       "skipped": 0,
-      "seconds": 8.57
+      "seconds": 27.49
     },
-    "windows": {
-      "passed": 626,
-      "skipped": 130,
-      "seconds": 9.93
+    "windows_before_final_normalization": {
+      "passed": 632,
+      "skipped": 134,
+      "seconds": 10.05
     },
     "compile": "passed",
+    "ruff_F_E9": "passed",
     "shell_syntax": "passed",
-    "ruff_new_modules_F_E9": "passed",
-    "basic_secret_pattern_scan": "passed"
+    "basic_secret_scan": "passed"
   },
-  "real_speech_samples": [
-    {
-      "language": "deu",
-      "provider": "edge",
-      "voice": "de-DE-ConradNeural",
-      "duration": 3,
-      "bytes": 18432
-    },
-    {
-      "language": "ell",
-      "provider": "edge",
-      "voice": "el-GR-NestorasNeural",
-      "duration": 4,
-      "bytes": 21744
-    },
-    {
-      "language": "eng",
-      "provider": "edge",
-      "voice": "en-US-GuyNeural",
-      "duration": 3,
-      "bytes": 17568
-    },
-    {
-      "language": "fra",
-      "provider": "edge",
-      "voice": "fr-FR-HenriNeural",
-      "duration": 3,
-      "bytes": 17568
-    },
-    {
-      "language": "grc",
-      "provider": "espeak",
-      "voice": "grc",
-      "duration": 8,
-      "bytes": 63405
-    },
-    {
-      "language": "hbo",
-      "provider": "edge",
-      "voice": "he-IL-AvriNeural",
-      "duration": 2,
-      "bytes": 14544
-    },
-    {
-      "language": "ita",
-      "provider": "edge",
-      "voice": "it-IT-DiegoNeural",
-      "duration": 4,
-      "bytes": 22176
-    },
-    {
-      "language": "lat",
-      "provider": "espeak",
-      "voice": "la",
-      "duration": 2,
-      "bytes": 16749
-    },
-    {
-      "language": "rus",
-      "provider": "edge",
-      "voice": "ru-RU-DmitryNeural",
-      "duration": 3,
-      "bytes": 19728
-    },
-    {
-      "language": "spa",
-      "provider": "edge",
-      "voice": "es-ES-AlvaroNeural",
-      "duration": 3,
-      "bytes": 18720
-    },
-    {
-      "language": "ukr",
-      "provider": "edge",
-      "voice": "uk-UA-OstapNeural",
-      "duration": 3,
-      "bytes": 19872
-    },
-    {
-      "language": "zho",
-      "provider": "edge",
-      "voice": "zh-CN-XiaoxiaoNeural",
-      "duration": 4,
-      "bytes": 23760
-    }
-  ],
   "production": {
+    "schema_migrations": 14,
     "healthy_services": [
       "postgres",
       "bot",
@@ -125,42 +40,57 @@
       "illustrator",
       "speaker"
     ],
-    "schema_migrations": 13,
     "editions": 14,
     "languages": 12,
     "verse_rows": 414980,
-    "old_data_preservation": {
-      "canonical_sha256_tables": 14,
-      "all_equal": true,
-      "new_audio_columns_excluded": true
-    },
-    "pre_upgrade_encrypted_s3_backup_verified": true,
+    "original_tables_preserved": 16,
+    "all_preservation_hashes_equal": true,
+    "new_voice_profile_column_excluded": true,
+    "encrypted_s3_backup_before_and_after_verified": true,
     "backup_timer_active": true,
-    "telegram_same_message_photo_paragraph_audio_confirmed": true,
-    "telegram_inline_buttons_preserved": true,
-    "live_language_roundtrip": [
+    "local_models_ready": [
       "rus",
+      "lat",
+      "grc"
+    ],
+    "telegram_existing_message_roundtrip": [
+      "rus",
+      "lat",
       "grc",
       "rus"
     ],
-    "live_audio_providers": [
-      "espeak",
-      "espeak",
-      "espeak"
+    "actual_audio_providers": [
+      "piper",
+      "mms",
+      "mms",
+      "piper"
     ],
-    "return_to_russian_reused_original_audio": true,
+    "same_message_photo_audio_buttons_confirmed": true,
+    "russian_cache_reused": true,
     "original_selection_restored": true,
+    "selected_quality_cards_upgraded": 3,
+    "all_quality_cards_acknowledged": true,
+    "old_cached_quality_recordings_preserved": 4,
     "paid_audio_attempts": 0,
-    "audio_provider": "free",
     "paid_audio_enabled": false,
-    "daily_image_attempt_limit_per_provider": 10,
-    "monthly_image_reserved_limit_usd": "10"
+    "latin_letter_coverage": {
+      "verse_rows": 35809,
+      "unsupported_letters": 0
+    },
+    "ancient_greek_letter_coverage": {
+      "verse_rows": 7939,
+      "unsupported_letters": 0
+    }
+  },
+  "voice_models": {
+    "rus": "Piper ru_RU-denis-medium",
+    "lat": "facebook/mms-tts-lat",
+    "grc": "facebook/mms-tts-grc"
   },
   "limitations": [
-    "Edge can return NoAudioReceived; live Russian cards used the local fallback, while direct neural samples succeeded.",
-    "Local eSpeak is less natural; ancient-language pronunciation is synthetic, not an academic or liturgical guarantee.",
-    "OpenAI speech is optional, opt-in and tested with mocked HTTP; no real paid speech request was made.",
-    "Existing language cards are backfilled; arbitrary older Telegram messages are not reconstructed.",
-    "Group permissions are covered by automated tests; no live third-party group test or new complete restore was performed."
+    "Synthetic voices do not guarantee correct stress for every name or a particular historical/liturgical pronunciation.",
+    "Meta MMS checkpoints are CC BY-NC 4.0; the application MIT license does not replace model terms.",
+    "MP3 decoding and letter coverage were verified; no human MOS or full-corpus listening test was performed.",
+    "Group permissions are covered by existing automated tests; no live third-party group test or new full restore was performed."
   ]
 }
