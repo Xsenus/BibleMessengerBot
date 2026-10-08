@@ -23,7 +23,7 @@ jobs:
       RUN_DB_TESTS: '1'
       DATABASE_URL: postgresql://biblebot_ci:ci-only-not-a-production-secret@localhost:5432/biblebot_ci
       PYTHONUTF8: '1'
-      AUDIO_MODELS_PATH: ${{ runner.temp }}/neural-voices
+      AUDIO_MODELS_PATH: /tmp/biblebot-neural-voices
       RUN_NEURAL_TESTS: '1'
     steps:
       - uses: actions/checkout@v4
