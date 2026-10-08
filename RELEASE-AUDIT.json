@@ -1,1 +1,91 @@
-{"version": "1.9.0", "status": "in_preparation", "previous_verified_release": "1.8.0"}
+{
+  "version": "1.9.0",
+  "status": "verified",
+  "verified_date": "2026-10-08",
+  "verified_code_commit": "7b6786db2474c22f4a5ba7562c7f35bcc9e0bd5f",
+  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37728620551",
+  "tests": {
+    "github_linux_postgres": {
+      "passed": 680,
+      "skipped": 0,
+      "seconds": 45.59
+    },
+    "vps_linux_postgres": {
+      "passed": 680,
+      "skipped": 0,
+      "seconds": 63.73
+    },
+    "windows": {
+      "passed": 593,
+      "skipped": 87,
+      "seconds": 9.64
+    }
+  },
+  "production": {
+    "healthy_services": [
+      "postgres",
+      "bot",
+      "worker",
+      "admin",
+      "illustrator"
+    ],
+    "editions": 14,
+    "languages": 12,
+    "schema_migrations": 10,
+    "request_states": {
+      "waiting": 2,
+      "cancelled": 4,
+      "delivered": 1
+    },
+    "confirmed_waiting_cards": 2,
+    "eligible_shared_jobs": 3,
+    "expiry_removed_from_all_requests": true,
+    "ready_images": 11,
+    "daily_attempt_limit": 10,
+    "monthly_reserved_limit_usd": "10",
+    "attempts_today": 10,
+    "uncertain_paid_jobs_preserved": 1,
+    "probe_paid_api_calls": 0,
+    "probe_new_telegram_messages": 0
+  },
+  "upgrade": {
+    "from_schema": 9,
+    "to_schema": 10,
+    "production_database_not_replaced": true,
+    "preservation": "Canonical SHA-256 before/after: artwork bytes, jobs, paid attempts, original message IDs, captions, source snapshots, delivery payloads, views, daily selections, subscriptions and progress match.",
+    "intentional_changes_excluded_from_digest": [
+      "request state and expiry",
+      "delivery status, retry/error bookkeeping and updated_at for recognised interrupted edits"
+    ],
+    "pre_upgrade_encrypted_s3_backup": "full GET and SHA-256 verified",
+    "post_upgrade_encrypted_s3_backup": "full GET and SHA-256 verified",
+    "new_schema_restore_test": "not performed"
+  },
+  "generation": {
+    "model": "gpt-image-2",
+    "quality": "medium",
+    "daily_attempt_limit": 10,
+    "monthly_reserved_limit_usd": "10",
+    "paid_requests_during_feature_validation": 0,
+    "uncertain_paid_requests_automatically_retried": false
+  },
+  "integration_scenarios": [
+    "One shared generation updates three week-old original cards across two chats, for both verses and chapters.",
+    "Disabled provider still records original targets; later ready images can fulfil them.",
+    "Chat settings changes preserve passive edits; full source is validated immediately before editing.",
+    "More than ten transport failures and process restart keep retrying the same target.",
+    "Deleted or blocked target does not block other users; inactive waiters do not starve active users.",
+    "Later successful same-source version fulfils a request tied to an earlier failed image.",
+    "Migration revives previously recorded expired/configuration-cancelled original targets."
+  ],
+  "limitations": [
+    "New paid generation and live multi-user fanout were not exercised: all ten daily API attempts were already used.",
+    "PostgreSQL integration uses controlled provider and Telegram adapters; live Rich Message editing was separately confirmed in 1.7.0.",
+    "Historic messages without a recorded acknowledged original ID cannot be recovered safely.",
+    "Persistent waiting does not guarantee successful generation: per-job generation limits, uncertain-outcome policy and budget remain in force.",
+    "Deleted or permanently noneditable targets become unavailable; blocked chats wait for restored access.",
+    "No restore of the new schema-010 dump was performed; the last full cloud restore test is recorded in 1.7.0.",
+    "Rich Messages require a compatible Telegram client."
+  ],
+  "previous_verified_release": "1.8.0"
+}
