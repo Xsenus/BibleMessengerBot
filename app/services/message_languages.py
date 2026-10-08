@@ -145,6 +145,8 @@ async def prepare(connection, text, chunks, chat, *, source_key=None):
             ON CONFLICT(telegram_chat_id,source_key) DO UPDATE SET source_key=EXCLUDED.source_key
             RETURNING id""", chat['telegram_chat_id'], f'{key}:{index}', text.edition_id,
             json.dumps(refs), str(piece), text.locale, image, request, text.title_key)
+        from app.services.speech import attach
+        await attach(connection,identifier)
         result.append(dict(kind='rich', text=str(piece), image_id=image, request_id=request, card_id=identifier))
     return result
 
@@ -238,6 +240,9 @@ async def outgoing(connection, chat_id, chunk):
         raise SendError('rejected')
     content = pages(card['current_html'])
     result = dict(chunk, text=content[min(card['text_page'], len(content) - 1)], image_id=card['image_id'])
+    from app.services.speech import media
+    audio = await media(connection,card)
+    result['audio_id'] = audio['id'] if audio else None
     return result, await keyboard(connection, card, text_pages=content)
 
 
@@ -271,6 +276,9 @@ async def select(connection, chat_id, message_id, card_id, action, value):
         await connection.execute("""UPDATE reading_cards SET selected_translation_id=$2,current_html=$3,
             language_page=$4,text_page=$5,revision=$6,updated_at=now() WHERE id=$1""",
             card_id, state['selected_translation_id'], state['current_html'], state['language_page'], state['text_page'], state['revision'])
+        if action in {'s','t'}:
+            from app.services.speech import attach
+            await attach(connection,card_id)
         chat = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1', chat_id)
         edition = await bible.find_translation(connection, card['source_translation_id'])
         if not edition:

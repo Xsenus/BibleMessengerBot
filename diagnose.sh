@@ -3,5 +3,5 @@
 set -Eeuo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 docker compose ps
-docker compose logs --tail=80 bot worker admin illustrator bootstrap
+docker compose logs --tail=80 bot worker admin illustrator speaker bootstrap
 docker compose run --rm --no-deps bootstrap python -m app.cli audit

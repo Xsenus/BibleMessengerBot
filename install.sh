@@ -90,7 +90,7 @@ docker compose build --pull bootstrap
 if docker compose exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; then
   BACKUP_LOCAL_ONLY=1 bash backup.sh
 fi
-docker compose stop bot worker admin illustrator || true
+docker compose stop bot worker admin illustrator speaker || true
 docker compose up -d postgres
 for _ in $(seq 1 90); do
   if docker compose exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; then break; fi
@@ -107,13 +107,14 @@ docker compose run --rm --no-deps bootstrap python -m app.cli audit \
   >runtime-evidence/database-audit.json
 docker compose run --rm --no-deps bootstrap python -m pip freeze >runtime-evidence/dependencies.txt
 log 'Starting only after successful tests and corpus audit.'
-docker compose up -d --no-deps bot worker admin illustrator
+docker compose up -d --no-deps bot worker admin illustrator speaker
 ready=false
 for _ in $(seq 1 90); do
   if docker compose exec -T admin curl -fsS http://127.0.0.1:8080/ready >/dev/null 2>&1 \
     && docker compose exec -T bot python -m app.healthcheck bot \
     && docker compose exec -T worker python -m app.healthcheck worker \
-    && docker compose exec -T illustrator python -m app.healthcheck illustrator; then ready=true; break; fi
+    && docker compose exec -T illustrator python -m app.healthcheck illustrator \
+    && docker compose exec -T speaker python -m app.healthcheck speaker; then ready=true; break; fi
   sleep 2
 done
 [[ "$ready" == true ]] || die "Runtime health checks failed; inspect docker compose logs bot worker admin"

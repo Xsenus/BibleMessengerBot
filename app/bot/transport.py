@@ -17,6 +17,7 @@ from aiogram.exceptions import (
 from aiogram.types import (
     BufferedInputFile,
     InputMediaPhoto,
+    InputMediaAudio,
     InputRichMessage,
     InputRichMessageMedia,
 )
@@ -93,6 +94,14 @@ class TelegramSender:
         if markup is not None and not hasattr(markup, "inline_keyboard"):
             raise SendError("rejected")
         html = text.replace("\n", "<br>")
+        audio = None
+        if chunk.get('audio_id'):
+            audio = await self.connection.fetchrow("SELECT * FROM reading_audio WHERE id=$1 AND state='ready'",chunk['audio_id'])
+        audio_cached = audio and audio['telegram_bot_id']==self.bot.id and audio['telegram_file_id']
+        async def remember_audio():
+            if chunk.get('card_id') is not None:
+                from app.services.speech import acknowledged
+                await acknowledged(self.connection,chunk['card_id'],audio['id'] if audio else None)
         image = cached = None
         if identifier is not None:
             image = await self.connection.fetchrow(
@@ -111,14 +120,19 @@ class TelegramSender:
                 ]
                 photo = (
                     cached
-                    if use_cache
+                    if use_cache and cached
                     else BufferedInputFile(
                         bytes(image["image_data"]), filename=f"reading-{identifier}.{suffix}"
                     )
                 )
                 media = [InputRichMessageMedia(id="artwork", media=InputMediaPhoto(media=photo))]
+            if audio is not None:
+                recording = audio['telegram_file_id'] if use_cache and audio['telegram_bot_id']==self.bot.id else None
+                recording = recording or BufferedInputFile(bytes(audio['audio_data']),filename=f"reading-{audio['language_code']}.mp3")
+                media.append(InputRichMessageMedia(id='narration',media=InputMediaAudio(media=recording,
+                    duration=audio['duration'],title='Библейское чтение · '+audio['language_code'],performer='Синтетическая озвучка')))
             rich = InputRichMessage(
-                html=('<img src="tg://photo?id=artwork"/>' if image else "") + html,
+                html=('<img src="tg://photo?id=artwork"/>' if image else "") + html + ('<audio src="tg://audio?id=narration"></audio>' if audio else ''),
                 media=media or None,
             )
             if editing:
@@ -140,13 +154,14 @@ class TelegramSender:
 
         try:
             try:
-                sent = await perform(bool(cached))
+                sent = await perform(bool(cached or audio_cached))
             except TelegramBadRequest as error:
                 if editing and "message is not modified" in error.message.lower():
+                    await remember_audio()
                     return SimpleNamespace(message_id=target)
                 # Retry only a definite stale-file rejection. Deleted/non-editable
                 # messages must never turn into replacement sends.
-                if not cached or not any(
+                if not (cached or audio_cached) or not any(
                     s in error.message.lower()
                     for s in ("file identifier", "file_id", "wrong remote file")
                 ):
@@ -154,6 +169,7 @@ class TelegramSender:
                 sent = await perform(False)
         except TelegramBadRequest as error:
             if editing and "message is not modified" in error.message.lower():
+                await remember_audio()
                 return SimpleNamespace(message_id=target)
             raise
         if image is not None:
@@ -175,6 +191,16 @@ class TelegramSender:
         if chunk.get('card_id') is not None and not editing:
             from app.services.message_languages import bind
             await bind(self.connection,chunk['card_id'],chat_id,sent.message_id)
+        await remember_audio()
+        if audio:
+            try:
+                for block in sent.rich_message.blocks:
+                    if getattr(block,'type',None)=='audio' and block.audio:
+                        await self.connection.execute('UPDATE reading_audio SET telegram_file_id=$2,telegram_bot_id=$3 WHERE id=$1',
+                            audio['id'],block.audio.file_id,self.bot.id)
+                        break
+            except Exception as error:
+                LOGGER.warning('Speech cache deferred (%s)',type(error).__name__)
         return sent
 
     async def _photo(self, chat_id: int, chunk: dict, thread_id: int | None, markup: Any) -> Any:
