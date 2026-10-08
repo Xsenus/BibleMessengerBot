@@ -3,17 +3,18 @@
   "status": "verified",
   "verified_date": "2026-10-09",
   "verified_code_commit": "d26ed5d9e83b2e3e5ca55db57705db7d21d4e184",
-  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37812151997",
+  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37813754066",
   "final_github_ci": {
     "url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37813754066",
-    "status": "in_progress",
-    "conclusion": ""
+    "status": "completed",
+    "conclusion": "success"
   },
   "tests": {
     "github_linux_postgres": {
-      "passed": 816,
+      "passed": 817,
       "skipped": 0,
-      "seconds": 152.06
+      "seconds": 144.16,
+      "commit": "d26ed5d9e83b2e3e5ca55db57705db7d21d4e184"
     },
     "vps_final_linux_postgres": {
       "passed": 817,
