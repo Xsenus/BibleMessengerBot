@@ -180,9 +180,11 @@ async def generate(provider, prompt, *, client=None, accepted=None, resume=None)
                     files={
                         "text_prompt": (None, prompt),
                         "rendering_speed": (None, "DEFAULT"),
-                        "resolution": (None, "1536x1024"),
                     },
                 )
+                # In this API 422 explicitly means the prompt failed safety checks.
+                if response.status_code == 422:
+                    raise GenerationError("moderation")
                 check_status(response)
                 payload = response.json()
                 image = payload["data"][0]

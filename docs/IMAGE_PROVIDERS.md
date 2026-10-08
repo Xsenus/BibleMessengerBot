@@ -9,7 +9,7 @@
 | OpenAI | GPT Image 2, medium, 1536×1024 | `OPENAI_API_KEY` | [API и ошибки](https://developers.openai.com/api/docs/guides/image-generation) |
 | Google Gemini | Nano Banana 2.1, 1K, 3:2 | `GEMINI_API_KEY` | [Изображения](https://ai.google.dev/gemini-api/docs/image-generation), [цены](https://ai.google.dev/gemini-api/docs/pricing) |
 | Black Forest Labs | FLUX.2 Pro, закреплённый snapshot, 1536×1024 | `BFL_API_KEY` | [Создание и проверка задания](https://docs.bfl.ai/quick_start/generating_images), [цены](https://bfl.ai/pricing?category=flux.2) |
-| Ideogram | Ideogram 4.0, DEFAULT, 1536×1024 | `IDEOGRAM_API_KEY` | [API](https://developer.ideogram.ai/v1/api-reference/generate-images/generate-v4), [цены](https://ideogram.ai/api-pricing) |
+| Ideogram | Ideogram 4.0, DEFAULT, размер API по умолчанию | `IDEOGRAM_API_KEY` | [API](https://developer.ideogram.ai/v1/api-reference/generate-images/generate-v4), [цены](https://ideogram.ai/api-pricing) |
 | Stability AI | Stable Image Ultra, 3:2, JPEG | `STABILITY_API_KEY` | [API](https://platform.stability.ai/docs/api-reference), [цены](https://platform.stability.ai/pricing) |
 
 Параметры и цены сверены по официальным страницам 8 октября 2026. API-доступ и средства оплачиваются отдельно в каждом аккаунте; подписка на пользовательский сайт не обязательно включает API. Ключи не входят в Git, сообщения Telegram или отчёты. Секреты всех пяти сервисов маскируются в журнале.

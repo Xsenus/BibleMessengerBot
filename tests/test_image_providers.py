@@ -183,3 +183,15 @@ async def test_unsafe_result_or_oversized_download_is_not_accepted():
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(api.GenerationError):
             await api.download(client, "https://ideogram.ai/sample", "ideogram")
+
+
+@pytest.mark.asyncio
+async def test_ideogram_422_is_a_terminal_safety_rejection():
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(422, json={"error": "fixture safety rejection"})
+        )
+    ) as client:
+        with pytest.raises(api.GenerationError) as error:
+            await api.generate(api.Provider("ideogram", "fixture"), "source", client=client)
+    assert error.value.code == "moderation" and not error.value.uncertain
