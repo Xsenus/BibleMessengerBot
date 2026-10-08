@@ -27,7 +27,7 @@ class ArtSettings:
     size: str = "1536x1024"
     monthly_usd: Decimal = Decimal("10")
     reservation_usd: Decimal = Decimal("0.10")
-    daily_requests: int = 10
+    daily_requests: int = 10  # Per provider in auto mode; UTC day, including failures.
     extra_keys: dict = field(default_factory=dict, repr=False)
     provider_order: tuple = ('openai', 'gemini', 'bfl', 'ideogram', 'stability')
 
@@ -437,7 +437,7 @@ async def reserve(connection, job_id, settings: ArtSettings):
         ):
             return None
         totals = await connection.fetchrow("""SELECT COALESCE(sum(reserved_usd),0) AS monthly,
-            count(*) FILTER(WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
+            count(*) FILTER(WHERE provider='openai' AND created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
             FROM image_generation_attempts WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')""")
         if (
             totals["monthly"] + settings.reservation_usd > settings.monthly_usd

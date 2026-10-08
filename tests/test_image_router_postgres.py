@@ -112,15 +112,64 @@ async def test_budget_stops_fallback_and_concurrent_reservations_share_limit(db)
         await other.close()
 
 
-async def test_daily_limit_is_shared_across_fallback_providers(db):
+async def test_daily_limit_is_independent_across_fallback_providers(db):
     c, _, identifier = await job(db)
     settings = config(daily_requests=1)
-    failed = AsyncMock(side_effect=api.GenerationError("quota"))
-    assert await router.process_job(c, identifier, settings, generator=failed) == "quota"
+    failed = AsyncMock(side_effect=api.GenerationError("rejected"))
+    assert await router.process_job(c, identifier, settings, generator=failed) == "rejected"
     assert (
-        await router.process_job(c, identifier, settings, generator=failed) == "budget_or_not_due"
+        await router.process_job(c, identifier, settings, generator=failed) == "rejected"
     )
-    assert failed.await_count == 1
+    assert [call.args[0].name for call in failed.await_args_list] == ['openai', 'gemini']
+    assert await c.fetchval("SELECT count(*) FROM image_generation_attempts") == 2
+
+
+async def another_job(c, *, chapter=1, verse=2):
+    from app.services import bible
+
+    image = await c.fetchrow("SELECT * FROM verse_illustrations ORDER BY id LIMIT 1")
+    edition = await bible.find_translation(c, image['translation_id'])
+    row = await c.fetchrow(
+        "SELECT * FROM verses WHERE translation_id=$1 AND book_code='GEN' AND chapter=$2 AND verse=$3",
+        edition['id'], chapter, verse,
+    )
+    image_id = await artwork.enqueue(c, row, edition)
+    return await c.fetchval('SELECT id FROM image_generation_jobs WHERE image_id=$1', image_id)
+
+
+async def test_concurrent_jobs_skip_full_provider_and_wait_when_every_provider_is_full(db):
+    c, dbsettings, first = await job(db)
+    second = await another_job(c)
+    third = await another_job(c, chapter=2, verse=1)
+    settings = replace(config(daily_requests=1), provider_order=('openai', 'ideogram'))
+    other = await asyncpg.connect(dbsettings.database_url)
+    try:
+        results = await asyncio.gather(
+            router.reserve(c, first, settings), router.reserve(other, second, settings)
+        )
+        assert sorted(r[1].name for r in results) == ['ideogram', 'openai']
+        assert await router.reserve(c, third, settings) == (None, None, 'budget_or_not_due')
+        assert await c.fetchval('SELECT state FROM image_generation_jobs WHERE id=$1', third) == 'queued'
+        assert await c.fetchval('SELECT count(*) FROM image_generation_attempts') == 2
+    finally:
+        await other.close()
+
+
+async def test_failed_attempt_uses_its_provider_day_and_reset_is_utc_even_after_key_rotation(db):
+    c, _, first = await job(db)
+    second = await another_job(c)
+    settings = replace(config(daily_requests=1), provider_order=('openai',))
+    attempt, provider, _ = await router.reserve(c, first, settings)
+    await router.fail(c, first, attempt, provider, api.GenerationError('rejected'))
+    rotated = replace(settings, key='rotated-fixture-openai')
+    await router.configure(c, rotated)
+    assert await router.reserve(c, second, rotated) == (None, None, 'budget_or_not_due')
+    await c.execute("SET TIME ZONE 'Pacific/Kiritimati'")
+    await c.execute("""UPDATE image_generation_attempts SET created_at=
+        (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')-interval '1 second'""")
+    identifier, chosen, error = await router.reserve(c, second, rotated)
+    assert identifier is not None and chosen.name == 'openai' and error is None
+    assert await c.fetchval('SELECT sum(reserved_usd) FROM image_generation_attempts') == Decimal('0.20')
 
 
 async def test_moderation_does_not_route_around_rejection(db):

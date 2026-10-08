@@ -44,10 +44,19 @@ async def run(args):
             configured = {p.name for p in image_router.providers(settings)}
             health = {r['provider']: dict(r) for r in await c.fetch(
                 'SELECT provider,failures,blocked_until,error_code FROM image_provider_health')}
+            usage = await c.fetch("""SELECT provider,COALESCE(sum(reserved_usd),0) AS monthly,
+                count(*) FILTER(WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
+                FROM image_generation_attempts
+                WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+                GROUP BY provider""")
+            daily = {r['provider']: r['daily'] for r in usage}
             return {'mode': settings.provider, 'order': settings.provider_order,
-                    'daily_max_requests': settings.daily_requests,
+                    'daily_max_requests_per_provider': settings.daily_requests,
                     'monthly_reserved_limit_usd': str(settings.monthly_usd),
+                    'monthly_reserved_usd': str(sum(r['monthly'] for r in usage)),
                     'providers': [{'provider': name, 'model': image_providers.MODELS[name],
+                                   'daily_requests_used': daily.get(name, 0),
+                                   'daily_requests_remaining': max(0, settings.daily_requests - daily.get(name, 0)),
                                    'configured': name in configured, **health.get(name, {})}
                                   for name in settings.provider_order]}
         if args.command == "stats":

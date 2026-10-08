@@ -1,0 +1,97 @@
+{
+  "version": "1.10.0",
+  "status": "verified",
+  "verified_date": "2026-10-08",
+  "verified_code_commit": "ca88f6840bffc05d46d34674221c6b1a2a2477ca",
+  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37730698608",
+  "tests": {
+    "github_linux_postgres": {
+      "passed": 721,
+      "skipped": 0,
+      "seconds": 81.31
+    },
+    "vps_linux_postgres": {
+      "passed": 721,
+      "skipped": 0,
+      "seconds": 261.09
+    },
+    "windows": {
+      "passed": 617,
+      "skipped": 104,
+      "seconds": 9.81
+    },
+    "new_provider_router_ruff": "passed"
+  },
+  "production": {
+    "healthy_services": [
+      "postgres",
+      "bot",
+      "worker",
+      "admin",
+      "illustrator"
+    ],
+    "editions": 14,
+    "languages": 12,
+    "schema_migrations": 11,
+    "provider_mode": "auto",
+    "configured_providers": [
+      "openai"
+    ],
+    "provider_order": [
+      "openai",
+      "gemini",
+      "bfl",
+      "ideogram",
+      "stability"
+    ],
+    "daily_attempt_limit": 10,
+    "monthly_reserved_limit_usd": "10",
+    "attempts_today": 10,
+    "uncertain_paid_jobs_preserved": 1,
+    "ready_images": 11,
+    "confirmed_waiting_cards": 2,
+    "probe_paid_api_calls": 0,
+    "probe_new_telegram_messages": 0
+  },
+  "providers": {
+    "openai": "gpt-image-2 / medium",
+    "gemini": "gemini-nano-banana-2.1 / 1K",
+    "bfl": "flux-2-pro / fixed snapshot",
+    "ideogram": "ideogram-4 / DEFAULT",
+    "stability": "stable-image-ultra"
+  },
+  "upgrade": {
+    "from_schema": 10,
+    "to_schema": 11,
+    "production_database_not_replaced": true,
+    "preservation": "Canonical SHA-256 of every existing artwork/job/attempt/request/view/selection/subscription/progress/delivery row matched; only the six newly added attempt metadata columns were excluded.",
+    "pre_upgrade_encrypted_s3_backup": "full GET and SHA-256 verified",
+    "post_upgrade_encrypted_s3_backup": "full GET and SHA-256 verified",
+    "new_schema_restore_test": "not performed"
+  },
+  "budget": {
+    "daily_attempt_limit": 10,
+    "monthly_reserved_limit_usd": "10",
+    "shared_across_all_providers": true,
+    "reserve_per_submission_usd": {
+      "openai": "0.10",
+      "gemini": "0.40",
+      "bfl": "0.10",
+      "ideogram": "0.10",
+      "stability": "0.10"
+    },
+    "max_submissions_per_job": 5,
+    "unknown_attempt_reserves_retained": true
+  },
+  "limitations": [
+    "Only OpenAI has a configured production key. The operator will supply the four additional keys later.",
+    "No live paid generation was performed for this release; current UTC-day cap was already exhausted.",
+    "HTTP contracts use mock transports; PostgreSQL routing/fanout uses controlled provider and Telegram adapters.",
+    "Actual account access, balance, latency and image quality of each additional service remain unverified.",
+    "A timed-out provider may have charged; fallback can pay for a second generation, with both reserves retained.",
+    "Legacy uncertain jobs and persistence failures remain quarantined; accepted BFL tasks are polled by ID for up to 15 minutes.",
+    "The late result of a BFL task abandoned after the 15-minute deadline is not automatically recovered.",
+    "No full restore of the new schema-011 S3 dump was performed; the last full cloud restore test belongs to 1.7.0."
+  ],
+  "previous_verified_release": "1.9.0"
+}

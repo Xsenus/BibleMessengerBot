@@ -1,4 +1,4 @@
-"""Durable provider failover under the single shared paid-request budget."""
+"""Durable failover with daily provider limits and one monthly paid-request budget."""
 
 from __future__ import annotations
 
@@ -59,14 +59,25 @@ async def reserve(connection, job_id, settings):
         health = {
             r["provider"]: r for r in await connection.fetch("SELECT * FROM image_provider_health")
         }
+        usage = await connection.fetch("""SELECT provider,COALESCE(sum(reserved_usd),0) AS monthly,
+            count(*) FILTER(WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
+            FROM image_generation_attempts
+            WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+            GROUP BY provider""")
+        monthly_reserved = sum(r["monthly"] for r in usage)
+        daily_used = {r["provider"]: r["daily"] for r in usage}
         candidates = []
         blocked = False
+        daily_exhausted = False
         for provider in providers(settings):
             if any(
                 r["provider"] == provider.name
                 and r["key_fingerprint"] in {None, fingerprint(provider)}
                 for r in used
             ):
+                continue
+            if daily_used.get(provider.name, 0) >= settings.daily_requests:
+                daily_exhausted = True
                 continue
             state = health.get(provider.name)
             if (
@@ -79,6 +90,10 @@ async def reserve(connection, job_id, settings):
                 continue
             candidates.append(provider)
         if not candidates:
+            if daily_exhausted:
+                # Keep the job eligible for the next UTC day; another provider
+                # can also become available without resetting any paid history.
+                return None, None, "budget_or_not_due"
             if blocked or not providers(settings):
                 await connection.execute(
                     "UPDATE image_generation_jobs SET state='retry',retry_at=now()+interval '1 minute' WHERE id=$1",
@@ -90,18 +105,15 @@ async def reserve(connection, job_id, settings):
                 job_id,
             )
             return None, None, "providers_exhausted"
-        totals = await connection.fetchrow("""SELECT COALESCE(sum(reserved_usd),0) AS monthly,
-            count(*) FILTER(WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
-            FROM image_generation_attempts WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')""")
         provider = next(
             (
                 p
                 for p in candidates
-                if totals["monthly"] + p.reservation_usd <= settings.monthly_usd
+                if monthly_reserved + p.reservation_usd <= settings.monthly_usd
             ),
             None,
         )
-        if not provider or totals["daily"] >= settings.daily_requests:
+        if not provider:
             return None, None, "budget_or_not_due"
         attempt = await connection.fetchval(
             """INSERT INTO image_generation_attempts
