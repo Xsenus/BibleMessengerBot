@@ -4,6 +4,8 @@
 
 ## Состояние и журналы
 
+Кнопки языка отдельного библейского сообщения и схема `reading_cards` описаны в [MESSAGE_LANGUAGES.md](MESSAGE_LANGUAGES.md). Обновление до 1.11.0 требует штатного применения миграции 012 до запуска новых служб. Предыдущие миграции и тексты корпуса не изменяются.
+
 ```bash
 docker compose ps
 docker compose logs --tail=100 bot worker admin

@@ -194,7 +194,6 @@ async def render(connection, row, edition, locale):
     )
     first, last = rows[0]["verse"], rows[-1].get("verse_end") or rows[-1]["verse"]
     ref = str(first) if first == last else f"{first}–{last}"
-    body = "\n\n".join(f"<b>[{bible.verse_label(r)}]</b> {escape(r['text'])}" for r in rows)
-    return f"<b>{escape(name)} {row['chapter']}:{ref}</b>\n\n{body}\n\n" + bible.attribution(
-        edition, locale
-    )
+    from app.services.message_languages import rows_text
+    return rows_text(f"<b>{escape(name)} {row['chapter']}:{ref}</b>\n\n", rows,
+        '\n\n'+bible.attribution(edition, locale), edition, locale, separator='\n\n')

@@ -25,6 +25,9 @@ async def insert_payload(connection: Any, chat: Any, translation: Any, text: str
                          subscription: Any = None, max_length: int = 3900, image_id: int | None = None, frozen_chunks=None) -> int:
     """Persist content and references atomically before the first send request."""
     chunks = frozen_chunks if frozen_chunks is not None else illustrations.chunks(text,image_id,max_length)
+    if frozen_chunks is None:
+        from app.services.message_languages import prepare
+        chunks = await prepare(connection,text,chunks,chat,source_key='outbox:'+key)
     if not chunks:
         raise ValueError('An empty payload cannot enter the delivery queue')
     identifier = await connection.fetchval('''INSERT INTO delivery_log(
@@ -72,7 +75,8 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
                 row,_ = await devotionals.selected_verse(connection,edition,chat['telegram_chat_id'],local_date,mode)
             if not row:
                 raise UserError('no_result')
-            text = f"<b>{tr(locale,mode)}</b>\n\n"+await bible.render_verse(connection,row,edition,ui_language=locale)
+            from app.services.message_languages import with_title
+            text = with_title(await bible.render_verse(connection,row,edition,ui_language=locale),mode,locale)
             text = await illustrations.decorate(connection,text,row,edition,chat=chat,
                 request_key=f"subscription:{sub['id']}:{sub['revision']}:{sub['next_run_at'].isoformat()}",
                 thread_id=chat['message_thread_id'])
@@ -103,7 +107,8 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
                 if not part:
                     raise ValueError('Missing chapter while composing a reading plan')
                 pieces.append(part)
-            text = ('\n\n'.join(pieces)+'\n\n'+bible.attribution(edition,locale)) if pieces else tr(locale,'complete')
+            from app.services.message_languages import combine
+            text = combine(pieces,footer='\n\n'+bible.attribution(edition,locale)) if pieces else tr(locale,'complete')
             progress.update(plan_day=min(sub['plan_day']+1,duration),completed=end==len(chapters))
             if pieces:
                 progress.update(book=chapters[end-1]['book_code'],chapter=chapters[end-1]['chapter'])
@@ -198,6 +203,9 @@ class SqlCheckpoints:
             chunk = envelope.chunks[envelope.next_chunk]
             if isinstance(chunk,dict) and chunk.get('kind')=='rich':
                 await illustrations.bind_message(self.connection,envelope.chat_id,chunk.get('request_id'),message_id)
+                if chunk.get('card_id'):
+                    from app.services.message_languages import bind
+                    await bind(self.connection,chunk['card_id'],envelope.chat_id,message_id)
             if final and delivery['mode']=='illustration_edit':
                 await self.connection.execute("UPDATE illustration_requests SET state='delivered' WHERE delivery_id=$1 AND telegram_message_id=$2",envelope.id,message_id)
 

@@ -74,6 +74,9 @@ class TelegramSender:
             raise SendError("uncertain") from None
 
     async def _rich(self, chat_id, chunk, thread_id, markup):
+        if chunk.get('card_id') is not None:
+            from app.services.message_languages import outgoing
+            chunk,markup = await outgoing(self.connection,chat_id,chunk)
         text, identifier = chunk.get("text"), chunk.get("image_id")
         editing = chunk["kind"] == "rich_edit"
         target = chunk.get("message_id")
@@ -169,6 +172,9 @@ class TelegramSender:
                 await record_view(self.connection, chat_id, identifier)
             except Exception as error:
                 LOGGER.warning("Reading artwork cache deferred (%s)", type(error).__name__)
+        if chunk.get('card_id') is not None and not editing:
+            from app.services.message_languages import bind
+            await bind(self.connection,chunk['card_id'],chat_id,sent.message_id)
         return sent
 
     async def _photo(self, chat_id: int, chunk: dict, thread_id: int | None, markup: Any) -> Any:

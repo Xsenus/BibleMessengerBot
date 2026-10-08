@@ -100,7 +100,9 @@ async def decorate_chapter(connection, text, translation, book_code, chapter, *,
                            request_key=request_key, thread_id=thread_id)
     if not isinstance(first, ReadingText):
         return text
-    return ChapterText(text, first, parts[1:])
+    from app.services.message_languages import inherit
+    return inherit(ChapterText(text, first, parts[1:]), text, row=row, edition=translation,
+                   locale=chat.get('ui_language', 'ru'))
 
 
 async def bind_message(connection, chat_id, request_id, message_id):
@@ -244,7 +246,9 @@ async def decorate(
                     request_key,
                 )
         if chat is not None:
-            return ReadingText(text, image_id, request_id)
+            from app.services.message_languages import inherit
+            return inherit(ReadingText(text, image_id, request_id), text, row=row, edition=translation,
+                           locale=chat.get('ui_language', 'ru'))
         return IllustratedText(text, image_id) if image_id else text
     except Exception as error:
         LOGGER.warning("Verse illustration unavailable (%s)", type(error).__name__)
@@ -257,6 +261,10 @@ def chunks(text: str, image_id: int | None, max_length: int = 3900) -> list:
     if isinstance(text, ReadingText):
         image_id = text.image_id if image_id is None else image_id
         if len(text.encode("utf-8")) > 24000:
+            if hasattr(text, 'refs'):
+                parts = split_message(str(text), min(max_length, 3900))
+                return [dict(kind='rich', text=part, image_id=image_id if index==0 else None,
+                             request_id=text.request_id if index==0 else None) for index,part in enumerate(parts)]
             raise ValueError("Reading card exceeds the bounded rich-message size")
         return [
             {"kind": "rich", "text": str(text), "image_id": image_id, "request_id": text.request_id}

@@ -219,8 +219,10 @@ async def render_verse(connection: Any, row: Any, translation: Any,
         from app.services.readings import render
         return await render(connection,row,translation,ui_language)
     name = await _book_name(connection,row['book_code'],translation['language_code'],translation['id'])
-    return (f"<blockquote>{escape(row['text'])}</blockquote>\n"
+    from app.services.message_languages import ScriptureText, ref
+    text = (f"<blockquote>{escape(row['text'])}</blockquote>\n"
             f"<b>{escape(name)} {row['chapter']}:{verse_label(row)}</b>\n"+attribution(translation,ui_language))
+    return ScriptureText(text, translation, [ref(row)], locale=ui_language)
 
 
 async def _ordinal_verse(connection: Any, translation: Any, ordinal: int) -> Any:
@@ -276,8 +278,10 @@ async def render_chapter(connection: Any, translation: Any, book_code: str, chap
     if not visible:
         return None
     name = await _book_name(connection,book_code,translation['language_code'],translation['id'])
-    body = '\n'.join(f"<b>[{verse_label(r)}]</b> {escape(r['text'])}" for r in visible)
-    return f'<b>{escape(name)} {chapter}</b>\n\n{body}'+('\n\n'+attribution(translation,ui_language) if with_attribution else '')
+    from app.services.message_languages import rows_text
+    return rows_text(f'<b>{escape(name)} {chapter}</b>\n\n', visible,
+        '\n\n'+attribution(translation,ui_language) if with_attribution else '',
+        translation, ui_language, whole=True)
 
 
 async def first_chapter(connection: Any, translation_id: int, *, testament: str | None = None) -> Any:

@@ -92,12 +92,17 @@ async def reply(bot: Any, connection: Any, settings: Any, chat_id: int, text: st
                 markup: Any = None, thread: int | None = None) -> None:
     """Split HTML safely and never automatically replay an ambiguous UI response."""
     parts = illustrations.chunks(text,getattr(text,'image_id',None),settings.max_message_length)
+    from app.services.message_languages import prepare
+    parts = await prepare(connection,text,parts,{'telegram_chat_id':chat_id})
     sender = TelegramSender(bot,connection,settings)
     for index,part in enumerate(parts):
         try:
             message_id = await sender.send(chat_id,part,thread,reply_markup=markup if index==len(parts)-1 else None)
             if isinstance(part,dict) and part.get('kind')=='rich':
                 await illustrations.bind_message(connection,chat_id,part.get('request_id'),message_id)
+                if part.get('card_id'):
+                    from app.services.message_languages import bind
+                    await bind(connection,part['card_id'],chat_id,message_id)
         except SendError as error:
             LOGGER.warning('UI response to %s stopped: %s',chat_id,error.kind)
             return
@@ -391,7 +396,8 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         if name=='read':
             return search_prompt(locale),None
         rows = await bible.search_verses(connection,edition['id'],' '.join(args),5)
-        return '\n\n'.join([await bible.render_verse(connection,r,edition,ui_language=locale) for r in rows]) or tr(locale,'no_result'),None
+        from app.services.message_languages import combine
+        return combine([await bible.render_verse(connection,r,edition,ui_language=locale) for r in rows]) or tr(locale,'no_result'),None
     else:
         raise UserError('invalid')
     if row:
@@ -494,7 +500,7 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
             LOGGER.error('Command failed: %s',type(error).__name__)
             text,markup = tr(locale,'not_ready'),None
         if donation_command is None and text is not None:
-            if markup is None and enum_value(message.chat.type)=='private' and not isinstance(text,illustrations.ReadingText):
+            if markup is None and enum_value(message.chat.type)=='private' and not isinstance(text,illustrations.ReadingText) and not hasattr(text,'refs'):
                 markup = main_keyboard(locale)
             await reply(bot,connection,settings,message.chat.id,text,markup,message.message_thread_id)
     if donation_command is not None:
@@ -516,6 +522,43 @@ async def private_text_handler(message: Message,bot: Any,db_pool: Any,settings: 
             reference = True
         command = '/read '+content if reference else '/menu'
     await command_handler(message.model_copy(update={'text':command}),bot,db_pool,settings)
+
+
+@router.callback_query(F.data.startswith('lc:'))
+async def message_language_handler(callback: CallbackQuery,bot: Any,db_pool: Any,settings: Any) -> None:
+    """Change one acknowledged Bible message without altering chat preferences."""
+    import re
+    from app.services.message_languages import select
+    from app.worker.delivery import process_delivery
+
+    if not isinstance(callback.message,Message):
+        await callback.answer()
+        return
+    locale = initial_ui(callback.from_user.language_code)
+    error_text = None
+    delivery = None
+    async with db_pool.acquire() as connection:
+        try:
+            match = re.fullmatch(r'lc:([1-9][0-9]{0,17}):([spt]):([0-9]{1,18})',callback.data or '')
+            if not match:
+                raise UserError('invalid')
+            await authorize(bot,callback.message.chat,callback.from_user.id)
+            await register_context(connection,callback.from_user,callback.message.chat,settings)
+            locale = await connection.fetchval('SELECT ui_language FROM telegram_chats WHERE telegram_chat_id=$1',callback.message.chat.id) or locale
+            async with chat_lock(connection,callback.message.chat.id):
+                delivery = await select(connection,callback.message.chat.id,callback.message.message_id,
+                                        int(match[1]),match[2],int(match[3]))
+        except UserError as error:
+            error_text = tr(locale,error.key)
+        except (ValueError,KeyError,OverflowError):
+            error_text = tr(locale,'invalid')
+        except Exception as error:
+            LOGGER.error('Message language callback failed: %s',type(error).__name__)
+            error_text = tr(locale,'not_ready')
+        await callback.answer(text=error_text,show_alert=bool(error_text))
+        if delivery is not None:
+            # Durable outbox remains eligible if the callback process stops here.
+            await process_delivery(connection,delivery,TelegramSender(bot,connection,settings))
 
 
 @router.callback_query(F.data.startswith('v1:'))

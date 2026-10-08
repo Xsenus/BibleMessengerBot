@@ -308,6 +308,17 @@ async def dispatch_requests(connection, maximum=100):
                 continue
             chat = dict(chat)
             chat["message_thread_id"] = request["message_thread_id"]
+            card_id = await connection.fetchval(
+                """UPDATE reading_cards SET image_id=$3,updated_at=now()
+                WHERE telegram_chat_id=$1 AND telegram_message_id=$2 RETURNING id""",
+                request["telegram_chat_id"],request["telegram_message_id"],image["id"],
+            )
+            chunk = {
+                "kind": "rich_edit", "image_id": image["id"],
+                "text": request["caption"], "message_id": request["telegram_message_id"],
+            }
+            if card_id:
+                chunk['card_id'] = card_id
             delivery = await insert_payload(
                 connection,
                 chat,
@@ -316,14 +327,7 @@ async def dispatch_requests(connection, maximum=100):
                 f"illustration-request:{request['id']}",
                 "illustration_edit",
                 {"kind": "illustration_edit"},
-                frozen_chunks=[
-                    {
-                        "kind": "rich_edit",
-                        "image_id": image["id"],
-                        "text": request["caption"],
-                        "message_id": request["telegram_message_id"],
-                    }
-                ],
+                frozen_chunks=[chunk],
             )
             await connection.execute(
                 "UPDATE illustration_requests SET state='queued',delivery_id=$2,image_id=$3 WHERE id=$1",

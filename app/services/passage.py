@@ -215,7 +215,6 @@ async def render(connection: Any, translation: Any, result: tuple, locale: str) 
 
     reference, book, rows = result
     name = await bible._book_name(connection, book, translation["language_code"], translation["id"])
-    body = "\n".join(f"<b>[{bible.verse_label(r)}]</b> {bible.escape(r['text'])}" for r in rows)
-    return f"<b>{bible.escape(name)} {reference.chapter}</b>\n\n{body}\n\n" + bible.attribution(
-        translation, locale
-    )
+    from app.services.message_languages import rows_text
+    return rows_text(f"<b>{bible.escape(name)} {reference.chapter}</b>\n\n", rows,
+        '\n\n'+bible.attribution(translation, locale), translation, locale, whole=reference.first is None)
