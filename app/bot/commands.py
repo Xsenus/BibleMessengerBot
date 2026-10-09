@@ -5,7 +5,7 @@ import re
 from app.services.errors import UserError
 
 MANAGEMENT = {'settings','language','ui','translation','translations','register','subscribe','channel','daily','read','devotions',
-    'pause','resume','unsubscribe','status','next','reset','resolve','thread','time','license','topics'}
+    'pause','resume','unsubscribe','status','next','reset','resolve','thread','time','timezone','license','topics'}
 MODE_ALIASES = {'morning':'morning_verse','evening':'evening_verse','утро':'morning_verse','вечер':'evening_verse','order':'sequential','порядок':'sequential','verse':'verse_of_day','стих':'verse_of_day',
     'topic':'topic_of_day','тема':'topic_of_day','plan':'reading_plan','план':'reading_plan'}
 

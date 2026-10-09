@@ -158,7 +158,7 @@ def invitation(prepared, locale, clock):
     is_ru=locale=='ru'
     title='🕊 Давайте помолимся вместе' if is_ru else '🕊 Let us pray together'
     intro='Оставим на минуту суету и обратим сердце к Богу. Можно произнести эти слова или помолиться своими.' if is_ru else 'Pause for a moment and turn your heart to God. Use these words or pray in your own words.'
-    result=f'<b>{title}</b>\n<i>{escape(clock)}</i>\n\n{intro}\n\n{escape(prepared["prayer_text"])}'
+    result=f'<b>{title}</b>\n\n{intro}\n\n{escape(prepared["prayer_text"])}'
     if prepared['generator'].startswith('local:'):
         result+='\n\n<i>'+('Прошения подобраны с помощью ИИ по сегодняшним новостям ООН.' if is_ru else 'Intentions selected with AI using today’s UN News.')+'</i>'
         news=json.loads(prepared['news_snapshot']) if isinstance(prepared['news_snapshot'],str) else prepared['news_snapshot']

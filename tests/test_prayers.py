@@ -94,7 +94,7 @@ def test_prayer_is_short_polished_and_not_presented_as_scripture():
     text=prayers.compose(['peace','children'],'ru')
     assert text.startswith('Господи') and text.endswith('Аминь.') and len(text)<700
     result=prayers.invitation({'prayer_text':text,'generator':'template:no_current_news','news_snapshot':[]},'ru','09:38')
-    assert '09:38' in result and 'Давайте помолимся вместе' in result
+    assert '09:38' not in result and 'Давайте помолимся вместе' in result
     assert 'сегодняшним новостям' not in result
     result=prayers.invitation({'prayer_text':text,'generator':'local:qwen3','news_snapshot':[{'url':'https://news.un.org/ru/story/example'}]},'ru','09:38')
     assert 'сегодняшним новостям' in result and 'Источник 1' in result

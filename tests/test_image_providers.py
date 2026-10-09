@@ -72,6 +72,7 @@ async def test_official_request_and_result_contracts(name):
             assert request.url.path.endswith("/generate/ultra")
             assert request.headers["authorization"] == "Bearer secret"
             assert b'name="aspect_ratio"' in request.content and b"3:2" in request.content
+            assert b'name="negative_prompt"' in request.content and b'printed page' in request.content
             return httpx.Response(200, content=image)
         if name == "ideogram":
             assert request.url.path == "/v1/ideogram-v4/generate"

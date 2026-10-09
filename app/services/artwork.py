@@ -521,6 +521,12 @@ async def process_job(connection, job_id, settings: ArtSettings, *, generator=ge
         return "budget_or_not_due"
     try:
         data, usage, request_id = await generator(settings, job["prompt"])
+        from app.services.image_quality import gate
+        verdict = await gate(connection, job['image_id'], attempt, data)
+        if verdict != 'approved':
+            await connection.execute("UPDATE image_generation_attempts SET state='succeeded',error_code=$2 WHERE id=$1", attempt, 'quality_'+verdict)
+            await connection.execute("UPDATE image_generation_jobs SET state='failed',error_code=$2,updated_at=now() WHERE id=$1", job_id, 'quality_'+verdict)
+            return 'quality_'+verdict
         async with connection.transaction():
             await illustrations.store(
                 connection,

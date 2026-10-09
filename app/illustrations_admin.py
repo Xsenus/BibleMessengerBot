@@ -141,14 +141,20 @@ async def run(args):
                 context=await artwork.source_context(c, row, edition),
             )
         )
+        from app.services import image_quality
+        image_data = args.file.read_bytes()
+        quality = await image_quality.assess(image_data)
+        if quality['verdict'] != 'approved':
+            raise ValueError('Artwork quality check: '+quality['reason'])
         identifier = await illustrations.store(
             c,
             row,
             edition,
-            args.file.read_bytes(),
+            image_data,
             prompt,
             prompt_version=(3 if args.scope=='chapter' else 2) if not args.prompt_file else 1,
         )
+        await image_quality.record(c, identifier, None, quality)
         return {"image_id": identifier, "status": "ready"}
     finally:
         await c.close()

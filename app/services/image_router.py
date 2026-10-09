@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import httpx
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
-from app.services import artwork, bible, illustrations
+from app.services import artwork, bible, illustrations, image_quality, visual_scene
 from app.services import image_providers as api
 from app.services.locks import lock_key
 
@@ -224,6 +225,17 @@ async def process_job(connection, job_id, settings, *, generator=None):
         job_id,
     )
     resume = None
+    scene = None
+    if not generator and not pending and any(p.name == 'stability' for p in providers(settings)):
+        try:
+            stored_usage=json.loads(job['usage']) if isinstance(job['usage'],str) else job['usage'] or {}
+            scene=stored_usage.get('scene_description')
+            if not scene:
+                scene = await visual_scene.describe(job['prompt'])
+                await connection.execute("UPDATE image_generation_jobs SET usage=$2::jsonb WHERE id=$1",job_id,json.dumps(dict(stored_usage,scene_description=scene)))
+        except (ValueError, KeyError, httpx.HTTPError, TimeoutError):
+            # No paid reservation when the free planner cannot prepare a scene.
+            settings = replace(settings, provider_order=tuple(p for p in settings.provider_order if p != 'stability'))
     if pending:
         provider = next((p for p in providers(settings) if p.name == pending["provider"]
                          and fingerprint(p) == pending['key_fingerprint']), None)
@@ -257,7 +269,7 @@ async def process_job(connection, job_id, settings, *, generator=None):
     try:
         if generator:
             data, usage, request_id = await generator(
-                provider, job["prompt"], accepted=accepted, resume=resume
+                provider, scene if provider.name == 'stability' and scene else job["prompt"], accepted=accepted, resume=resume
             )
         elif provider.name == "openai":
             data, usage, request_id = await artwork.generate(
@@ -265,8 +277,10 @@ async def process_job(connection, job_id, settings, *, generator=None):
             )
         else:
             data, usage, request_id = await api.generate(
-                provider, job["prompt"], accepted=accepted, resume=resume
+                provider, scene if provider.name == 'stability' and scene else job["prompt"], accepted=accepted, resume=resume
             )
+        if provider.name == 'stability' and scene:
+            usage=dict(usage,scene_description=scene)
         # The source may have changed while waiting for the external API.
         current = await illustrations.source_row(connection, job)
         if not current or illustrations.identity(current, edition)[4] != job["text_sha256"]:
@@ -280,6 +294,15 @@ async def process_job(connection, job_id, settings, *, generator=None):
                 job_id,
             )
             return "source_changed"
+        await connection.execute('UPDATE image_generation_attempts SET request_id=$2 WHERE id=$1',attempt,request_id)
+        verdict = await image_quality.gate(connection, job['image_id'], attempt, data)
+        if verdict == 'rejected':
+            await fail(connection, job_id, attempt, provider, api.GenerationError('quality_text'), max_attempts=attempt_limit(settings))
+            return 'quality_text'
+        if verdict == 'unavailable':
+            await connection.execute("UPDATE image_generation_attempts SET state='succeeded',request_id=$2,error_code='quality_unavailable' WHERE id=$1", attempt, request_id)
+            await connection.execute("UPDATE image_generation_jobs SET state='failed',error_code='quality_unavailable',updated_at=now() WHERE id=$1", job_id)
+            return 'quality_unavailable'
         async with connection.transaction():
             await illustrations.store(
                 connection,

@@ -251,6 +251,22 @@ async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> st
             return 'paused'
         editing = row['mode']=='illustration_edit'
         if editing:
+            repair=decoded(row['progress']).get('repair_new_image_id')
+            if repair:
+                old_image=decoded(row['progress']).get('repair_old_image_id')
+                if old_image and await connection.fetchval('SELECT new_image_id FROM artwork_replacements WHERE old_image_id=$1',old_image)!=repair:
+                    await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='replacement_changed' WHERE id=$1",delivery_id)
+                    return 'stale'
+                image=await connection.fetchrow("SELECT * FROM verse_illustrations WHERE id=$1 AND status='ready'",repair)
+                source=await illustrations.source_row(connection,image) if image else None
+                edition=await bible.find_translation(connection,image['translation_id']) if image else None
+                if not source or not edition or illustrations.identity(source,edition)[4]!=image['text_sha256']:
+                    await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='source_changed' WHERE id=$1",delivery_id)
+                    return 'source_changed'
+                for chunk in decoded(row['chunks']):
+                    if chunk.get('card_id') and await connection.fetchval('SELECT image_id FROM reading_cards WHERE id=$1',chunk['card_id'])!=repair:
+                        await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='replacement_changed' WHERE id=$1",delivery_id)
+                        return 'stale'
             request = await connection.fetchrow('SELECT * FROM illustration_requests WHERE delivery_id=$1',delivery_id)
             if request and not await illustrations.valid_request_source(connection,request):
                 async with connection.transaction():

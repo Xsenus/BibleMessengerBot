@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from PIL import Image
+from app.services.visual_scene import NEGATIVE
 
 NAMES = ("openai", "gemini", "bfl", "ideogram", "stability")
 MODELS = dict(
@@ -233,6 +234,7 @@ async def generate(provider, prompt, *, client=None, accepted=None, resume=None)
                     headers={"Authorization": "Bearer " + provider.key, "Accept": "image/*"},
                     files={
                         "prompt": (None, prompt),
+                        "negative_prompt": (None, NEGATIVE),
                         "aspect_ratio": (None, "3:2"),
                         "output_format": (None, "jpeg"),
                     },

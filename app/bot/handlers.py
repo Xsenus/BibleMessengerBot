@@ -119,6 +119,7 @@ def settings_keyboard(chat: Any) -> InlineKeyboardMarkup:
         [button(tr(locale,'edition'),'editions',identifier,'0'),button(tr(locale,'mode'),'modes',identifier)],
         [button(tr(locale,'pause'),'pause',identifier),button(tr(locale,'resume'),'resume',identifier)],
         [button(tr(locale,'status'),'status',identifier),button(tr(locale,'time'),'timehelp',identifier)]]
+    rows.insert(0,[button('🌍 Мой город / часовой пояс' if locale=='ru' else '🌍 My city / time zone','zones',identifier)])
     rows.append([button('🔔 Стих каждый день' if locale=='ru' else '🔔 Daily verse','daily',identifier)])
     rows.append([button('🌅 Утро и вечер' if locale=='ru' else '🌅 Morning and evening','devotions',identifier)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -321,6 +322,14 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         chat = await configure_chat(connection,chat_id=chat['telegram_chat_id'],actor_id=user.id,set_thread=True,
             message_thread_id=None if args[0]=='off' else int(args[0]))
         return tr(locale,'saved'),settings_keyboard(chat)
+    if name=='timezone':
+        from app.bot.timezones import menu
+        if not args:
+            return menu(chat)
+        if len(args)!=1:
+            raise UserError('invalid')
+        chat=await configure_chat(connection,chat_id=chat['telegram_chat_id'],actor_id=user.id,timezone_name=args[0])
+        return await settings_text(connection,chat),settings_keyboard(chat)
     if name=='time':
         if not args:
             target = f" {chat['telegram_chat_id']}" if chat['telegram_chat_id'] < 0 else ''
@@ -629,6 +638,12 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
                     translation_id=edition['id'],mode='verse_of_day',
                     send_time=parse_hhmm(settings.default_send_time),timezone_name=chat['timezone'])
                 text,markup = daily_confirmation(sub,locale),settings_keyboard(chat)
+            elif action=='zones':
+                from app.bot.timezones import menu
+                text,markup=menu(chat)
+            elif action=='setzone':
+                chat=await configure_chat(connection,chat_id=chat_id,actor_id=callback.from_user.id,timezone_name=value)
+                text,markup=await settings_text(connection,chat),settings_keyboard(chat)
             elif action=='timehelp':
                 suffix = f" {chat_id}" if chat_id<0 else ''
                 text,markup = f"{tr(locale,'time')}: <code>/time 09:00 {escape(chat['timezone'])}{suffix}</code>",None
