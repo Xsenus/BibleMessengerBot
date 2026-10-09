@@ -73,10 +73,16 @@ async def test_stability_planner_sends_only_bounded_frozen_source():
 
 
 @pytest.mark.asyncio
-async def test_stability_planner_rejects_page_descriptions():
+@pytest.mark.parametrize(
+    "scene",
+    [
+        "A printed page with ornate lettering and a large book, with many lines of text in a decorative frame.",
+        "Several ancient travellers carry decorated books and scrolls through a courtyard beneath warm afternoon sunlight.",
+    ],
+)
+async def test_stability_planner_rejects_page_descriptions(scene):
     import json
 
-    scene = "A printed page with ornate lettering and a large book, with many lines of text in a decorative frame."
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(
             lambda _: httpx.Response(

@@ -63,11 +63,14 @@ async def test_missing_ocr_holds_paid_result_without_automatic_duplicate(db, mon
     assert bytes(await c.fetchval("SELECT rejected_data FROM image_quality_reviews")) == jpeg()
 
 
-async def test_stability_does_not_reserve_money_when_free_scene_planner_fails(db, monkeypatch):
+@pytest.mark.parametrize("error", [ValueError("no scene"), IndexError("empty model output")])
+async def test_stability_does_not_reserve_money_when_free_scene_planner_fails(
+    db, monkeypatch, error
+):
     from app.services import visual_scene
 
     c, _, identifier = await job(db)
-    monkeypatch.setattr(visual_scene, "describe", AsyncMock(side_effect=ValueError("no scene")))
+    monkeypatch.setattr(visual_scene, "describe", AsyncMock(side_effect=error))
     settings = replace(
         config(),
         key="",

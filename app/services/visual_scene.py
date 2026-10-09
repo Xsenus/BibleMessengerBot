@@ -63,7 +63,7 @@ async def describe(prompt, *, client=None):
             or not 80 <= len(scene) <= 1600
             or any(c in scene for c in "<>{}")
             or re.search(
-                r"\b(?:text|lettering|typography|caption|manuscript|poster|scroll|book|page|watermark|target verse|create one)\b",
+                r"\b(?:texts?|letters?|lettering|typography|captions?|manuscripts?|posters?|scrolls?|books?|pages?|watermarks?|logos?|writing|written|inscriptions?|target verse|create one)\b",
                 scene,
                 re.I,
             )

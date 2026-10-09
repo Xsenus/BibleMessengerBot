@@ -233,7 +233,7 @@ async def process_job(connection, job_id, settings, *, generator=None):
             if not scene:
                 scene = await visual_scene.describe(job['prompt'])
                 await connection.execute("UPDATE image_generation_jobs SET usage=$2::jsonb WHERE id=$1",job_id,json.dumps(dict(stored_usage,scene_description=scene)))
-        except (ValueError, KeyError, httpx.HTTPError, TimeoutError):
+        except (ValueError, KeyError, IndexError, TypeError, httpx.HTTPError, TimeoutError):
             # No paid reservation when the free planner cannot prepare a scene.
             settings = replace(settings, provider_order=tuple(p for p in settings.provider_order if p != 'stability'))
     if pending:
