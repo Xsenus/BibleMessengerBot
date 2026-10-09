@@ -96,8 +96,9 @@ async def test_timeout_does_not_send_again():
 
 @pytest.mark.parametrize('body', [
     {'text': 'x' * 4001}, {}, {'text': 42},
-    {'attachments': [{'type': 'audio'}, {'type': 'inline_keyboard'}]},
     {'attachments': [{'type': 'audio'}, {'type': 'image'}]},
+    {'attachments': [{'type': 'audio'}, {'type': 'audio'}]},
+    {'attachments': [{'type': 'audio'}, {'type': 'inline_keyboard'}, {'type': 'inline_keyboard'}]},
 ])
 def test_invalid_bodies_rejected_locally(body):
     with pytest.raises(ValueError):
@@ -108,6 +109,8 @@ def test_image_and_buttons_valid_audio_separate():
     validate_body({'text': 'x' * 4000,
                    'attachments': [{'type': 'image'}, {'type': 'inline_keyboard'}]})
     validate_body({'attachments': [{'type': 'audio'}]})
+    validate_body({'attachments': [{'type': 'audio'}, {'type': 'inline_keyboard'}],
+                   'link': {'type': 'reply', 'mid': 'mid.original'}})
 
 
 @pytest.mark.asyncio

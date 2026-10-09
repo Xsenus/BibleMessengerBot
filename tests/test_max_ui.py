@@ -26,6 +26,14 @@ def test_card_callbacks_preserve_bound_card_and_audio_is_separate_action():
     ]
 
 
+def test_private_reading_shortcuts_keep_bound_language_and_audio_buttons():
+    markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='English', callback_data='lc:12:s:34')]])
+    result = keyboard_attachment(markup, audio=(12, 56), navigation=True)
+    payloads = [b['payload'] for row in result['payload']['buttons'] for b in row]
+    assert payloads == ['lc:12:s:34','maxcmd:/next','maxcmd:/random','maxcmd:/search','maxcmd:/menu','maxaudio:12:56']
+    assert all(len(row) <= 3 for row in result['payload']['buttons'])
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('platform,kind,identifier,expected',[
     ('telegram','private',101,''),('telegram','channel',-404,' -404'),

@@ -13,6 +13,25 @@ from app.maxbot.identities import external, message_external, remember_message
 from app.maxbot.rate_limit import wait_send_slot
 from app.maxbot.ui import keyboard_attachment
 from app.services.errors import SendError, UserError
+from app.services.formatting import escape
+
+
+async def audio_caption(connection, card, locale):
+    """Name the exact language/page's source rather than send an anonymous MP3."""
+    from app.services import bible
+    edition = await bible.find_translation(connection, card['selected_translation_id'])
+    if not edition:
+        raise SendError('rejected')
+    refs = json.loads(card['refs']) if isinstance(card['refs'], str) else card['refs']
+    labels = []
+    for ref in refs[:3]:
+        name = await bible._book_name(connection, ref['book'], edition['language_code'], edition['id'])
+        label = f"{name} {ref['chapter']}"
+        if ref['first'] is not None:
+            label += f":{ref['first']}" + (f"–{ref['last']}" if ref['last'] != ref['first'] else '')
+        labels.append(escape(label))
+    title = '🔊 Озвучка' if locale == 'ru' else '🔊 Audio reading'
+    return f'<b>{title}</b>\n' + '\n'.join(labels)
 
 
 def image_upload(data: bytes, mime: str) -> tuple[bytes, str, str]:
@@ -87,10 +106,11 @@ class MaxSender:
             if thread_id is not None:
                 raise SendError('rejected')  # MAX has no Telegram forum topics API.
             external_chat = await external(self.connection, 'chat', chat_id)
-            chat = await self.connection.fetchrow("SELECT ui_language FROM telegram_chats WHERE telegram_chat_id=$1 AND platform='max'", chat_id)
+            chat = await self.connection.fetchrow("SELECT ui_language,chat_type FROM telegram_chats WHERE telegram_chat_id=$1 AND platform='max'", chat_id)
             if not chat:
                 raise SendError('forbidden')
             locale = chat['ui_language']
+            navigation = chat.get('chat_type') == 'private'
             audio = None
             attachments = []
             chunk = dict(text) if isinstance(text, dict) else None
@@ -107,7 +127,12 @@ class MaxSender:
                     if not card:
                         raise SendError('rejected')
                     attachments = [{'type': 'audio', 'payload': await self.media('audio', chunk['audio_id'])}]
-                    body = {'attachments': attachments}
+                    original = await message_external(self.connection, self.bot_id, chat_id, card['telegram_message_id'])
+                    body = {'text': await audio_caption(self.connection, card, locale), 'format': 'html',
+                            'attachments': attachments, 'link': {'type': 'reply', 'mid': original}}
+                    keyboard = keyboard_attachment(None, locale=locale, navigation=navigation)
+                    if keyboard:
+                        attachments.append(keyboard)
                 elif kind in {'rich', 'rich_edit', 'photo', 'max_text', 'max_welcome'}:
                     if kind == 'max_welcome':
                         attachments.append({'type': 'image', 'payload': await self.welcome_media(chunk.get('asset_sha256'))})
@@ -124,7 +149,8 @@ class MaxSender:
             else:
                 body = {'text': str(text), 'format': 'html', 'attachments': attachments}
             if not chunk or chunk.get('kind') != 'max_audio':
-                keyboard = chunk.get('max_keyboard') if chunk and chunk.get('max_keyboard') else keyboard_attachment(reply_markup, audio=audio, locale=locale)
+                keyboard = chunk.get('max_keyboard') if chunk and chunk.get('max_keyboard') else keyboard_attachment(
+                    reply_markup, audio=audio, locale=locale, navigation=navigation and bool(chunk and chunk.get('card_id')))
                 if keyboard:
                     attachments.append(keyboard)
             target = chunk.get('message_id') if editing else None

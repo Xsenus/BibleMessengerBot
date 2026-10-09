@@ -332,7 +332,13 @@ async def test_late_audio_offers_one_button_then_sends_standalone_cached_mp3(max
                        'payload':buttons[-1][0]['payload']}}
     await dispatcher.dispatch(event,'fixture-listen-event')
     await drain(max_context)
-    assert len(sent)==2 and sent[-1][1]=={'attachments':[{'type':'audio','payload':{'token':'fixture-audio'}}]}
+    assert len(sent)==2
+    response=sent[-1][1]
+    assert response['attachments'][0]=={'type':'audio','payload':{'token':'fixture-audio'}}
+    assert response['link']=={'type':'reply','mid':sent[0][0]}
+    assert 'Audio reading' in response['text'] and '1:1' in response['text']
+    shortcuts={b['payload'] for row in response['attachments'][1]['payload']['buttons'] for b in row}
+    assert shortcuts=={'maxcmd:/next','maxcmd:/random','maxcmd:/search','maxcmd:/menu'}
     updated=await c.fetchrow('SELECT * FROM reading_cards')
     assert updated['audio_offered_id']==updated['audio_sent_id']==updated['audio_id']
     assert await c.fetchval("SELECT count(*) FROM max_media WHERE kind='audio'")==1

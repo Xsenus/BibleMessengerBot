@@ -62,8 +62,10 @@ def validate_body(body: dict) -> None:
     if text is not None and (not isinstance(text, str) or len(text) > 4000):
         raise ValueError('MAX message text exceeds 4000 characters')
     attachments = body.get('attachments') or []
-    if any(a.get('type') in {'audio', 'file'} for a in attachments) and len(attachments) != 1:
-        raise ValueError('MAX audio/file must be the only attachment')
+    if any(a.get('type') in {'audio', 'file'} for a in attachments):
+        media = [a for a in attachments if a.get('type') != 'inline_keyboard']
+        if len(media) != 1 or len(attachments) > 2:
+            raise ValueError('MAX audio/file supports only one media and one keyboard')
     if not text and not attachments:
         raise ValueError('Empty MAX message')
 
