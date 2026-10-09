@@ -58,7 +58,7 @@ async def test_api_refusals_are_not_blindly_retried(status, code, kind):
         if status == 503:
             assert caught.value.send_error(editing=True).kind == 'retry'
         if kind == 'retry':
-            assert caught.value.send_error().retry_after == 12
+            assert caught.value.send_error().retry_after == (60 if status==401 else 12)
     finally:
         await client.close()
 
