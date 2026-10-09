@@ -1,6 +1,10 @@
 """Shared menus preserve command meaning when mapped to MAX inline buttons."""
+from unittest.mock import AsyncMock
+
+import pytest
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from app.bot.handlers import command_target_suffix
 from app.bot.ui import main_keyboard
 from app.maxbot.ui import keyboard_attachment
 
@@ -20,3 +24,20 @@ def test_card_callbacks_preserve_bound_card_and_audio_is_separate_action():
         [{'type': 'callback', 'text': 'English', 'payload': 'lc:12:s:34'}],
         [{'type': 'callback', 'text': '🔊 Слушать', 'payload': 'maxaudio:12:56'}],
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('platform,kind,identifier,expected',[
+    ('telegram','private',101,''),('telegram','channel',-404,' -404'),
+    ('max','private',-1000000001,''),('max','channel',-1000000002,' chat:404'),
+])
+async def test_copyable_targets_keep_telegram_syntax_and_hide_max_internal_ids(platform,kind,identifier,expected):
+    connection=AsyncMock()
+    connection.fetchval.return_value=404
+    assert await command_target_suffix(connection,{
+        'platform':platform,'chat_type':kind,'telegram_chat_id':identifier,
+    })==expected
+    if platform=='max' and kind!='private':
+        connection.fetchval.assert_awaited_once()
+    else:
+        connection.fetchval.assert_not_awaited()

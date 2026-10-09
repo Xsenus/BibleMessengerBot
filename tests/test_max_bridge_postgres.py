@@ -196,6 +196,54 @@ async def test_positive_max_channel_target_and_revoked_rights_fail_closed(max_co
     assert not await c.fetchval('SELECT is_enabled FROM subscriptions WHERE telegram_chat_id=$1',channel)
 
 
+async def test_time_help_uses_copyable_max_destination_for_command_and_button(max_context):
+    c,dispatcher,_,_,sent,_=max_context
+    await command(max_context,'/start')
+    await drain(max_context)
+    private=await lookup(c,'chat',303)
+    await dispatcher.dispatch({'update_type':'bot_added','timestamp':456,'chat_id':404,'is_channel':True,
+                               'user':{'user_id':101,'first_name':'Fixture'}},'fixture-time-channel')
+    channel=await lookup(c,'chat',404)
+    original={'sender':{'user_id':900,'is_bot':True,'first_name':'Fixture Bible'},
+              'recipient':{'chat_id':303,'chat_type':'dialog'},'body':{'mid':sent[0][0],'text':'Fixture'}}
+    for index,(target,suffix) in enumerate([(private,''),(channel,' chat:404')],1):
+        await command(max_context,'/time'+suffix,index+1)
+        await drain(max_context)
+        zone=await c.fetchval('SELECT timezone FROM telegram_chats WHERE telegram_chat_id=$1',target)
+        expected=f'<code>/time 09:00 {zone}{suffix}</code>'
+        assert expected in sent[-1][1]['text']
+        assert str(target) not in sent[-1][1]['text']
+        event={'update_type':'message_callback','timestamp':456,'user_locale':'en','message':original,
+               'callback':{'callback_id':f'fixture-time-{index}','user':{'user_id':101,'first_name':'Fixture'},
+                           'payload':f'v1:timehelp:{target}:'}}
+        await dispatcher.dispatch(event,f'fixture-time-event-{index}')
+        await drain(max_context)
+        assert expected in sent[-1][1]['text']
+        assert str(target) not in sent[-1][1]['text']
+    # The group suffix shown in a private management dialog can be pasted back.
+    await command(max_context,f'/subscribe sequential 09:00 {zone} chat:404',4)
+    await drain(max_context)
+    await command(max_context,f'/time 10:00 {zone} chat:404',5)
+    await drain(max_context)
+    assert await c.fetchval('SELECT timezone FROM telegram_chats WHERE telegram_chat_id=$1',channel)==zone
+    assert await c.fetchval('SELECT send_time::text FROM subscriptions WHERE telegram_chat_id=$1',channel)=='10:00:00'
+
+
+async def test_commands_addressed_to_other_bots_never_trigger_max_intercepts(max_context):
+    c,_,_,requests,sent,_=max_context
+    for index,name in enumerate(['help','chats','thread','donate','donations','paysupport','terms','refund'],1):
+        await command(max_context,f'/{name}@other_fixture_bot',index)
+    await command(max_context,'/settings@other_fixture_bot chat:999999',19)
+    assert not requests and not sent
+    assert not await c.fetchval('SELECT EXISTS(SELECT 1 FROM delivery_log)')
+    assert not await c.fetchval('SELECT EXISTS(SELECT 1 FROM native_payment_orders)')
+    assert not await c.fetchval('SELECT EXISTS(SELECT 1 FROM native_payment_support)')
+    # Case-insensitive own-bot mentions must still work.
+    await command(max_context,'/help@FIXTURE_BOT',20)
+    await drain(max_context)
+    assert len(sent)==1 and '/next' in sent[0][1]['text']
+
+
 async def test_two_next_clicks_on_same_menu_have_independent_acknowledged_progress(max_context):
     c,dispatcher,_,_,sent,_=max_context
     await command(max_context,'/start')

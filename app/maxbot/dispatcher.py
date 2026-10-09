@@ -48,6 +48,13 @@ class MaxDispatcher:
             await self.bridge.queue_response(connection,self.settings,chat.id,text,markup)
 
     async def _command(self, message):
+        try:
+            parsed = parse_command(message.text or '')
+        except UserError:
+            await handlers.command_handler(message,self.bridge,self.pool,self.settings)
+            return
+        if parsed.mentioned_bot and parsed.mentioned_bot.lower()!=(self.bridge.info.get('username') or '').lower():
+            return
         # MAX chat IDs may be positive. An explicit chat:<ID> avoids confusing
         # ordinary command arguments (time, amount, page) with destinations.
         tokens = (message.text or '').split()
@@ -61,11 +68,7 @@ class MaxDispatcher:
             if target is None or private:
                 raise UserError('forbidden')
             message = message.model_copy(update={'text':' '.join([*tokens[:-1],str(target)])})
-        try:
             parsed = parse_command(message.text or '')
-        except UserError:
-            await handlers.command_handler(message,self.bridge,self.pool,self.settings)
-            return
         if parsed.name in {'donate','donations','paysupport','terms','refund'} or (parsed.name=='start' and parsed.arguments==('donate',)):
             from app.maxbot.payments import support
             await support(self, message, parsed)

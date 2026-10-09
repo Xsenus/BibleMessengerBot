@@ -169,6 +169,16 @@ async def settings_text(connection: Any, chat: Any) -> str:
     return '\n'.join(lines)
 
 
+async def command_target_suffix(connection: Any, chat: Any) -> str:
+    """Expose copyable destination syntax, never a MAX internal database key."""
+    if chat.get('platform','telegram') == 'max':
+        if chat['chat_type']=='private':
+            return ''
+        from app.maxbot.identities import external
+        return f" chat:{await external(connection,'chat',chat['telegram_chat_id'])}"
+    return f" {chat['telegram_chat_id']}" if chat['telegram_chat_id'] < 0 else ''
+
+
 async def status_text(connection: Any, chat: Any) -> str:
     """Show progress, queue IDs and ambiguous chunks without exposing private payloads."""
     locale = chat['ui_language']
@@ -191,10 +201,7 @@ async def status_text(connection: Any, chat: Any) -> str:
         # Machine state identifiers intentionally remain stable for diagnostics.
         lines.append(f"<code>#{job['id']} {job['status']} {job['next_chunk']}/{job['total']}</code>")
         if job['status'] in {'uncertain','failed'}:
-            target = f" {chat['telegram_chat_id']}" if chat['telegram_chat_id'] < 0 else ''
-            if chat.get('platform','telegram') == 'max':
-                from app.maxbot.identities import external
-                target = '' if chat['chat_type']=='private' else f" chat:{await external(connection,'chat',chat['telegram_chat_id'])}"
+            target = await command_target_suffix(connection,chat)
             lines += [tr(locale,'pending_review'),f"<code>/resolve {job['id']} sent{target}</code>",
                 f"<code>/resolve {job['id']} retry-duplicate-risk{target}</code>",
                 f"<code>/resolve {job['id']} cancel{target}</code>"]
@@ -342,7 +349,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         return await settings_text(connection,chat),settings_keyboard(chat)
     if name=='time':
         if not args:
-            target = f" {chat['telegram_chat_id']}" if chat['telegram_chat_id'] < 0 else ''
+            target = await command_target_suffix(connection,chat)
             return f"{tr(locale,'time')}: <code>/time 09:00 {escape(chat['timezone'])}{target}</code>",None
         if not 1<=len(args)<=2:
             raise UserError('invalid')
@@ -655,7 +662,7 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
                 chat=await configure_chat(connection,chat_id=chat_id,actor_id=callback.from_user.id,timezone_name=value)
                 text,markup=await settings_text(connection,chat),settings_keyboard(chat)
             elif action=='timehelp':
-                suffix = f" {chat_id}" if chat_id<0 else ''
+                suffix = await command_target_suffix(connection,chat)
                 text,markup = f"{tr(locale,'time')}: <code>/time 09:00 {escape(chat['timezone'])}{suffix}</code>",None
             elif action=='settings':
                 text,markup = await settings_text(connection,chat),settings_keyboard(chat)
