@@ -29,3 +29,13 @@ ARCHIVE-TESTS.txt
 ARCHIVE-VERIFICATION.json
 DELIVERY.json
 DELIVERY.md
+
+# Generated packages and local test/build output
+*.bundle
+*.tar
+*.zip
+*.whl
+build/
+dist/
+*.egg-info/
+TEST-RESULTS*

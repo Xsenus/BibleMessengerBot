@@ -24,3 +24,15 @@ git
 *.dump
 *.dump.sha256
 *.tar.gz
+
+# Development/build leftovers must not enter release images
+.ruff_cache
+build
+dist
+*.egg-info
+*.tar
+*.whl
+ARCHIVE-TESTS.txt
+ARCHIVE-VERIFICATION.json
+DELIVERY.json
+DELIVERY.md
