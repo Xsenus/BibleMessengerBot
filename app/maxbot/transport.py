@@ -133,14 +133,14 @@ class MaxSender:
             if editing:
                 await self.client.edit(external_message, body)
                 if audio:
-                    await self.connection.execute('UPDATE reading_cards SET audio_offered_id=$2 WHERE id=$1', *audio)
+                    await self.connection.execute('UPDATE reading_cards SET audio_offered_id=$2 WHERE id=$1', audio[0],audio[1])
                 return target
             mid = await self.client.send(chat_id=external_chat, body=body)
             checkpoint = await remember_message(self.connection, self.bot_id, chat_id, mid)
             if not checkpoint:
                 raise SendError('uncertain')
             if audio:
-                await self.connection.execute('UPDATE reading_cards SET audio_offered_id=$2 WHERE id=$1', *audio)
+                await self.connection.execute('UPDATE reading_cards SET audio_offered_id=$2 WHERE id=$1', audio[0],audio[1])
             if chunk and chunk.get('kind') == 'max_audio':
                 from app.services.speech import acknowledged
                 await acknowledged(self.connection, chunk['card_id'], chunk['audio_id'])
