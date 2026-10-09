@@ -1,0 +1,20 @@
+[Unit]
+Description=BibleMessengerBot HTTPS and existing VPN gateway
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/bible-messenger-bot
+Environment=MAX_EDGE_IP=82.38.69.203
+Environment=MAX_EDGE_INTERFACE=ens1
+ExecStart=/usr/bin/python3 /opt/bible-messenger-bot/scripts/max_https_edge.py start
+ExecStop=/usr/bin/python3 /opt/bible-messenger-bot/scripts/max_https_edge.py stop
+TimeoutStartSec=3min
+TimeoutStopSec=1min
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Check the shared MAX HTTPS gateway every 20 seconds
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=20s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

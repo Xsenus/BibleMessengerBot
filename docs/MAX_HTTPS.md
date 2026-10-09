@@ -25,8 +25,46 @@ HTTP-проверка `/max-edge-health` вернула 200, а `/max/webhook` �
 
 При использовании общего шлюза именованный SNI VPN передаётся в Xray,
 пустой SNI или SNI IP-адреса — в HTTPS MAX. Xray будет видеть IP шлюза.
-Это изменение публичной маршрутизации требует решения владельца существующего VPN.
-Регистрация IP URL в MAX и живая доставка событий пока не проверены.
+Владелец разрешил включение общего шлюза 9 октября 2026. Подготовлены
+`scripts/max_https_edge.py` и units `bible-max-edge`/`bible-max-edge-guard`.
+Регистрация IP URL в MAX и живая доставка событий проверяются при активации.
+
+## Общий порт с существующим Xray
+
+Шлюз слушает 29443, HTTPS-приёмник — только `127.0.0.1:28443`; Xray остаётся на 443.
+Одна помеченная iptables REDIRECT-запись направляет новые входящие соединения на 443
+через шлюз, только на заданном публичном интерфейсе/IP. OUTPUT не меняется, поэтому
+локальный backend Xray не зацикливается. NAT применяется к первому пакету потока:
+уже установленные прямые VPN-сеансы сохраняются. Глобальные таблицы не очищаются
+и не сохраняются поверх правил других служб.
+
+```sh
+cd /opt/bible-messenger-bot
+systemd-analyze verify deploy/bible-max-edge.service deploy/bible-max-edge-guard.service deploy/bible-max-edge-guard.timer
+install -m 0644 deploy/bible-max-edge.service deploy/bible-max-edge-guard.service deploy/bible-max-edge-guard.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now bible-max-edge.service bible-max-edge-guard.timer
+python3 scripts/max_https_edge.py status
+```
+
+Для другого сервера изменить `MAX_EDGE_IP` и `MAX_EDGE_INTERFACE` в обоих units.
+Чужой контейнер `bible-max-edge` не переиспользуется. Имя/метку оставить для
+совместимости со скриптом продления сертификата.
+
+Guard раз в 20 секунд проверяет доверенный TLS через frontend, MAX `/health`
+и доступность исходного Xray. При неисправности удаляет только свои точные
+помеченные правила: новые VPN-соединения идут напрямую в Xray. Если сервис
+шлюза остаётся активным и проверка проходит, маршрут восстанавливается.
+Соединения неисправного прокси могут оборваться: VPN-клиент должен переподключиться.
+
+```sh
+systemctl disable --now bible-max-edge-guard.timer
+systemctl disable --now bible-max-edge.service
+```
+
+Остановка удаляет только маршрут проекта и останавливает его nginx; Xray продолжает
+работу. После включения проверить внешний HTTPS, настоящую авторизованную VPN-сессию,
+автоматический fallback/возврат и действительную доставку событий из MAX.
 
 ## Подготовка и обслуживание
 
