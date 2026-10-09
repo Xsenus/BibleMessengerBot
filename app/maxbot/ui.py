@@ -43,9 +43,12 @@ def keyboard_attachment(markup, *, audio: tuple[int, int] | None = None, locale=
                     command = keyboard_command(button.text)
                     if not command:
                         raise ValueError('Unknown shared navigation command')
+                    if command == '/hide_keyboard':
+                        continue
                     converted.append({'type': 'callback', 'text': button.text,
                                       'payload': 'maxcmd:' + command})
-                rows.append(converted)
+                if converted:
+                    rows.append(converted)
         else:
             raise ValueError('Unsupported MAX keyboard')
     if navigation:

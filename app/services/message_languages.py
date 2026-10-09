@@ -233,6 +233,9 @@ async def keyboard(connection, card, *, editions=None, text_pages=None):
     if len(text_pages) > 1:
         current = min(card['text_page'], len(text_pages) - 1)
         rows.append([button('‹', 't', (current - 1) % len(text_pages)), button(f'📖 {current + 1}/{len(text_pages)}', 't', current), button('›', 't', (current + 1) % len(text_pages))])
+    references=decoded(card['refs'])
+    if len({(r['book'],r['chapter']) for r in references})==1 and any(r['first'] is not None for r in references):
+        rows.append([button('📖 Вся глава' if card['ui_language']=='ru' else '📖 Full chapter','c',0)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -262,6 +265,22 @@ async def select(connection, chat_id, message_id, card_id, action, value):
             WHERE id=$1 AND telegram_chat_id=$2 AND telegram_message_id=$3 FOR UPDATE""", card_id, chat_id, message_id)
         if not card:
             raise UserError('invalid')
+        if action=='c':
+            references=decoded(card['refs'])
+            if value!=0 or len({(r['book'],r['chapter']) for r in references})!=1:
+                raise UserError('invalid')
+            reference=references[0]
+            edition=await bible.find_translation(connection,card['selected_translation_id'])
+            if not edition:
+                raise UserError('no_result')
+            text=await bible.render_chapter(connection,edition,reference['book'],reference['chapter'],ui_language=card['ui_language'])
+            if not text:
+                raise UserError('no_result')
+            chat=await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1',chat_id)
+            key=f"context:{card_id}:{card['revision']}:{edition['id']}"
+            from app.services.illustrations import decorate_chapter
+            text=await decorate_chapter(connection,text,edition,reference['book'],reference['chapter'],chat=chat,request_key=key)
+            return await insert_payload(connection,chat,edition,text,key,'manual',{'kind':'reading'})
         editions = await available(connection, card)
         state = dict(card)
         if action == 's':

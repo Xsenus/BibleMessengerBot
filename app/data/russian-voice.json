@@ -1,0 +1,11 @@
+{
+  "engine": "silero",
+  "model": "v5_5_ru",
+  "license": "CC-BY-NC-4.0",
+  "source": "https://github.com/snakers4/silero-models",
+  "url": "https://models.silero.ai/models/tts/ru/v5_5_ru.pt",
+  "name": "model.pt",
+  "bytes": 145420684,
+  "sha256": "50081637b602126ee06cb3bc8a744d25651d2da149ee8864b9a379bfdd934437",
+  "speakers": {"david": "aidar", "mary": "kseniya"}
+}

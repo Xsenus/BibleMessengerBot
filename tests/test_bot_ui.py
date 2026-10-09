@@ -30,13 +30,13 @@ def pool_for(connection):
 
 
 @pytest.mark.parametrize('locale', sorted(available_ui()))
-def test_every_localized_keyboard_has_eight_working_commands(locale):
+def test_every_localized_keyboard_has_navigation_and_explicit_hide(locale):
     keyboard = main_keyboard(locale)
-    assert keyboard.resize_keyboard and keyboard.is_persistent and not keyboard.one_time_keyboard
-    assert [len(row) for row in keyboard.keyboard] == [2, 2, 2, 2]
+    assert keyboard.resize_keyboard and not keyboard.is_persistent and keyboard.one_time_keyboard
+    assert [len(row) for row in keyboard.keyboard] == [2, 2, 2, 2, 1]
     labels = [button.text for row in keyboard.keyboard for button in row]
-    assert [keyboard_command(label) for label in labels] == ['/' + name for name, _ in BUTTONS]
-    assert len(set(labels)) == 8
+    assert [keyboard_command(label) for label in labels] == ['/' + name for name, _ in BUTTONS]+['/hide_keyboard']
+    assert len(set(labels)) == 9
     assert split_message(welcome_text(locale, 'Fixture <Edition> & text'))
     assert split_message(search_prompt(locale))
     assert split_message(handlers.help_text(locale))
@@ -60,7 +60,7 @@ async def test_unknown_text_is_helpful_only_in_private_chat(monkeypatch):
     command_handler = AsyncMock()
     monkeypatch.setattr(handlers, 'command_handler', command_handler)
     await handlers.private_text_handler(message('Здравствуйте'), None, None, None)
-    assert command_handler.await_args.args[0].text == '/menu'
+    assert command_handler.await_args.args[0].text == '/menu_hint'
     command_handler.reset_mock()
     await handlers.private_text_handler(message('Здравствуйте', chat_id=-100, chat_type='supergroup'), None, None, None)
     command_handler.assert_not_awaited()
@@ -103,12 +103,12 @@ async def test_prompt_commands_work_without_telegram_requests(monkeypatch, comma
 
 
 @pytest.mark.asyncio
-async def test_start_returns_one_welcome_with_persistent_keyboard(monkeypatch):
+async def test_start_returns_one_welcome_with_collapsible_keyboard(monkeypatch):
     chat = {'telegram_chat_id': 101, 'ui_language': 'ru', 'timezone': 'UTC'}
     monkeypatch.setattr(handlers, 'destination', AsyncMock(return_value=chat))
     monkeypatch.setattr(handlers.bible, 'chat_translation', AsyncMock(return_value={'title': '<Edition> & source'}))
     text, markup = await handlers.run_command(None, None, None, message('/start'), parse_command('/start'))
-    assert isinstance(markup, ReplyKeyboardMarkup) and markup.is_persistent
+    assert isinstance(markup, ReplyKeyboardMarkup) and not markup.is_persistent
     assert '&lt;Edition&gt; &amp; source' in text
     assert len(split_message(text)) == 1
 

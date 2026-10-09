@@ -1,7 +1,7 @@
 """Edition-native reading units, without rewriting or summarizing Scripture.
 
 The curated Synodal catalog is deliberately scoped to its exact source edition.
-Other editions use conservative native sentence boundaries, never a borrowed
+Other editions use complete native chapters, never a borrowed
 Psalm numbering table. Explicit /read addresses bypass automatic selection.
 """
 
@@ -68,6 +68,13 @@ def attach(anchor, rows):
     return result
 
 
+def approved_unit(anchor, rows, first, last):
+    result = attach(anchor, rows)
+    key = f"{anchor['book_code']}:{anchor['chapter']}:{first}:{last}"
+    result['context_note'] = catalog().get('notes', {}).get(key, {})
+    return result
+
+
 def valid_unit(rows, first, last):
     if (
         not rows
@@ -103,14 +110,14 @@ async def units(connection, edition):
     for row in data:
         grouped.setdefault(row["n"], []).append(row)
     return [
-        attach(rows[0], rows)
+        approved_unit(rows[0], rows, definitions[n]['first'], definitions[n]['last'])
         for n, rows in grouped.items()
         if valid_unit(rows, definitions[n]["first"], definitions[n]["last"])
     ]
 
 
 async def contextual(connection, edition, anchor):
-    """Return a short native unit containing the anchor, or decline the fragment."""
+    """Use reviewed meaning boundaries; punctuation alone cannot establish context."""
     if not anchor:
         return None
     rows = [
@@ -127,34 +134,16 @@ async def contextual(connection, edition, anchor):
             ] <= last:
                 chosen = [r for r in rows if first <= r["verse"] <= last]
                 if valid_unit(chosen, first, last):
-                    return attach(anchor, chosen)
-    if fragment(anchor["text"]):
+                    return approved_unit(anchor, chosen, first, last)
+        # A random claim from an unreviewed scene is not a recommended reading.
         return None
-    index = next((i for i, r in enumerate(rows) if r["verse"] == anchor["verse"]), None)
-    if index is None:
+    # No verified semantic/versification map exists for this edition. Keep its
+    # entire chapter rather than guessing a five-verse window in its language.
+    if not rows or not any(r['verse']==anchor['verse'] for r in rows):
         return None
-    start = end = index
-    # Aphorisms are often complete in one verse; narratives and arguments need
-    # an antecedent and the end of the sentence. Bound total visible rows to 5.
-    while start > 0 and dependent(rows[start]["text"]) and end - start < 3:
-        start -= 1
-    while end + 1 < len(rows) and end - start < 4:
-        following = rows[end + 1]["text"]
-        if complete(rows[end]["text"]) and not re.match(
-            r"^(?:и не только|так что|потому что|so that|and not only)\b", following, re.I
-        ):
-            break
-        end += 1
-    chosen = rows[start : end + 1]
-    if any(fragment(r["text"]) for r in chosen) or not valid_unit(
-        chosen, chosen[0]["verse"], chosen[-1].get("verse_end") or chosen[-1]["verse"]
-    ):
+    if not valid_unit(rows, 1, rows[-1].get('verse_end') or rows[-1]['verse']):
         return None
-    if (dependent(chosen[0]["text"]) and start > 0) or (
-        not complete(chosen[-1]["text"]) and end + 1 < len(rows)
-    ):
-        return None
-    return attach(anchor, chosen)
+    return attach(anchor, rows)
 
 
 async def choose(connection, edition, *, seed=None):
@@ -184,7 +173,7 @@ async def choose(connection, edition, *, seed=None):
 
 
 async def daily(connection, edition, chat_id, day):
-    return await choose(connection, edition, seed=f"reading-v1:{edition['id']}:{chat_id}:{day}")
+    return await choose(connection, edition, seed=f"reading-v2:{edition['id']}:{chat_id}:{day}")
 
 
 async def render(connection, row, edition, locale):
@@ -195,5 +184,7 @@ async def render(connection, row, edition, locale):
     first, last = rows[0]["verse"], rows[-1].get("verse_end") or rows[-1]["verse"]
     ref = str(first) if first == last else f"{first}–{last}"
     from app.services.message_languages import rows_text
-    return rows_text(f"<b>{escape(name)} {row['chapter']}:{ref}</b>\n\n", rows,
+    note = row.get('context_note', {}).get('ru' if locale=='ru' else 'en')
+    context = f'<i>{escape(note)}</i>\n\n' if note else ''
+    return rows_text(f"<b>{escape(name)} {row['chapter']}:{ref}</b>\n\n"+context, rows,
         '\n\n'+bible.attribution(edition, locale), edition, locale, separator='\n\n')

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -25,6 +26,25 @@ INTENTIONS = {
  'environment': ('Укрепи пострадавших от стихийных бедствий и научи нас беречь Твоё творение.', 'Strengthen those affected by disasters and teach us to care for Your creation.'),
  'gratitude': ('Научи нас замечать добро и отвечать на нужду ближнего делом и милосердием.', 'Teach us to notice goodness and respond to our neighbours’ needs with kindness and action.'),
 }
+
+
+COMPOSITION_VERSION = 2
+COMMON_PRAYER = {
+ 'ru': 'Благодарим Тебя за Твои дары. Благослови наших близких, храни их здоровье и поддержи в трудностях. Укрепи нашу церковь в вере, любви и служении. Даруй мир людям и народам, помоги разрешать конфликты без насилия и примирять враждующих.',
+ 'en': 'We thank You for Your gifts. Bless our loved ones, protect their health and support them in hardship. Strengthen our church in faith, love and service. Grant peace to people and nations, help resolve conflicts without violence and bring reconciliation.',
+}
+
+
+def with_common_prayer(text, locale):
+    """Fixed petitions cannot be omitted by AI or lost during a news outage."""
+    common = COMMON_PRAYER['ru' if locale=='ru' else 'en']
+    if common in text:
+        return text
+    ending = 'Аминь.' if locale=='ru' else 'Amen.'
+    body = text.strip()
+    if body.endswith(ending):
+        body = body[:-len(ending)].rstrip()
+    return f'{body} {common} {ending}'
 
 
 def reminder(prayer_at, locale='ru', *, timezone_name='UTC', now=None):
@@ -131,13 +151,16 @@ def compose(chosen, locale):
     index=0 if locale=='ru' else 1
     start='Господи, услышь нашу молитву.' if locale=='ru' else 'Lord, hear our prayer.'
     end='Даруй нам мир в сердце и силы помогать друг другу. Аминь.' if locale=='ru' else 'Give us peace in our hearts and strength to help one another. Amen.'
-    return ' '.join([start,*[INTENTIONS[key][index] for key in chosen],end])
+    return with_common_prayer(' '.join([start,*[INTENTIONS[key][index] for key in chosen if key not in {'peace','gratitude'}],end]),locale)
 
 
 async def brief(connection, day, timezone_name, slot, locale):
     locale='ru' if locale=='ru' else 'en'
     existing=await connection.fetchrow('SELECT * FROM prayer_briefs WHERE local_date=$1 AND timezone=$2 AND slot=$3 AND locale=$4',day,timezone_name,slot,locale)
     if existing:
+        if existing.get('composition_version',1)<COMPOSITION_VERSION:
+            return await connection.fetchrow('UPDATE prayer_briefs SET prayer_text=$2,composition_version=$3 WHERE id=$1 RETURNING *',
+                existing['id'],with_common_prayer(existing['prayer_text'],locale),COMPOSITION_VERSION)
         return existing
     news=[]
     chosen=['peace','gratitude']
@@ -149,25 +172,16 @@ async def brief(connection, day, timezone_name, slot, locale):
             generator='local:qwen3-0.6b:intentions-v1'
     except (httpx.HTTPError,ValueError,KeyError,IndexError,ET.ParseError):
         generator='template:news_or_ai_unavailable'
-        news=[]
-    return await connection.fetchrow('''INSERT INTO prayer_briefs(local_date,timezone,slot,locale,prayer_text,generator,news_snapshot)
-        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) ON CONFLICT(local_date,timezone,slot,locale) DO UPDATE SET locale=EXCLUDED.locale RETURNING *''',
-        day,timezone_name,slot,locale,compose(chosen,locale),generator,json.dumps(news,ensure_ascii=False))
+    return await connection.fetchrow('''INSERT INTO prayer_briefs(local_date,timezone,slot,locale,prayer_text,generator,news_snapshot,composition_version)
+        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8) ON CONFLICT(local_date,timezone,slot,locale) DO UPDATE SET locale=EXCLUDED.locale RETURNING *''',
+        day,timezone_name,slot,locale,compose(chosen,locale),generator,json.dumps(news,ensure_ascii=False),COMPOSITION_VERSION)
 
 
 def invitation(prepared, locale, clock):
     is_ru=locale=='ru'
     title='🕊 Давайте помолимся вместе' if is_ru else '🕊 Let us pray together'
     intro='Оставим на минуту суету и обратим сердце к Богу. Можно произнести эти слова или помолиться своими.' if is_ru else 'Pause for a moment and turn your heart to God. Use these words or pray in your own words.'
-    result=f'<b>{title}</b>\n\n{intro}\n\n{escape(prepared["prayer_text"])}'
-    if prepared['generator'].startswith('local:'):
-        result+='\n\n<i>'+('Прошения подобраны с помощью ИИ по сегодняшним новостям ООН.' if is_ru else 'Intentions selected with AI using today’s UN News.')+'</i>'
-        news=json.loads(prepared['news_snapshot']) if isinstance(prepared['news_snapshot'],str) else prepared['news_snapshot']
-        links=[f'<a href="{escape(item["url"])}">'+('Источник ' if is_ru else 'Source ')+str(i)+'</a>' for i,item in enumerate(news[:3],1)]
-        result+='\n'+' · '.join(links)
-    else:
-        result+='\n\n<i>'+('Общая молитва о мире и заботе о ближних.' if is_ru else 'A general prayer for peace and care for our neighbours.')+'</i>'
-    return result
+    return f'<b>{title}</b>\n\n{intro}\n\n{escape(with_common_prayer(prepared["prayer_text"],locale))}'
 
 
 async def prepare_due(connection, *, now=None):
@@ -245,4 +259,16 @@ async def artwork_for_send(connection, delivery):
     image=await connection.fetchval("""SELECT i.id FROM prayer_occurrences p JOIN verse_illustrations i ON i.id=p.image_id
         WHERE p.id=$1 AND i.status='ready'""",progress.get('occurrence_id'))
     parts=json.loads(delivery['chunks']) if isinstance(delivery['chunks'],str) else delivery['chunks']
+    prepared=await connection.fetchrow('''SELECT b.*,c.ui_language FROM prayer_occurrences p
+        JOIN subscriptions s ON s.id=p.subscription_id JOIN telegram_chats c ON c.telegram_chat_id=s.telegram_chat_id
+        JOIN prayer_briefs b ON b.local_date=p.local_date AND b.timezone=s.timezone AND b.slot=s.mode
+            AND b.locale=CASE WHEN c.ui_language='ru' THEN 'ru' ELSE 'en' END
+        WHERE p.id=$1''',progress.get('occurrence_id'))
+    if prepared:
+        text=with_common_prayer(prepared['prayer_text'],prepared['ui_language'])
+        await connection.execute('UPDATE prayer_briefs SET prayer_text=$2,composition_version=$3 WHERE id=$1 AND composition_version<$3',prepared['id'],text,COMPOSITION_VERSION)
+        parts=[dict(part,text=invitation(prepared,prepared['ui_language'],'')) for part in parts]
+    else:
+        locale=await connection.fetchval('SELECT ui_language FROM telegram_chats WHERE telegram_chat_id=$1',delivery['telegram_chat_id']) or 'ru'
+        parts=[dict(part,text=with_common_prayer(re.split(r'\n\n<i>(?:Прошения подобраны|Intentions selected|Общая молитва|A general prayer)',part['text'],maxsplit=1)[0],locale)) for part in parts]
     return [dict(part,image_id=image) for part in parts]

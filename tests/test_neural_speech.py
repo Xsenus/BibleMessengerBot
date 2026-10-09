@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from app.services import neural_speech as neural, speech
+from app.services import neural_speech as neural, speech,russian_speech
 
 
 def test_profiles_are_distinct_and_neural_chunks_are_lossless():
@@ -14,7 +14,7 @@ def test_profiles_are_distinct_and_neural_chunks_are_lossless():
     parts = neural.segments(text)
     assert ''.join(parts) == text and all(0 < len(x) <= 350 for x in parts)
     for code in ('rus', 'lat', 'grc'):
-        assert speech.voice_profile(code, speech.SpeechSettings()).startswith('neural-v1:')
+        assert speech.voice_profile(code, speech.SpeechSettings()).startswith('neural-')
         assert speech.voice_profile(code, speech.SpeechSettings(provider='espeak')) == 'v1'
     assert len({neural.profile(code) for code in neural.LANGUAGES}) == 3
 
@@ -61,14 +61,14 @@ async def test_failed_download_never_marks_model_ready(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('language,engine', [('rus', 'piper'), ('lat', 'mms'), ('grc', 'mms')])
+@pytest.mark.parametrize('language,engine', [('rus', 'silero'), ('lat', 'mms'), ('grc', 'mms')])
 async def test_quality_languages_never_fall_back_to_robotic_voice(language, engine, monkeypatch):
     run = AsyncMock(return_value=b'')
     monkeypatch.setattr(speech, 'run_process', run)
     monkeypatch.setattr(speech, 'validate_audio', AsyncMock(return_value=(b'ID3' + b'x' * 700, 5)))
     result = await speech.synthesize('text', language, speech.SpeechSettings())
-    assert result[2] == engine and result[3] == neural.profile(language)
-    assert run.await_args_list[0].args[2] == 'app.services.neural_speech'
+    assert result[2] == engine and result[3] == speech.voice_profile(language,speech.SpeechSettings())
+    assert run.await_args_list[0].args[2] == ('app.services.russian_speech' if language=='rus' else 'app.services.neural_speech')
     assert not any(call.args[0] == 'espeak-ng' for call in run.await_args_list)
     run.side_effect = RuntimeError('neural worker unavailable')
     with pytest.raises(RuntimeError):
@@ -85,4 +85,13 @@ async def test_quality_languages_never_fall_back_to_robotic_voice(language, engi
 async def test_real_neural_voice_produces_valid_audio(language, text):
     data, duration, provider, voice = await speech.synthesize(text, language, speech.SpeechSettings())
     assert len(data) > 512 and duration >= 2
-    assert provider == neural.MODELS[language]['engine'] and voice == neural.profile(language)
+    assert provider == ('silero' if language=='rus' else neural.MODELS[language]['engine']) and voice == speech.voice_profile(language,speech.SpeechSettings())
+
+
+@pytest.mark.skipif(os.getenv('RUN_NEURAL_TESTS') != '1', reason='Pinned local neural models required')
+@pytest.mark.parametrize('speaker,engine',[('kseniya','silero'),('aidar','piper')])
+async def test_real_selected_voice_and_preserved_reserve(speaker,engine):
+    settings=speech.SpeechSettings(russian_voice=speaker,russian_engine=engine)
+    data,duration,provider,voice=await speech.synthesize('Ему было двести тридцать лет. Любовь долготерпит, милосердствует.', 'rus',settings)
+    assert len(data)>512 and duration>=2 and provider==engine
+    assert voice==speech.voice_profile('rus',settings)

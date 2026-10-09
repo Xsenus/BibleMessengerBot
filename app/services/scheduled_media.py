@@ -34,7 +34,7 @@ async def prepare(connection, delivery_id, row, edition, sub, chat, day):
     deadline=prayer_at if sub['mode'] in {'morning_verse','evening_verse'} and prayer_at>delivery['scheduled_for'] else delivery['scheduled_for']+timedelta(minutes=30)
     await connection.execute('''INSERT INTO scheduled_readings(delivery_id,image_id,deadline_at)
         VALUES($1,$2,$3) ON CONFLICT(delivery_id) DO NOTHING''',delivery_id,image_id,deadline)
-    audio_settings=speech.SpeechSettings.from_env()
+    audio_settings=speech.for_chat(speech.SpeechSettings.from_env(),chat)
     if not audio_settings.enabled:
         raise ValueError('Scheduled readings require enabled audio')
     for card_id in cards:

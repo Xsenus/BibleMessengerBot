@@ -34,8 +34,11 @@ def test_catalog_is_edition_scoped_and_contains_varied_lengths():
     assert not readings.curated({"source_name": "getBible/v2", "source_translation_id": "web"})
     assert not readings.curated({"source_name": "Other", "source_translation_id": "synodal"})
     sizes = {last - first + 1 for _, _, first, last in readings.catalog()["units"]}
-    assert {1, 2, 3, 5} <= sizes
-    assert all(1 <= f <= l and l - f < 6 for _, _, f, l in readings.catalog()["units"])
+    assert 1 in sizes and max(sizes)>20
+    assert all(1 <= f <= l for _, _, f, l in readings.catalog()["units"])
+    assert ['1CO',13,1,13] in readings.catalog()['units']
+    assert ['1CO',13,11,13] not in readings.catalog()['units']
+    assert ['PHP',4,10,20] in readings.catalog()['units']
 
 
 async def test_context_expands_unfinished_sentence_and_preserves_original_text():
@@ -55,19 +58,33 @@ async def test_context_expands_unfinished_sentence_and_preserves_original_text()
 
 async def test_independent_wisdom_stays_single_verse():
     rows = [
-        verse(1, "A gentle answer turns away wrath."),
-        verse(2, "The tongue of the wise brings knowledge."),
+        dict(verse(1, "Кроткий ответ отвращает гнев."),book_code='PRO',chapter=15),
+        dict(verse(2, "Язык мудрых сообщает добрые знания."),book_code='PRO',chapter=15),
     ]
     result = await readings.contextual(
-        SimpleNamespace(fetch=AsyncMock(return_value=rows)), {"id": 4}, rows[0]
+        SimpleNamespace(fetch=AsyncMock(return_value=rows)), {"id": 4,'source_name':'getBible/v2','source_translation_id':'synodal'}, rows[0]
     )
     assert result["reading_rows"] == rows[:1]
+
+
+async def test_punctuation_does_not_make_an_argument_self_contained():
+    rows=[verse(1,'The speaker introduces the argument.'),verse(2,'I can do everything.'),verse(3,'The point concerns living in need and abundance.')]
+    c=SimpleNamespace(fetch=AsyncMock(return_value=rows))
+    result=await readings.contextual(c,{'id':8,'language_code':'eng'},rows[1])
+    assert result['reading_rows']==rows
+
+
+async def test_synodal_unreviewed_statement_is_not_automatically_recommended():
+    row=dict(verse(1,'A complete sentence that could be a quoted false claim.'),book_code='JOB',chapter=4)
+    result=await readings.contextual(SimpleNamespace(fetch=AsyncMock(return_value=[row])),
+        {'id':1,'source_name':'getBible/v2','source_translation_id':'synodal'},row)
+    assert result is None
 
 
 async def test_does_not_cut_argument_at_five_or_bridge_missing_verse():
     rows = [verse(n, "Because this is a dependent unfinished sentence,") for n in range(1, 8)]
     c = SimpleNamespace(fetch=AsyncMock(return_value=rows))
-    assert await readings.contextual(c, {"id": 9}, rows[4]) is None
+    assert (await readings.contextual(c, {"id": 9}, rows[4]))['reading_rows'] == rows
     c.fetch.return_value = [verse(1, "Jesus said:"), verse(3, "Love your neighbor as yourself.")]
     assert await readings.contextual(c, {"id": 9}, c.fetch.return_value[0]) is None
 

@@ -153,7 +153,7 @@ async def test_unbound_audio_is_not_generated_and_invalid_output_never_attaches(
  assert await speech.dispatch(c)==0
 
 
-async def test_existing_robotic_cache_is_upgraded_for_every_bound_card(db,monkeypatch):
+async def test_pending_voice_upgrades_without_resending_already_sent_telegram_audio(db,monkeypatch):
  c,settings,_,chat,row=await setup(db)
  ru,_,_=await load_fixture(c,db[2],'rus')
  _,first=await card(c,ru,chat,row)
@@ -162,16 +162,16 @@ async def test_existing_robotic_cache_is_upgraded_for_every_bound_card(db,monkey
  old=first['audio_id']
  await speech.process(c,old,generator=generator())
  await c.execute("UPDATE reading_audio SET voice_profile='v1',cache_key='legacy-robotic',provider='espeak' WHERE id=$1",old)
- await c.execute('UPDATE reading_cards SET audio_sent_id=$1',old)
+ await c.execute('UPDATE reading_cards SET audio_sent_id=$1 WHERE id=$2',old,second['id'])
  before=await c.fetchrow('SELECT audio_data,source_text FROM reading_audio WHERE id=$1',old)
- assert await speech.upgrade_profiles(c)==2
+ assert await speech.upgrade_profiles(c)==1
  fresh=await c.fetchval('SELECT audio_id FROM reading_cards WHERE id=$1',first['id'])
- assert fresh!=old and fresh==await c.fetchval('SELECT audio_id FROM reading_cards WHERE id=$1',second['id'])
+ assert fresh!=old and old==await c.fetchval('SELECT audio_id FROM reading_cards WHERE id=$1',second['id'])
  assert await speech.upgrade_profiles(c)==0
  assert dict(await c.fetchrow('SELECT audio_data,source_text FROM reading_audio WHERE id=$1',old))==dict(before)
  assert await c.fetchval('SELECT selected_translation_id FROM reading_cards WHERE id=$1',first['id'])==ru['id']
  await speech.process(c,fresh,generator=AsyncMock(return_value=(b'ID3'+b'q'*1000,12,'piper','neural-fixture')))
- assert await speech.dispatch(c)==2
+ assert await speech.dispatch(c)==1
  bot,transport=sender(c,settings,monkeypatch)
  for edit in await c.fetch("SELECT id FROM delivery_log WHERE payload_key LIKE 'audio:%' ORDER BY id"):
   assert await process_delivery(c,edit['id'],transport)=='sent'

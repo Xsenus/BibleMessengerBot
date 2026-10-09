@@ -73,6 +73,9 @@ def commands_for(locale: str) -> list[BotCommand]:
         BotCommand(command='daily', description='Включить ежедневный стих' if language == 'ru' else 'Enable daily verse delivery'),
         BotCommand(command='read', description='Найти главу или стих по адресу' if language == 'ru' else 'Read a chapter or verse by reference'),
         BotCommand(command='devotions', description='Стихи утром и вечером' if language == 'ru' else 'Morning and evening verses'),
+        BotCommand(command='voice', description='Выбрать голос чтения: Давид или Мария' if language == 'ru' else 'Choose Russian reading voice: David or Mary'),
+        BotCommand(command='hide_keyboard', description='Скрыть нижние кнопки' if language == 'ru' else 'Hide the bottom keyboard'),
+        BotCommand(command='menu', description='Показать нижние кнопки' if language == 'ru' else 'Show the bottom keyboard'),
     ])
     return commands
 

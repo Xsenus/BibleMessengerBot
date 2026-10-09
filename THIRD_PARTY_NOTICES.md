@@ -35,4 +35,12 @@ aiogram, asyncpg, HTTPX, FastAPI, Uvicorn, Pydantic, tzdata, Python, PostgreSQL 
 
 ## Локальные нейросетевые голоса
 
+Silero Team: [Silero Models, v5_5_ru](https://github.com/snakers4/silero-models),
+**CC BY-NC 4.0**. Используется неизменённая официальная модель `v5_5_ru.pt`;
+`aidar` и `kseniya` обозначены в интерфейсе как «Давид» и «Мария».
+Размер и SHA-256 зафиксированы в `app/data/russian-voice.json`. Упакованный код
+модели импортируется только после проверки этого хеша. Num2words 0.5.14
+(Taro Ogawa / Savoir-faire Linux) распространяется по LGPL; лицензия пакета
+сохраняется в установленной зависимости. Лицензия MIT приложения их не заменяет.
+
 [Piper](https://github.com/OHF-Voice/piper1-gpl) сохраняет GPL-3.0; русский [Denis medium](https://huggingface.co/rhasspy/piper-voices/tree/main/ru/ru_RU/denis/medium) использует CC0-данные и сопровождается карточкой автора. Meta AI / Vineel Pratap и соавторы, *Scaling Speech Technology to 1,000+ Languages*, предоставляют [MMS Latin](https://huggingface.co/facebook/mms-tts-lat) и [MMS Ancient Greek](https://huggingface.co/facebook/mms-tts-grc) по **CC BY-NC 4.0 (некоммерческое использование)**. Исходные карточки сохранены при загрузке. Веса не дообучаются; исходный библейский текст не изменяется, для произношения нормализуются буквы/лигатуры. MIT приложения не распространяется на веса и зависимости. PyTorch, Transformers, ONNX Runtime и их компоненты сохраняют собственные уведомления в установленных пакетах. Точные файлы, ревизии и SHA-256 указаны в `app/data/speech-models.json`; версии библиотек — в `constraints-neural-linux.txt`.

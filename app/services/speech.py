@@ -10,7 +10,7 @@ import re
 import tempfile
 import sys
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import httpx
@@ -47,6 +47,8 @@ class SpeechSettings:
  paid_enabled: bool = False
  monthly_characters: int = 0
  daily_characters: int = 0
+ russian_voice: str = 'aidar'
+ russian_engine: str = 'silero'
 
  @classmethod
  def from_env(cls):
@@ -57,11 +59,19 @@ class SpeechSettings:
   daily=int(os.getenv('AUDIO_PAID_DAILY_MAX_CHARACTERS','0'))
   if min(monthly,daily)<0:
    raise ValueError('Negative audio limit')
+  if os.getenv('AUDIO_RUSSIAN_ENGINE','silero') not in {'silero','piper'}:
+   raise ValueError('Invalid Russian audio engine')
   return cls(enabled=os.getenv('AUDIO_ENABLED','true').lower() in {'true','1','yes'},
    provider=provider,key=os.getenv('AUDIO_OPENAI_API_KEY') or os.getenv('OPENAI_API_KEY',''),
    model=os.getenv('AUDIO_OPENAI_MODEL','gpt-4o-mini-tts'),voice=os.getenv('AUDIO_OPENAI_VOICE','marin'),
    paid_enabled=os.getenv('AUDIO_PAID_ENABLED','false').lower() in {'true','1','yes'},
-   monthly_characters=monthly,daily_characters=daily)
+   monthly_characters=monthly,daily_characters=daily,
+   russian_engine=os.getenv('AUDIO_RUSSIAN_ENGINE','silero'))
+
+
+def for_chat(settings, chat):
+ from app.services.russian_speech import SPEAKERS
+ return replace(settings,russian_voice=SPEAKERS.get(chat.get('audio_voice','david'),'aidar'))
 
 
 def spoken_text(html, edition, locale):
@@ -72,11 +82,15 @@ def spoken_text(html, edition, locale):
    html=html[:-len(footer)]
    break
  html=re.sub(r'<b>.*?</b>','',html,flags=re.S)
+ html=re.sub(r'<i>.*?</i>','',html,flags=re.S)
  return re.sub(r'\s+',' ',plain_text(html)).strip()
 
 
 def voice_profile(language, settings):
  from app.services import neural_speech
+ if language=='rus' and settings.provider in {'free','neural'} and settings.russian_engine!='piper':
+  from app.services.russian_speech import profile
+  return profile(settings.russian_voice)
  return neural_speech.profile(language) if settings.provider in {'free','neural'} and language in neural_speech.LANGUAGES else 'v1'
 
 
@@ -92,7 +106,8 @@ async def attach(connection, card_id, settings=None):
  settings=settings or SpeechSettings.from_env()
  if not settings.enabled:
   return None
- card=await connection.fetchrow('SELECT * FROM reading_cards WHERE id=$1',card_id)
+ card=await connection.fetchrow('SELECT r.*,c.audio_voice FROM reading_cards r JOIN telegram_chats c USING(telegram_chat_id) WHERE r.id=$1',card_id)
+ settings=for_chat(settings,card)
  edition=await bible.find_translation(connection,card['selected_translation_id'])
  if not edition:
   return None
@@ -171,11 +186,29 @@ async def synthesize(text, language, settings, *, client=None):
   from app.services import neural_speech
   if settings.provider in {'free','neural'} and language in neural_speech.LANGUAGES:
    wav=root/'reading.wav'
-   await run_process(sys.executable,'-m','app.services.neural_speech',language,str(wav),stdin=text.encode(),timeout=600)
-   await run_process('ffmpeg','-v','error','-i',str(wav),'-threads','1','-ac','1','-ar','24000',
-    '-codec:a','libmp3lame','-b:a','96k',str(output))
-   data,duration=await validate_audio(output)
-   return data,duration,neural_speech.MODELS[language]['engine'],voice_profile(language,settings)
+   provider=neural_speech.MODELS[language]['engine']
+   voice=neural_speech.profile(language)
+   async def encoded():
+    await run_process('ffmpeg','-v','error','-y','-i',str(wav),'-threads','1','-ac','1','-ar','24000',
+     '-codec:a','libmp3lame','-b:a','96k',str(output))
+    return await validate_audio(output)
+   if language=='rus' and settings.russian_engine!='piper':
+    try:
+     await run_process(sys.executable,'-m','app.services.russian_speech',str(wav),settings.russian_voice,stdin=text.encode(),timeout=600)
+     provider='silero'
+     voice=voice_profile(language,settings)
+     data,duration=await encoded()
+     return data,duration,provider,voice
+    except (RuntimeError,OSError,TimeoutError,ValueError) as error:
+     LOGGER.warning('Russian voice unavailable (%s); using reserved Piper voice',type(error).__name__)
+     provider=neural_speech.MODELS[language]['engine']
+     voice=neural_speech.profile(language)
+     wav.unlink(missing_ok=True)
+     await run_process(sys.executable,'-m','app.services.neural_speech',language,str(wav),stdin=text.encode(),timeout=600)
+   else:
+    await run_process(sys.executable,'-m','app.services.neural_speech',language,str(wav),stdin=text.encode(),timeout=600)
+   data,duration=await encoded()
+   return data,duration,provider,voice
   if settings.provider=='neural':
    raise ValueError('unsupported_neural_language')
   if settings.provider=='openai':
@@ -277,6 +310,12 @@ async def process(connection, identifier, settings=None, *, generator=synthesize
    AND (retry_at IS NULL OR retry_at<=now())""",identifier)
   if not audio:
    return 'not_due'
+  if audio['language_code']=='rus' and settings.provider in {'free','neural'} and settings.russian_engine!='piper':
+   from app.services import russian_speech
+   for speaker in russian_speech.SPEAKERS.values():
+    if audio['voice_profile']==russian_speech.profile(speaker):
+     settings=replace(settings,russian_voice=speaker)
+     break
   if audio['provider_mode']!=settings.provider or audio['voice_profile']!=voice_profile(audio['language_code'],settings):
    return 'configuration_changed'
   from app.services.scheduled_media import AUDIO_ELIGIBILITY
@@ -323,14 +362,39 @@ async def upgrade_profiles(connection, settings=None):
  settings=settings or SpeechSettings.from_env()
  if not settings.enabled or settings.provider not in {'free','neural'}:
   return 0
- profiles={language:voice_profile(language,settings) for language in neural_speech.LANGUAGES}
+ profiles={language:voice_profile(language,settings) for language in neural_speech.LANGUAGES if language!='rus'}
+ profiles.update({'rus:'+name:voice_profile('rus',for_chat(settings,{'audio_voice':name})) for name in ('david','mary')})
  cards=await connection.fetch('''SELECT c.id,c.telegram_chat_id FROM reading_cards c
-  JOIN reading_audio a ON a.id=c.audio_id JOIN jsonb_each_text($1::jsonb) p ON p.key=a.language_code
-  WHERE a.provider_mode=$2 AND a.voice_profile<>p.value ORDER BY c.id LIMIT 100''',json.dumps(profiles),settings.provider)
+  JOIN telegram_chats ch USING(telegram_chat_id)
+  JOIN reading_audio a ON a.id=c.audio_id JOIN jsonb_each_text($1::jsonb) p
+  ON p.key=CASE WHEN a.language_code='rus' THEN 'rus:'||ch.audio_voice ELSE a.language_code END
+  WHERE a.provider_mode=$2 AND a.voice_profile<>p.value AND (c.platform='max' OR c.audio_sent_id IS NULL)
+  ORDER BY c.id LIMIT 100''',json.dumps(profiles),settings.provider)
  for card in cards:
   async with chat_lock(connection,card['telegram_chat_id']),connection.transaction():
    await attach(connection,card['id'],settings)
  return len(cards)
+
+
+async def refresh_prepared_tracks(connection, settings=None):
+ """A changed voice also applies to future bundles, without replaying sent audio."""
+ settings=settings or SpeechSettings.from_env()
+ if not settings.enabled or settings.provider not in {'free','neural'}:
+  return 0
+ profiles={name:voice_profile('rus',for_chat(settings,{'audio_voice':name})) for name in ('david','mary')}
+ rows=await connection.fetch('''SELECT t.card_id,t.translation_id,t.page,a.source_text,ch.audio_voice
+  FROM reading_card_tracks t JOIN reading_audio a ON a.id=t.audio_id
+  JOIN reading_cards c ON c.id=t.card_id JOIN telegram_chats ch USING(telegram_chat_id)
+  JOIN delivery_log d ON d.id=c.delivery_id JOIN scheduled_readings r ON r.delivery_id=d.id
+  JOIN jsonb_each_text($1::jsonb) p ON p.key=ch.audio_voice
+  WHERE a.language_code='rus' AND a.provider_mode=$2 AND a.voice_profile<>p.value
+  AND r.state IN ('preparing','ready') AND d.status IN ('pending','retry')
+  ORDER BY t.card_id,t.page LIMIT 100''',json.dumps(profiles),settings.provider)
+ for row in rows:
+  identifier=await ensure_audio(connection,row['source_text'],'rus',for_chat(settings,row))
+  await connection.execute('UPDATE reading_card_tracks SET audio_id=$4 WHERE card_id=$1 AND translation_id=$2 AND page=$3',
+   row['card_id'],row['translation_id'],row['page'],identifier)
+ return len(rows)
 
 
 async def dispatch(connection):

@@ -31,6 +31,8 @@ LABELS = {
 
 
 def button_label(locale: str, command: str, emoji: str) -> str:
+    if command == 'hide_keyboard':
+        return f"{emoji} " + ('Скрыть кнопки' if locale == 'ru' else 'Hide buttons')
     if command == 'donate':
         return f"{emoji} " + ('Поддержать' if locale == 'ru' else 'Support')
     if command == 'daily':
@@ -38,15 +40,16 @@ def button_label(locale: str, command: str, emoji: str) -> str:
     return f"{emoji} {LABELS.get(locale, {}).get(command, tr(locale, command))}"
 
 
-def main_keyboard(locale: str) -> ReplyKeyboardMarkup:
-    """Native keyboard stays available while inline settings are being used."""
+def main_keyboard(locale: str, *, collapsible=True) -> ReplyKeyboardMarkup:
+    """Allow clients to collapse navigation; offer explicit removal too."""
     buttons = [KeyboardButton(text=button_label(locale, command, emoji))
                for command, emoji in BUTTONS]
     placeholder = {'ru': 'Выберите действие или введите /search …',
                    'en': 'Choose an action or enter /search …'}.get(locale, tr(locale, 'choose'))
     return ReplyKeyboardMarkup(
-        keyboard=[buttons[index:index + 2] for index in range(0, len(buttons), 2)],
-        resize_keyboard=True, is_persistent=True, one_time_keyboard=False,
+        keyboard=[buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+                 + ([[KeyboardButton(text=button_label(locale, 'hide_keyboard', '⌨️'))]] if collapsible else []),
+        resize_keyboard=True, is_persistent=False, one_time_keyboard=True,
         input_field_placeholder=placeholder,
     )
 
@@ -54,7 +57,7 @@ def main_keyboard(locale: str) -> ReplyKeyboardMarkup:
 @lru_cache(maxsize=1)
 def _button_commands() -> dict[str, str]:
     return {button_label(locale, command, emoji): '/' + command
-            for locale in available_ui() for command, emoji in BUTTONS}
+            for locale in available_ui() for command, emoji in (*BUTTONS, ('hide_keyboard', '⌨️'))}
 
 
 def keyboard_command(text: str) -> str | None:
@@ -200,7 +203,7 @@ def onboarding_help(locale: str) -> str | None:
             '/donations — история поддержки · /terms — условия\n'
             '/paysupport текст — вопрос по платежу или запрос возврата\n'
             'Библия бесплатна; поддержка разовая и добровольная.\n\n'
-            'Кнопки внизу всегда под рукой. Вернуться к началу: /start'
+            'Скрыть кнопки: /hide_keyboard. Вернуть: /menu. Голос чтения: /voice'
         )
     if locale == 'en':
         return (
@@ -232,6 +235,6 @@ def onboarding_help(locale: str) -> str | None:
             '/donations — support history · /terms — terms\n'
             '/paysupport your message — payment issue or refund request\n'
             'The Bible is free; support is optional and one-time.\n\n'
-            'The keyboard below is always available. Start again: /start'
+            'Hide buttons: /hide_keyboard. Restore buttons: /menu. Russian voices: /voice'
         )
     return None

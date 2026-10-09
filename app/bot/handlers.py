@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 from aiogram import F,Router
-from aiogram.types import Message,CallbackQuery,InlineKeyboardMarkup,InlineKeyboardButton,ChatMemberUpdated
+from aiogram.types import Message,CallbackQuery,InlineKeyboardMarkup,InlineKeyboardButton,ChatMemberUpdated,ReplyKeyboardRemove
 from aiogram.exceptions import TelegramAPIError
 from app.bot.commands import parse_command,mode_name,encode_callback,decode_callback
 from app.bot.donations import handle_command as handle_donation_command
@@ -125,7 +125,24 @@ def settings_keyboard(chat: Any) -> InlineKeyboardMarkup:
     rows.insert(0,[button('🌍 Мой город / часовой пояс' if locale=='ru' else '🌍 My city / time zone','zones',identifier)])
     rows.append([button('🔔 Стих каждый день' if locale=='ru' else '🔔 Daily verse','daily',identifier)])
     rows.append([button('🌅 Утро и вечер' if locale=='ru' else '🌅 Morning and evening','devotions',identifier)])
+    rows.append([button('🎙 Голос русского чтения' if locale=='ru' else '🎙 Russian narration voice','voices',identifier)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def voices_menu(chat):
+    locale=chat['ui_language']
+    chosen=chat.get('audio_voice','david')
+    names={'david':'Давид' if locale=='ru' else 'David','mary':'Мария' if locale=='ru' else 'Mary'}
+    text=('Выберите голос русского чтения. По умолчанию — Давид.' if locale=='ru' else 'Choose a Russian narration voice. David is the default.')
+    rows=[[button(('✓ ' if key==chosen else '')+name,'voice',chat['telegram_chat_id'],key)] for key,name in names.items()]
+    return text,InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def change_voice(connection,chat,value):
+    if value not in {'david','mary'}:
+        raise UserError('invalid')
+    # Voice preferences do not change reading progress, schedule revisions or artwork.
+    return await connection.fetchrow('UPDATE telegram_chats SET audio_voice=$2,updated_at=now() WHERE telegram_chat_id=$1 RETURNING *',chat['telegram_chat_id'],value)
 
 
 def daily_confirmation(subscription: Any, locale: str) -> str:
@@ -254,14 +271,36 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
     name = parsed.name
     chat = await destination(connection,bot,message.chat,user.id,parsed.target,settings)
     locale = chat['ui_language']
+    if name=='voice':
+        if not args:
+            return voices_menu(chat)
+        aliases={'давид':'david','мария':'mary','aidar':'david','kseniya':'mary'}
+        if len(args)!=1:
+            raise UserError('invalid')
+        value=aliases.get(args[0].casefold(),args[0].casefold())
+        chat=await change_voice(connection,chat,value)
+        return voices_menu(chat)
+    if name=='hide_keyboard':
+        if enum_value(message.chat.type)!='private' or getattr(bot,'platform',None)=='max':
+            raise UserError('invalid')
+        await connection.execute('UPDATE telegram_chats SET keyboard_hidden=true WHERE telegram_chat_id=$1',message.chat.id)
+        return ('Кнопки скрыты. Вернуть их: /menu. Команды доступны через кнопку «Меню».' if locale=='ru' else
+                'Buttons hidden. Restore them with /menu. Commands remain available in Menu.'),ReplyKeyboardRemove()
     if name=='start' and enum_value(message.chat.type)=='private':
+        if getattr(bot,'platform',None)!='max' and connection is not None:
+            await connection.execute('UPDATE telegram_chats SET keyboard_hidden=false WHERE telegram_chat_id=$1',message.chat.id)
         edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
-        return welcome_text(locale,bible.display_title(edition) if edition else None),main_keyboard(locale)
+        return welcome_text(locale,bible.display_title(edition) if edition else None),main_keyboard(locale,collapsible=getattr(bot,'platform',None)!='max')
     if name in {'start','settings','register'}:
         return await settings_text(connection,chat),settings_keyboard(chat)
     if name=='help':
         return help_text(locale),None
+    if name=='menu_hint':
+        return menu_hint(locale),None
     if name=='menu':
+        if enum_value(message.chat.type)=='private' and getattr(bot,'platform',None)!='max':
+            await connection.execute('UPDATE telegram_chats SET keyboard_hidden=false WHERE telegram_chat_id=$1',message.chat.id)
+            return menu_hint(locale),main_keyboard(locale)
         return menu_hint(locale),None
     if name=='search' and not args:
         return search_prompt(locale),None
@@ -533,7 +572,8 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
             text,markup = tr(locale,'not_ready'),None
         if donation_command is None and text is not None:
             if markup is None and enum_value(message.chat.type)=='private' and not isinstance(text,illustrations.ReadingText) and not hasattr(text,'refs'):
-                markup = main_keyboard(locale)
+                hidden = await connection.fetchval('SELECT keyboard_hidden FROM telegram_chats WHERE telegram_chat_id=$1',message.chat.id)
+                markup = ReplyKeyboardRemove() if hidden else None
             await reply(bot,connection,settings,message.chat.id,text,markup,message.message_thread_id)
     if donation_command is not None:
         # Release the shared connection before the payment flow acquires its own.
@@ -552,7 +592,7 @@ async def private_text_handler(message: Message,bot: Any,db_pool: Any,settings: 
             reference = passage.parse_reference(content)
         except UserError:
             reference = True
-        command = '/read '+content if reference else '/menu'
+        command = '/read '+content if reference else '/menu_hint'
     await command_handler(message.model_copy(update={'text':command}),bot,db_pool,settings)
 
 
@@ -571,7 +611,7 @@ async def message_language_handler(callback: CallbackQuery,bot: Any,db_pool: Any
     delivery = None
     async with db_pool.acquire() as connection:
         try:
-            match = re.fullmatch(r'lc:([1-9][0-9]{0,17}):([spt]):([0-9]{1,18})',callback.data or '')
+            match = re.fullmatch(r'lc:([1-9][0-9]{0,17}):([sptc]):([0-9]{1,18})',callback.data or '')
             if not match:
                 raise UserError('invalid')
             await authorize(bot,callback.message.chat,callback.from_user.id)
@@ -607,7 +647,12 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
             await register_context(connection,callback.from_user,callback.message.chat,settings)
             chat = await destination(connection,bot,callback.message.chat,callback.from_user.id,chat_id,settings)
             locale = chat['ui_language']
-            if action=='lang':
+            if action=='voices':
+                text,markup=voices_menu(chat)
+            elif action=='voice':
+                chat=await change_voice(connection,chat,value)
+                text,markup=voices_menu(chat)
+            elif action=='lang':
                 chat = await change_language(connection,chat,callback.from_user.id,value)
                 text,markup = await settings_text(connection,chat),settings_keyboard(chat)
                 if not ui_for_language(value):

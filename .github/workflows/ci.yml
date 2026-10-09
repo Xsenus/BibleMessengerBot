@@ -40,7 +40,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.AUDIO_MODELS_PATH }}
-          key: neural-voices-${{ hashFiles('app/data/speech-models.json') }}
+          key: neural-voices-${{ hashFiles('app/data/speech-models.json', 'app/data/russian-voice.json') }}
       - run: python -m app.neural_audio_admin prepare
       - run: python -m compileall -q app tests scripts
       - name: Shell syntax

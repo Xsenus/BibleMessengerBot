@@ -130,7 +130,16 @@ async def selection(connection, edition, chat_id: int, day: date, slot: str):
                 theme["keywords"],
             )
             seed = f"devotional-v1:{chat_id}:{edition['id']}:{day.isoformat()}:{day.weekday()}:{current}"
+            if readings.curated(edition):
+                reviewed = await readings.units(connection, edition)
+                keywords = [word.casefold().replace('ё','е') for word in theme['keywords']]
+                matched = [r for r in reviewed if any(word in ' '.join(v['text'] for v in r['reading_rows']).casefold().replace('ё','е') for word in keywords)]
+                candidates = matched or reviewed
             available = thematic_candidates(candidates, blocked)
+            if readings.curated(edition):
+                available = [r for r in available if not any(coordinates(v) in blocked for v in r['reading_rows'])]
+                if not available:
+                    available = [r for r in reviewed if not any(coordinates(v) in blocked for v in r['reading_rows'])]
             if not available:
                 # Languages without curated keywords still get a native-language verse.
                 candidates = await connection.fetch(
@@ -147,7 +156,7 @@ async def selection(connection, edition, chat_id: int, day: date, slot: str):
                 raise ValueError("No distinct devotional verse available")
             row = reading = None
             for candidate in sorted(available, key=lambda r: rank(seed, r))[:64]:
-                complete_reading = await readings.contextual(connection, edition, candidate)
+                complete_reading = candidate if candidate.get('reading_rows') else await readings.contextual(connection, edition, candidate)
                 if complete_reading and not any(
                     coordinates(r) in blocked for r in complete_reading["reading_rows"]
                 ):
@@ -161,8 +170,8 @@ async def selection(connection, edition, chat_id: int, day: date, slot: str):
             ]
             result = await connection.fetchrow(
                 """INSERT INTO daily_verse_selections
-                (telegram_chat_id,translation_id,local_date,slot,book_code,chapter,verse,verse_text,text_sha256,theme,prompt_variant,reading_snapshot)
-                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb) RETURNING *""",
+                (telegram_chat_id,translation_id,local_date,slot,book_code,chapter,verse,verse_text,text_sha256,theme,prompt_variant,reading_snapshot,reading_version)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,2) RETURNING *""",
                 chat_id,
                 edition["id"],
                 day,
@@ -193,7 +202,7 @@ async def selected_verse(connection, edition, chat_id, day, slot):
         raise ValueError("Prepared devotional source text changed; operator review required")
     snapshot = chosen["reading_snapshot"]
     snapshot = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
-    if snapshot:
+    if snapshot and chosen.get('reading_version',1) == 2:
         for frozen in snapshot:
             native = await connection.fetchrow(
                 "SELECT text,verse_end FROM verses WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4",
@@ -212,6 +221,8 @@ async def selected_verse(connection, edition, chat_id, day, slot):
         frozen_anchor = next(
             (r for r in snapshot if coordinates(r) == coordinates(row)), snapshot[0]
         )
+        if readings.curated(edition):
+            return readings.approved_unit(frozen_anchor, snapshot, snapshot[0]['verse'], snapshot[-1].get('verse_end') or snapshot[-1]['verse']), chosen
         return readings.attach(frozen_anchor, snapshot), chosen
     reading = await readings.contextual(connection, edition, row)
     if not reading:
@@ -223,7 +234,7 @@ async def selected_verse(connection, edition, chat_id, day, slot):
     if not reading:
         raise ValueError("No complete devotional reading available")
     await connection.execute(
-        "UPDATE daily_verse_selections SET reading_snapshot=$2::jsonb WHERE id=$1 AND reading_snapshot IS NULL",
+        "UPDATE daily_verse_selections SET reading_snapshot=$2::jsonb,reading_version=2 WHERE id=$1 AND reading_version=1",
         chosen["id"],
         json.dumps(reading["reading_rows"], ensure_ascii=False),
     )
