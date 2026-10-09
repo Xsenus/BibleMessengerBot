@@ -5,6 +5,7 @@ import asyncio
 import signal
 
 from app.bot.branding import commands_for
+from app.payments.yookassa import merchant_available
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
 from app.logging import configure_logging
@@ -15,6 +16,7 @@ from app.maxbot.dispatcher import MaxDispatcher
 from app.maxbot.events import UPDATE_TYPES
 from app.maxbot.inbox import consumer_loop, recover
 from app.payments.reconcile import loop as payment_loop
+from app.maxbot.payment_menus import loop as payment_menu_loop
 from app.services.locks import lock_key
 
 
@@ -22,6 +24,12 @@ async def heartbeat(connection):
     while True:
         await connection.execute("INSERT INTO service_heartbeats(service) VALUES('maxbot') ON CONFLICT(service) DO UPDATE SET last_seen=now()")
         await asyncio.sleep(15)
+
+
+def command_menu():
+    enabled=merchant_available()
+    return [{'name':c.command,'description':'Поддержать картой или СБП' if c.command=='donate' else c.description}
+            for c in commands_for('ru') if enabled or c.command not in {'donate','paysupport'}]
 
 
 async def main():
@@ -50,7 +58,7 @@ async def main():
             if type(info.get('user_id')) is not int or info['user_id']<=0 or not info.get('is_bot'):
                 raise RuntimeError('MAX token does not identify a bot')
             bridge = MaxBotBridge(client,pool,info)
-            await client.commands([{'name':c.command,'description': 'Поддержать картой или СБП' if c.command=='donate' else c.description} for c in commands_for('ru')])
+            await client.commands(command_menu())
             subscriptions = await client.request('GET','/subscriptions')
             existing = [s for s in subscriptions.get('subscriptions',[]) if s.get('url')!=config.webhook_url]
             if existing:
@@ -59,7 +67,8 @@ async def main():
             await recover(owner)
             dispatcher = MaxDispatcher(bridge,pool,settings)
             consumer = asyncio.create_task(consumer_loop(pool,dispatcher,stop))
-            tasks = [asyncio.create_task(heartbeat(owner)),consumer,asyncio.create_task(payment_loop(pool,stop)),asyncio.create_task(stop.wait())]
+            tasks = [asyncio.create_task(heartbeat(owner)),consumer,asyncio.create_task(payment_loop(pool,stop)),
+                     asyncio.create_task(payment_menu_loop(pool,client,info['user_id'],stop)),asyncio.create_task(stop.wait())]
             done,_ = await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 task.result()

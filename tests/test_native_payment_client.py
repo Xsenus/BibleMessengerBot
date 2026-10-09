@@ -26,15 +26,16 @@ def payment():
 
 
 @pytest.mark.asyncio
-async def test_create_and_repeat_use_same_key_exact_amount_sbp_redirect_and_no_saved_method():
+@pytest.mark.parametrize('platform',['max','telegram'])
+async def test_create_and_repeat_use_same_key_exact_amount_sbp_redirect_and_no_saved_method(platform):
     requests=[]
     def handle(request):
         requests.append(request)
         return httpx.Response(200,json=payment())
     api=YooKassa(CONFIG,transport=httpx.MockTransport(handle))
     try:
-        await api.create(order())
-        await api.create(order())
+        await api.create(dict(order(),platform=platform))
+        await api.create(dict(order(),platform=platform))
     finally:
         await api.close()
     assert len(requests)==2 and requests[0].headers['Idempotence-Key']==requests[1].headers['Idempotence-Key']==str(KEY)
@@ -47,6 +48,7 @@ async def test_create_and_repeat_use_same_key_exact_amount_sbp_redirect_and_no_s
         assert body['confirmation']=={'type':'redirect','return_url':CONFIG.return_url}
         assert body['save_payment_method'] is False and body['capture'] is True
         assert body['metadata']['order_id']==str(ORDER_ID)
+        assert body['metadata']['application']=='bible-messenger-'+platform
 
 
 @pytest.mark.asyncio

@@ -57,15 +57,17 @@ class MerchantSettings:
     secret_key: str = field(default='', repr=False)
     return_url: str = ''
     support_contact: str = ''
+    active: bool = True
 
     @property
     def enabled(self):
-        return bool(self.shop_id and self.secret_key and self.return_url and self.support_contact)
+        return bool(self.active and self.shop_id and self.secret_key and self.return_url and self.support_contact)
 
     @classmethod
     def from_env(cls):
         result = cls(*(os.getenv(key, '').strip() for key in
-                       ('YOOKASSA_SHOP_ID', 'YOOKASSA_SECRET_KEY', 'YOOKASSA_RETURN_URL', 'PAYMENT_SUPPORT_CONTACT')))
+                       ('YOOKASSA_SHOP_ID', 'YOOKASSA_SECRET_KEY', 'YOOKASSA_RETURN_URL', 'PAYMENT_SUPPORT_CONTACT')),
+                     active=os.getenv('YOOKASSA_ENABLED','true').strip().lower() in {'true','1','yes'})
         if result.shop_id and (not result.shop_id.isascii() or not result.shop_id.isdigit()):
             raise ValueError('YOOKASSA_SHOP_ID must be numeric')
         if result.return_url and not https_url(result.return_url):
@@ -73,6 +75,14 @@ class MerchantSettings:
         if len(result.support_contact) > 300 or '\x00' in result.support_contact:
             raise ValueError('Invalid PAYMENT_SUPPORT_CONTACT')
         return result
+
+
+def merchant_available():
+    """Optional payment configuration must not break reading/navigation."""
+    try:
+        return MerchantSettings.from_env().enabled
+    except ValueError:
+        return False
 
 
 class YooKassa:
@@ -122,7 +132,7 @@ class YooKassa:
             'payment_method_data': {'type': order['method']},
             'confirmation': {'type': 'redirect', 'return_url': self.settings.return_url},
             'description': 'Добровольная разовая поддержка «Библия каждый день»',
-            'metadata': {'application': 'bible-messenger-max', 'order_id': str(order['id'])},
+            'metadata': {'application': 'bible-messenger-' + order.get('platform','max'), 'order_id': str(order['id'])},
         })
 
     async def create_refund(self, order, refund):

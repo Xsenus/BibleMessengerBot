@@ -2,6 +2,22 @@
 from __future__ import annotations
 
 from app.bot.ui import button_label, keyboard_command
+from app.payments.yookassa import merchant_available
+
+
+def payment_controls(attachment, *, enabled=None, locale='ru'):
+    """Apply current availability even to a keyboard frozen before configuration changed."""
+    if not attachment:
+        return None
+    enabled = merchant_available() if enabled is None else enabled
+    rows = [[dict(button) for button in row if enabled or not
+             ((button.get('payload') or '')=='maxcmd:/donate' or (button.get('payload') or '').startswith(('maxpay:','maxretry:')))]
+            for row in attachment['payload']['buttons']]
+    rows = [row for row in rows if row]
+    commands = {button.get('payload') for row in rows for button in row}
+    if enabled and {'maxcmd:/today','maxcmd:/help','maxcmd:/daily'} <= commands and 'maxcmd:/donate' not in commands:
+        rows.append([{'type':'callback','text':'💳 Поддержать' if locale=='ru' else '💳 Support','payload':'maxcmd:/donate'}])
+    return dict(attachment,payload=dict(attachment['payload'],buttons=rows)) if rows else None
 
 
 def keyboard_attachment(markup, *, audio: tuple[int, int] | None = None, locale='ru', navigation=False) -> dict | None:
@@ -46,4 +62,4 @@ def keyboard_attachment(markup, *, audio: tuple[int, int] | None = None, locale=
         card_id, audio_id = audio
         rows.append([{'type': 'callback', 'text': '🔊 Слушать' if locale == 'ru' else '🔊 Listen',
                       'payload': f'maxaudio:{card_id}:{audio_id}'}])
-    return {'type': 'inline_keyboard', 'payload': {'buttons': rows}} if rows else None
+    return payment_controls({'type': 'inline_keyboard', 'payload': {'buttons': rows}},locale=locale) if rows else None

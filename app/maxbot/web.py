@@ -115,7 +115,7 @@ def create_app(*, config=None, pool=None, payment_api=None) -> FastAPI:
         return HTMLResponse('<!doctype html><html lang="ru"><meta charset="utf-8">'
                             '<meta name="viewport" content="width=device-width,initial-scale=1">'
                             '<title>Библия каждый день</title><body>'
-                            '<h1>Вернитесь в чат с ботом MAX</h1>'
+                            '<h1>Вернитесь в чат с ботом</h1>'
                             '<p>Бот сообщит результат после проверки платежа. '
                             'Открытие этой страницы само по себе не подтверждает оплату.</p></body></html>',
                             headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',

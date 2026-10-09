@@ -3,6 +3,15 @@
 
 
 def help_text(locale='ru'):
+    from app.payments.yookassa import merchant_available
+    value = _help_text(locale)
+    if merchant_available():
+        return value
+    marker = '<b>Добровольная поддержка</b>' if locale=='ru' else '/donate — card or SBP'
+    return value.split(marker,1)[0].rstrip() + ('\n\n/menu — главное меню' if locale=='ru' else '\n\n/menu — main menu')
+
+
+def _help_text(locale='ru'):
     if locale=='ru':
         return ('📖 <b>Библия каждый день</b>\n\n'
                 '<b>Читать сейчас</b>\n/next — следующая глава\n/today — стих дня\n/random — случайное чтение\n'

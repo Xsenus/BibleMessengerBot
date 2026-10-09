@@ -11,6 +11,7 @@ from app.bot.branding import COMMAND_KEYS as COMMAND_KEYS
 from app.bot.branding import branding_loop
 from app.bot.handlers import router
 from app.bot.donations import router as donations_router
+from app.bot.native_payments import router as native_payments_router
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
 from app.logging import configure_logging
@@ -34,6 +35,7 @@ async def main() -> None:
     bot = Bot(settings.bot_token,default=DefaultBotProperties(parse_mode='HTML'))
     dispatcher = Dispatcher()
     dispatcher.include_router(donations_router)
+    dispatcher.include_router(native_payments_router)
     dispatcher.include_router(router)
     dispatcher['db_pool'],dispatcher['settings'] = pool,settings
     try:

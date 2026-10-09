@@ -20,6 +20,7 @@ from aiogram.types import (
 )
 
 from app.services import donations
+from app.payments.yookassa import merchant_available
 
 LOGGER = logging.getLogger(__name__)
 router = Router(name='stars-donations')
@@ -113,8 +114,17 @@ async def _handle_command(message: Message, bot: Any, settings: Any, pool: Any,
         return True
     locale = await locale_for(pool, user)
     args = args.strip()
+    if (command in {'terms','paysupport'} and (args=='card' or args.startswith('card '))
+            or command=='donate' and (args=='card' or re.fullmatch(r'[1-9][0-9]{2,4} (?:card|sbp)',args))):
+        from app.bot.native_payments import command as native_command
+        native_args = () if args=='card' else tuple(args.split()[1:]) if command!='donate' else tuple(args.split())
+        await native_command(message,bot,pool,command,native_args)
+        return True
     if command == 'terms':
-        await send_text(bot, user.id, terms_text(locale))
+        terms = terms_text(locale)
+        if merchant_available():
+            terms += text(locale,'\n\nКарта/СБП через ЮKassa: /terms card.','\n\nCard/SBP through YooKassa: /terms card.')
+        await send_text(bot, user.id, terms)
     elif command == 'donate':
         if args:
             amount = amount_value(args)
@@ -129,6 +139,9 @@ async def _handle_command(message: Message, bot: Any, settings: Any, pool: Any,
                 InlineKeyboardButton(text=f'⭐ {amount}', callback_data=f'donate:{amount}')
                 for amount in donations.PRESET_AMOUNTS[index:index+3]]
                 for index in range(0, len(donations.PRESET_AMOUNTS), 3)])
+            if merchant_available():
+                markup.inline_keyboard.append([InlineKeyboardButton(
+                    text=text(locale,'💳 Карта / СБП','💳 Card / SBP'),callback_data='rubmenu')])
             await send_text(bot, user.id, text(locale,
                 '⭐ Поддержать бота\n\nБиблия бесплатна. Добровольная поддержка помогает оплачивать сервер '
                 'и развивать бота. Выберите сумму или отправьте /donate 100 (1–2500 ⭐).\n\n'
@@ -139,11 +152,20 @@ async def _handle_command(message: Message, bot: Any, settings: Any, pool: Any,
     elif command == 'donations':
         async with pool.acquire() as connection:
             rows = await donations.list_user_donations(connection, user.id, limit=10)
+            native = await connection.fetch('''SELECT o.*,r.status AS refund_status FROM native_payment_orders o
+                LEFT JOIN native_payment_refunds r ON r.order_id=o.id
+                WHERE o.user_id=$1 AND o.platform='telegram' AND o.status='succeeded'
+                ORDER BY o.confirmed_at DESC LIMIT 10''',user.id)
         lines = [text(locale, 'Ваши последние подтверждённые платежи:', 'Your latest confirmed payments:')]
         for row in rows:
             status = text(locale, 'возвращён', 'refunded') if row['status'] == 'refunded' else text(locale, 'оплачен', 'paid')
             lines.append(f"#{row['id']} · ⭐ {row['amount']} · {status}")
-        if not rows:
+        for row in native:
+            refunded = row['refund_status']=='succeeded'
+            state = text(locale,'возвращён' if refunded else 'оплачен','refunded' if refunded else 'paid')
+            marker = '[TEST] ' if row['provider_test'] else ''
+            lines.append(f"{marker}{row['id']} · {row['amount_minor']//100} ₽ · {state}")
+        if not rows and not native:
             lines.append(text(locale, 'Платежей пока нет.', 'No payments yet.'))
         lines.append(text(locale, '\nВопрос или возврат: /paysupport текст', '\nIssue or refund request: /paysupport your message'))
         await send_text(bot, user.id, '\n'.join(lines))

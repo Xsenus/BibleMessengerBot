@@ -6,15 +6,31 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot.handlers import command_target_suffix
 from app.bot.ui import main_keyboard
-from app.maxbot.ui import keyboard_attachment
+from app.maxbot.ui import keyboard_attachment, payment_controls
 
 
-def test_main_navigation_has_all_eight_commands_in_both_languages():
+@pytest.mark.parametrize('enabled',[False,True])
+def test_main_navigation_matches_merchant_availability_in_both_languages(monkeypatch,enabled):
+    monkeypatch.setattr('app.maxbot.ui.merchant_available',lambda:enabled)
     for locale in ['ru', 'en']:
         result = keyboard_attachment(main_keyboard(locale))
         payloads = {b['payload'] for row in result['payload']['buttons'] for b in row}
-        assert payloads == {'maxcmd:/next', 'maxcmd:/today', 'maxcmd:/random', 'maxcmd:/search',
-                            'maxcmd:/settings', 'maxcmd:/help', 'maxcmd:/daily', 'maxcmd:/donate'}
+        expected = {'maxcmd:/next', 'maxcmd:/today', 'maxcmd:/random', 'maxcmd:/search',
+                    'maxcmd:/settings', 'maxcmd:/help', 'maxcmd:/daily'}
+        assert payloads == expected | ({'maxcmd:/donate'} if enabled else set())
+
+
+def test_stale_navigation_can_remove_and_restore_payment_without_losing_other_buttons(monkeypatch):
+    monkeypatch.setattr('app.maxbot.ui.merchant_available',lambda:True)
+    original=keyboard_attachment(main_keyboard('en'))
+    hidden=payment_controls(original,enabled=False)
+    restored=payment_controls(hidden,enabled=True,locale='en')
+    assert sum(len(row) for row in original['payload']['buttons'])==8
+    assert sum(len(row) for row in hidden['payload']['buttons'])==7
+    assert sum(len(row) for row in restored['payload']['buttons'])==8
+    assert restored['payload']['buttons'][-1][0]['text']=='💳 Support'
+    assert payment_controls({'type':'inline_keyboard','payload':{'buttons':[[
+        {'type':'callback','text':'Pay','payload':'maxpay:100:sbp'}]]}},enabled=False) is None
 
 
 def test_card_callbacks_preserve_bound_card_and_audio_is_separate_action():

@@ -22,11 +22,13 @@ async def support(dispatcher, message, parsed):
     if message.chat.type != 'private':
         raise UserError('private_only')
     settings = MerchantSettings.from_env()
+    platform = dispatcher.bridge.platform
+    pay_prefix = 'maxpay' if platform=='max' else 'rubpay'
     async with dispatcher.pool.acquire() as connection:
         row = await connection.fetchrow("""SELECT c.ui_language,u.is_blocked FROM telegram_chats c
             JOIN telegram_users u ON u.telegram_user_id=c.registered_by
-            WHERE c.telegram_chat_id=$1 AND c.registered_by=$2 AND c.platform='max'""",
-            message.chat.id, message.from_user.id)
+            WHERE c.telegram_chat_id=$1 AND c.registered_by=$2 AND c.platform=$3 AND u.platform=c.platform""",
+            message.chat.id, message.from_user.id, platform)
         if not row or row['is_blocked']:
             raise UserError('forbidden')
         ru = row['ui_language'] == 'ru'
@@ -46,7 +48,7 @@ async def support(dispatcher, message, parsed):
                 text = ' '.join(args)
                 if len(text) > 4000:
                     raise UserError('invalid')
-                request_key = 'max-support:' + dispatcher.bridge.reply_context.get().key
+                request_key = platform+'-support:' + dispatcher.bridge.reply_context.get().key
                 ticket = await connection.fetchval('''INSERT INTO native_payment_support(user_id,request_key,message)
                     VALUES($1,$2,$3) ON CONFLICT(request_key) DO UPDATE SET request_key=EXCLUDED.request_key RETURNING id''',
                     message.from_user.id, request_key, text)
@@ -61,7 +63,7 @@ async def support(dispatcher, message, parsed):
         if parsed.name == 'donations':
             rows = await connection.fetch('''SELECT o.*,r.status AS refund_status FROM native_payment_orders o
                 LEFT JOIN native_payment_refunds r ON r.order_id=o.id
-                WHERE o.user_id=$1 AND o.status='succeeded' ORDER BY o.confirmed_at DESC LIMIT 10''', message.from_user.id)
+                WHERE o.user_id=$1 AND o.platform=$2 AND o.status='succeeded' ORDER BY o.confirmed_at DESC LIMIT 10''', message.from_user.id,platform)
             text = 'Ваша поддержка:' if ru else 'Your receipts:'
             for row in rows:
                 test = '[ТЕСТ] ' if ru and row['provider_test'] else '[TEST] ' if row['provider_test'] else ''
@@ -85,8 +87,8 @@ async def support(dispatcher, message, parsed):
         await dispatcher._response(message.chat, 'Оплата картой и СБП появится после подключения магазина. Чтение бесплатно.' if ru else
                                    'Card and SBP support will be available when the merchant account is connected. Reading is free.')
         return
-    rows = [[(f'{amount} ₽ · '+('Карта' if ru else 'Card'), f'maxpay:{amount}:bank_card'),
-             (f'{amount} ₽ · '+('СБП' if ru else 'SBP'), f'maxpay:{amount}:sbp')] for amount in ledger.PRESETS]
+    rows = [[(f'{amount} ₽ · '+('Карта' if ru else 'Card'), f'{pay_prefix}:{amount}:bank_card'),
+             (f'{amount} ₽ · '+('СБП' if ru else 'SBP'), f'{pay_prefix}:{amount}:sbp')] for amount in ledger.PRESETS]
     await dispatcher._response(message.chat, 'Поддержать «Библию каждый день»\nВыберите сумму и способ оплаты. '
                                'Это разовая добровольная поддержка; чтение бесплатно. Условия: /terms. История: /donations.' if ru else
                                'Support Bible Every Day\nChoose an amount and payment method. One-time optional support; '
@@ -97,6 +99,7 @@ async def checkout(dispatcher, message, rubles=None, method=None, *, retry_id=No
     if message.chat.type != 'private':
         raise UserError('private_only')
     config = MerchantSettings.from_env()
+    platform = dispatcher.bridge.platform
     order = None
     api = None
     async with dispatcher.pool.acquire() as connection:
@@ -107,14 +110,14 @@ async def checkout(dispatcher, message, rubles=None, method=None, *, retry_id=No
             if retry_id is None:
                 order = await ledger.new_order(connection, user_id=message.from_user.id, chat_id=message.chat.id,
                                                rubles=rubles, method=method,
-                                               request_key='max-pay:' + dispatcher.bridge.reply_context.get().key)
+                                               request_key=platform+'-pay:' + dispatcher.bridge.reply_context.get().key,platform=platform)
             else:
                 order = await connection.fetchrow('''SELECT o.* FROM native_payment_orders o
                     JOIN telegram_users u ON u.telegram_user_id=o.user_id
                     JOIN telegram_chats c ON c.telegram_chat_id=o.chat_id
                     WHERE o.id=$1 AND o.user_id=$2 AND o.chat_id=$3 AND NOT u.is_blocked
-                    AND c.platform='max' AND c.chat_type='private' AND c.is_active''',
-                    UUID(retry_id), message.from_user.id, message.chat.id)
+                    AND c.platform=$4 AND o.platform=$4 AND c.chat_type='private' AND c.is_active''',
+                    UUID(retry_id), message.from_user.id, message.chat.id,platform)
                 if not order:
                     raise UserError('forbidden')
             order = await ledger.checkout(connection, api, order)
@@ -140,7 +143,7 @@ async def checkout(dispatcher, message, rubles=None, method=None, *, retry_id=No
             text = ('Оплата пока недоступна. Деньги не подтверждены; история: /donations. '
                     'Поддержка: /paysupport.' if ru else 'Checkout is unavailable. No payment has been confirmed; '
                     'receipts: /donations. Support: /paysupport.')
-            markup = buttons([[('Повторить' if ru else 'Retry', 'maxretry:' + str(order['id']))]]) if order else None
+            markup = buttons([[('Повторить' if ru else 'Retry', ('maxretry:' if platform=='max' else 'rubretry:') + str(order['id']))]]) if order else None
         finally:
             if api:
                 await api.close()

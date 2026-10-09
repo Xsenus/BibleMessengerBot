@@ -25,7 +25,7 @@ def message(content='/donate', *, sender=None, chat_id=101, chat_type='private',
 
 @pytest.fixture
 def setup_ui(monkeypatch):
-    connection=SimpleNamespace(fetchval=AsyncMock(side_effect=lambda query,*a:'ru' if 'ui_language' in query else False))
+    connection=SimpleNamespace(fetch=AsyncMock(return_value=[]),fetchval=AsyncMock(side_effect=lambda query,*a:'ru' if 'ui_language' in query else False))
 
     @asynccontextmanager
     async def acquire():

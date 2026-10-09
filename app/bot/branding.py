@@ -60,13 +60,15 @@ COMMAND_DESCRIPTIONS = {
 
 
 def commands_for(locale: str) -> list[BotCommand]:
+    from app.payments.yookassa import merchant_available
     language = locale or 'ru'
     descriptions = COMMAND_DESCRIPTIONS.get(language)
     commands = [BotCommand(command=command, description=(descriptions[i] if descriptions else tr(language,key))[:256])
         for i,(command,key) in enumerate(COMMAND_KEYS)]
     commands.extend([
         BotCommand(command='timezone', description='Выбрать свой город и часовой пояс' if language == 'ru' else 'Choose your city and time zone'),
-        BotCommand(command='donate', description='Добровольно поддержать бота ⭐' if language == 'ru' else 'Support the bot with Stars ⭐'),
+        BotCommand(command='donate', description=(('Поддержать: Stars, карта или СБП' if language=='ru' else 'Support: Stars, card or SBP')
+                   if merchant_available() else ('Добровольно поддержать бота ⭐' if language == 'ru' else 'Support the bot with Stars ⭐'))),
         BotCommand(command='paysupport', description='Вопрос по платежу или возврат' if language == 'ru' else 'Payment issue or refund request'),
         BotCommand(command='daily', description='Включить ежедневный стих' if language == 'ru' else 'Enable daily verse delivery'),
         BotCommand(command='read', description='Найти главу или стих по адресу' if language == 'ru' else 'Read a chapter or verse by reference'),

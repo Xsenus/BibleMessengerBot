@@ -11,7 +11,7 @@ from PIL import Image
 from app.maxbot.client import MaxAPIError, MaxClient
 from app.maxbot.identities import external, message_external, remember_message
 from app.maxbot.rate_limit import wait_send_slot
-from app.maxbot.ui import keyboard_attachment
+from app.maxbot.ui import keyboard_attachment, payment_controls
 from app.services.errors import SendError, UserError
 from app.services.formatting import escape
 
@@ -151,6 +151,7 @@ class MaxSender:
             if not chunk or chunk.get('kind') != 'max_audio':
                 keyboard = chunk.get('max_keyboard') if chunk and chunk.get('max_keyboard') else keyboard_attachment(
                     reply_markup, audio=audio, locale=locale, navigation=navigation and bool(chunk and chunk.get('card_id')))
+                keyboard = payment_controls(keyboard,locale=locale)
                 if keyboard:
                     attachments.append(keyboard)
             target = chunk.get('message_id') if editing else None

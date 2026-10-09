@@ -21,7 +21,7 @@ def validate_payment(order, payment, shop_id):
     if order['provider_payment_id'] and payment_id != order['provider_payment_id']:
         raise PaymentError('payment_mismatch')
     if (minor_amount(payment.get('amount')) != order['amount_minor'] or
-            payment.get('metadata', {}).get('application') != 'bible-messenger-max' or
+            payment.get('metadata', {}).get('application') != 'bible-messenger-' + order.get('platform','max') or
             payment.get('metadata', {}).get('order_id') != str(order['id']) or
             str(payment.get('recipient', {}).get('account_id')) != shop_id or
             type(payment.get('test')) is not bool):
@@ -39,28 +39,30 @@ def validate_payment(order, payment, shop_id):
     return payment_id, status
 
 
-async def new_order(connection, *, user_id, chat_id, rubles, method, request_key):
+async def new_order(connection, *, user_id, chat_id, rubles, method, request_key, platform='max'):
+    if platform not in {'max','telegram'}:
+        raise PaymentError('invalid_platform')
     if type(rubles) is not int or not 100 <= rubles <= 10000 or method not in {'bank_card', 'sbp'}:
         raise PaymentError('invalid_order')
     owner = await connection.fetchval("""SELECT EXISTS(SELECT 1 FROM telegram_chats c
         JOIN telegram_users u ON u.telegram_user_id=c.registered_by
-        WHERE c.telegram_chat_id=$1 AND c.platform='max' AND c.chat_type='private'
-        AND c.registered_by=$2 AND NOT u.is_blocked AND c.is_active)""", chat_id, user_id)
+        WHERE c.telegram_chat_id=$1 AND c.platform=$3 AND u.platform=c.platform AND c.chat_type='private'
+        AND c.registered_by=$2 AND NOT u.is_blocked AND c.is_active)""", chat_id, user_id, platform)
     if not owner:
         raise PaymentError('forbidden')
     row = await connection.fetchrow('''INSERT INTO native_payment_orders
-        (id,user_id,chat_id,request_key,amount_minor,method,idempotency_key)
-        VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(request_key) DO NOTHING RETURNING *''',
-        uuid4(), user_id, chat_id, request_key, rubles * 100, method, uuid4())
+        (id,user_id,chat_id,request_key,amount_minor,method,idempotency_key,platform)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(request_key) DO NOTHING RETURNING *''',
+        uuid4(), user_id, chat_id, request_key, rubles * 100, method, uuid4(), platform)
     if row is None:
         row = await connection.fetchrow('SELECT * FROM native_payment_orders WHERE request_key=$1', request_key)
-        if (row['user_id'], row['chat_id'], row['amount_minor'], row['method']) != (user_id, chat_id, rubles * 100, method):
+        if (row['user_id'], row['chat_id'], row['amount_minor'], row['method'],row['platform']) != (user_id, chat_id, rubles * 100, method,platform):
             raise PaymentError('order_conflict')
     return row
 
 
 async def notify(connection, order, *, refund=False):
-    chat = await connection.fetchrow("SELECT * FROM telegram_chats WHERE telegram_chat_id=$1 AND platform='max'", order['chat_id'])
+    chat = await connection.fetchrow("SELECT * FROM telegram_chats WHERE telegram_chat_id=$1 AND platform=$2", order['chat_id'],order.get('platform','max'))
     if not chat:
         raise PaymentError('destination_mismatch')
     amount = order['amount_minor'] // 100
@@ -75,7 +77,7 @@ async def notify(connection, order, *, refund=False):
             text = 'TEST PAYMENT — no funds were charged.\n' + text
     await insert_payload(connection, chat, {'id': None}, text,
                          f"native-payment:{order['id']}:{'refund' if refund else 'paid'}", 'max_ui',
-                         {'kind': 'max_ui'}, frozen_chunks=[{'kind': 'max_text', 'text': text}])
+                         {'kind': 'max_ui'}, frozen_chunks=[{'kind': 'max_text', 'text': text}] if chat['platform']=='max' else [text])
 
 
 async def record_payment(connection, order_id, payment, shop_id):
