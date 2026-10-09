@@ -3,6 +3,7 @@
 import base64
 from datetime import date
 from io import BytesIO
+from pathlib import Path
 
 import httpx
 import pytest
@@ -147,6 +148,40 @@ def test_cloud_copy_requires_actual_read_back_integrity():
         cloud_backup.upload_checked(
             S3(), "fixture-bucket", cloud_backup.PREFIX + "images/fixture", b"correct"
         )
+
+
+@pytest.mark.parametrize("tamper", [False, True])
+def test_large_database_backup_uses_multipart_and_requires_full_integrity(tmp_path, tamper):
+    source = tmp_path / "encrypted-backup.aesgcm"
+    source.write_bytes(b"private-encrypted-fixture" * (8 * 1024**2 // 25 + 2))
+
+    class S3:
+        def upload_file(self, path, bucket, key, *, ExtraArgs, Config):
+            assert Config.multipart_chunksize == 8 * 1024**2 and Config.max_concurrency == 1
+            self.data = Path(path).read_bytes()
+            self.metadata = ExtraArgs["Metadata"]
+
+        def put_object(self, **kwargs):
+            raise AssertionError("Large single PUT is forbidden")
+
+        def head_object(self, **kwargs):
+            return dict(ContentLength=len(self.data), Metadata=self.metadata)
+
+        def get_object(self, **kwargs):
+            return {"Body": BytesIO(b"CORRUPT" if tamper else self.data)}
+
+    if tamper:
+        with pytest.raises(ValueError, match="checksum mismatch"):
+            cloud_backup.upload_checked(
+                S3(), "fixture", cloud_backup.PREFIX + "database/fixture", source
+            )
+    else:
+        receipt = cloud_backup.upload_checked(
+            S3(), "fixture", cloud_backup.PREFIX + "database/fixture", source
+        )
+        assert receipt["byte_count"] == source.stat().st_size and receipt[
+            "sha256"
+        ] == cloud_backup.digest_file(source)
 
 
 def test_local_retention_leaves_foreign_files_and_newest(tmp_path):

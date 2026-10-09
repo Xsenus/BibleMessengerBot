@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import boto3
+from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -154,15 +155,32 @@ def upload_checked(
     if isinstance(data, Path):
         sha = digest_file(data)
         size = data.stat().st_size
-        with data.open("rb") as body:
-            client.put_object(
-                Bucket=bucket,
-                Key=key,
-                Body=body,
-                ContentLength=size,
-                ContentType=content_type,
-                Metadata={"sha256": sha, **(metadata or {})},
+        if size >= 8 * 1024**2:
+            client.upload_file(
+                str(data),
+                bucket,
+                key,
+                ExtraArgs={
+                    "ContentType": content_type,
+                    "Metadata": {"sha256": sha, **(metadata or {})},
+                },
+                Config=TransferConfig(
+                    multipart_threshold=8 * 1024**2,
+                    multipart_chunksize=8 * 1024**2,
+                    max_concurrency=1,
+                    use_threads=False,
+                ),
             )
+        else:
+            with data.open("rb") as body:
+                client.put_object(
+                    Bucket=bucket,
+                    Key=key,
+                    Body=body,
+                    ContentLength=size,
+                    ContentType=content_type,
+                    Metadata={"sha256": sha, **(metadata or {})},
+                )
     else:
         sha = hashlib.sha256(data).hexdigest()
         size = len(data)
