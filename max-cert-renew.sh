@@ -29,6 +29,7 @@ else
     python3 - <<'PY'
 import socket
 with socket.socket() as listener:
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind(('0.0.0.0', 80))
 PY
     docker run --rm --network none \
