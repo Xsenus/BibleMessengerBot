@@ -1,0 +1,14 @@
+[Unit]
+Description=BibleMessengerBot MAX IP certificate renewal
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/bible-messenger-bot
+ExecStart=/usr/bin/bash /opt/bible-messenger-bot/max-cert-renew.sh
+TimeoutStartSec=15min
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
