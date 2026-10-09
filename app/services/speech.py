@@ -96,7 +96,7 @@ async def attach(connection, card_id, settings=None):
  edition=await bible.find_translation(connection,card['selected_translation_id'])
  if not edition:
   return None
- content=pages(card['current_html'])
+ content=pages(card['current_html'],card.get('platform','telegram'))
  text=spoken_text(content[min(card['text_page'],len(content)-1)],edition,card['ui_language'])
  if not text:
   return None
@@ -340,13 +340,16 @@ async def dispatch(connection):
   return 0
  cards=await connection.fetch("""SELECT c.id,c.telegram_chat_id FROM reading_cards c JOIN reading_audio a ON a.id=c.audio_id
   JOIN telegram_chats t ON t.telegram_chat_id=c.telegram_chat_id AND t.is_active
-  WHERE a.state='ready' AND c.telegram_message_id IS NOT NULL AND c.audio_sent_id IS DISTINCT FROM c.audio_id
+  WHERE a.state='ready' AND c.telegram_message_id IS NOT NULL
+  AND CASE WHEN c.platform='max' THEN c.audio_offered_id IS DISTINCT FROM c.audio_id
+      ELSE c.audio_sent_id IS DISTINCT FROM c.audio_id END
   ORDER BY c.id LIMIT 100""")
  count=0
  for hint in cards:
   async with chat_lock(connection,hint['telegram_chat_id']),connection.transaction():
    card=await connection.fetchrow('SELECT * FROM reading_cards WHERE id=$1 FOR UPDATE',hint['id'])
-   if not await media(connection,card) or card['audio_id']==card['audio_sent_id']:
+   confirmed=card.get('audio_offered_id') if card.get('platform')=='max' else card['audio_sent_id']
+   if not await media(connection,card) or card['audio_id']==confirmed:
     continue
    chat=await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1',card['telegram_chat_id'])
    edition=await bible.find_translation(connection,card['source_translation_id'])

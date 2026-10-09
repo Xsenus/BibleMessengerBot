@@ -1,6 +1,7 @@
 """MAX cards, original-message edits and MP3 using shared approved media assets."""
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 from typing import Any
@@ -60,6 +61,24 @@ class MaxSender:
             SET payload=EXCLUDED.payload,updated_at=now()''', self.bot_id, kind, identifier, json.dumps(payload))
         return payload
 
+    async def welcome_media(self, expected_digest: str) -> dict:
+        from app.bot.ui import WELCOME_PATH
+        data = WELCOME_PATH.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != expected_digest:
+            raise SendError('rejected')
+        key = f'max:welcome:{self.bot_id}:{digest}'
+        cached = await self.connection.fetchval('SELECT value FROM app_settings WHERE key=$1', key)
+        if cached:
+            return json.loads(cached)
+        try:
+            payload = await self.client.upload('image', data, 'welcome.png', 'image/png')
+        except MaxAPIError as error:
+            raise error.send_error(editing=True) from None
+        await self.connection.execute('''INSERT INTO app_settings(key,value) VALUES($1,$2)
+            ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()''', key, json.dumps(payload))
+        return payload
+
     async def send(self, chat_id: int, text: str | dict, thread_id: int | None = None,
                    *, reply_markup: Any = None) -> int:
         """A lost send ACK is uncertain; retrying a fixed original edit is safe."""
@@ -89,7 +108,9 @@ class MaxSender:
                         raise SendError('rejected')
                     attachments = [{'type': 'audio', 'payload': await self.media('audio', chunk['audio_id'])}]
                     body = {'attachments': attachments}
-                elif kind in {'rich', 'rich_edit', 'photo'}:
+                elif kind in {'rich', 'rich_edit', 'photo', 'max_text', 'max_welcome'}:
+                    if kind == 'max_welcome':
+                        attachments.append({'type': 'image', 'payload': await self.welcome_media(chunk.get('asset_sha256'))})
                     if chunk.get('image_id'):
                         attachments.append({'type': 'image', 'payload': await self.media('image', chunk['image_id'])})
                     content = chunk.get('caption', '') if kind == 'photo' else chunk.get('text')
@@ -103,7 +124,7 @@ class MaxSender:
             else:
                 body = {'text': str(text), 'format': 'html', 'attachments': attachments}
             if not chunk or chunk.get('kind') != 'max_audio':
-                keyboard = keyboard_attachment(reply_markup, audio=audio, locale=locale)
+                keyboard = chunk.get('max_keyboard') if chunk and chunk.get('max_keyboard') else keyboard_attachment(reply_markup, audio=audio, locale=locale)
                 if keyboard:
                     attachments.append(keyboard)
             target = chunk.get('message_id') if editing else None
@@ -111,11 +132,15 @@ class MaxSender:
             await wait_send_slot(self.connection, chat_id)
             if editing:
                 await self.client.edit(external_message, body)
+                if audio:
+                    await self.connection.execute('UPDATE reading_cards SET audio_offered_id=$2 WHERE id=$1', *audio)
                 return target
             mid = await self.client.send(chat_id=external_chat, body=body)
             checkpoint = await remember_message(self.connection, self.bot_id, chat_id, mid)
             if not checkpoint:
                 raise SendError('uncertain')
+            if audio:
+                await self.connection.execute('UPDATE reading_cards SET audio_offered_id=$2 WHERE id=$1', *audio)
             if chunk and chunk.get('kind') == 'max_audio':
                 from app.services.speech import acknowledged
                 await acknowledged(self.connection, chunk['card_id'], chunk['audio_id'])

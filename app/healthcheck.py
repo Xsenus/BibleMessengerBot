@@ -31,7 +31,7 @@ def container_started_at(proc_root: Path = Path('/proc')) -> datetime | None:
 
 async def probe(service: str) -> bool:
     """Require a recent heartbeat produced after this container started."""
-    if service not in {'bot','worker','illustrator','speaker','composer'}:
+    if service not in {'bot','worker','illustrator','speaker','composer','maxbot'}:
         return False
     started_at = container_started_at()
     if started_at is None:

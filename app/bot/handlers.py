@@ -90,6 +90,9 @@ async def destination(connection: Any, bot: Any, current_chat: Any, actor_id: in
 async def reply(bot: Any, connection: Any, settings: Any, chat_id: int, text: str,
                 markup: Any = None, thread: int | None = None) -> None:
     """Split HTML safely and never automatically replay an ambiguous UI response."""
+    if getattr(bot,'platform',None)=='max':
+        await bot.queue_response(connection,settings,chat_id,text,markup)
+        return
     parts = illustrations.chunks(text,getattr(text,'image_id',None),settings.max_message_length)
     from app.services.message_languages import prepare
     parts = await prepare(connection,text,parts,{'telegram_chat_id':chat_id})
@@ -149,7 +152,11 @@ async def settings_text(connection: Any, chat: Any) -> str:
     """Display exactly this destination's saved edition, locale and timezone."""
     locale = chat['ui_language']
     edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
-    lines = [f"<b>{tr(locale,'settings')}</b>",f"{tr(locale,'destination')}: <code>{chat['telegram_chat_id']}</code>",
+    display_id = chat['telegram_chat_id']
+    if chat.get('platform','telegram') == 'max':
+        from app.maxbot.identities import external
+        display_id = await external(connection,'chat',display_id)
+    lines = [f"<b>{tr(locale,'settings')}</b>",f"{tr(locale,'destination')}: <code>{display_id}</code>",
         f"{tr(locale,'ui_language')}: {escape(native_ui_name(locale))}",
         f"{tr(locale,'language')}: {escape(bible.display_language(edition['language_code'],locale) if edition else '—')}",
         f"{tr(locale,'edition')}: {escape(bible.display_title(edition) if edition else '—')}",
@@ -185,6 +192,9 @@ async def status_text(connection: Any, chat: Any) -> str:
         lines.append(f"<code>#{job['id']} {job['status']} {job['next_chunk']}/{job['total']}</code>")
         if job['status'] in {'uncertain','failed'}:
             target = f" {chat['telegram_chat_id']}" if chat['telegram_chat_id'] < 0 else ''
+            if chat.get('platform','telegram') == 'max':
+                from app.maxbot.identities import external
+                target = '' if chat['chat_type']=='private' else f" chat:{await external(connection,'chat',chat['telegram_chat_id'])}"
             lines += [tr(locale,'pending_review'),f"<code>/resolve {job['id']} sent{target}</code>",
                 f"<code>/resolve {job['id']} retry-duplicate-risk{target}</code>",
                 f"<code>/resolve {job['id']} cancel{target}</code>"]

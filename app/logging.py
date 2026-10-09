@@ -8,7 +8,7 @@ import sys
 
 def redact(value: str) -> str:
     """Never print tokens, claim codes, admin keys or database passwords."""
-    for key in ('BOT_TOKEN','MAX_BOT_TOKEN','MAX_WEBHOOK_SECRET','OWNER_CLAIM_CODE','ADMIN_API_KEY','POSTGRES_PASSWORD','DATABASE_URL','OPENAI_API_KEY','GEMINI_API_KEY','BFL_API_KEY','IDEOGRAM_API_KEY','STABILITY_API_KEY','S3_ACCESS_KEY','S3_SECRET_KEY','BACKUP_ENCRYPTION_KEY'):
+    for key in ('BOT_TOKEN','MAX_BOT_TOKEN','MAX_WEBHOOK_SECRET','YOOKASSA_SECRET_KEY','OWNER_CLAIM_CODE','ADMIN_API_KEY','POSTGRES_PASSWORD','DATABASE_URL','OPENAI_API_KEY','GEMINI_API_KEY','BFL_API_KEY','IDEOGRAM_API_KEY','STABILITY_API_KEY','S3_ACCESS_KEY','S3_SECRET_KEY','BACKUP_ENCRYPTION_KEY'):
         secret = os.getenv(key,'')
         if len(secret)>=8:
             value = value.replace(secret,'[REDACTED]')

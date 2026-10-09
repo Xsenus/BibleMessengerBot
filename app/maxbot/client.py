@@ -23,7 +23,9 @@ class MaxAPIError(Exception):
     def send_error(self, *, editing: bool = False) -> SendError:
         if self.status == 429 or self.code == 'attachment.not.ready':
             return SendError('retry', max(1, self.retry_after))
-        if self.status in {401, 403}:
+        if self.status == 401:
+            return SendError('retry', 60)  # Credential outage is not a blocked chat.
+        if self.status == 403:
             return SendError('forbidden')
         if self.status >= 500 or self.status == 0:
             return SendError('retry', 3) if editing else SendError('uncertain')

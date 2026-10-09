@@ -39,6 +39,8 @@ class TelegramSender:
         self, chat_id: int, text: Any, thread_id: int | None = None, *, reply_markup: Any = None
     ) -> int:
         """Map definitive Telegram rejections separately from uncertain transport failures."""
+        if getattr(self.bot,'platform',None)=='max':
+            return await self.bot.sender(self.connection).send(chat_id,text,thread_id,reply_markup=reply_markup)
         await wait_send_slot(
             self.connection,
             chat_id,

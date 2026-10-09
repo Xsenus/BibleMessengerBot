@@ -103,6 +103,9 @@ async def send_welcome(bot: Any, connection: Any, settings: Any, chat_id: int,
                        text: str, markup: ReplyKeyboardMarkup,
                        *, image_path: Path | None = None) -> bool:
     """Send one welcome photo, reusing Telegram's file_id; False means text fallback."""
+    if getattr(bot,'platform',None)=='max':
+        await bot.queue_welcome(connection,settings,chat_id,text,markup)
+        return True
     path = image_path or WELCOME_PATH
     try:
         if utf16_length(plain_text(text)) > 1024:

@@ -37,7 +37,7 @@ async def test_send_exact_destination_and_authorization_header():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(('status', 'code', 'kind'), [
     (429, 'rate.limit', 'retry'), (400, 'attachment.not.ready', 'retry'),
-    (403, 'access.denied', 'forbidden'), (401, 'auth', 'forbidden'),
+    (403, 'access.denied', 'forbidden'), (401, 'auth', 'retry'),
     (400, 'invalid', 'rejected'), (503, 'unavailable', 'uncertain'),
 ])
 async def test_api_refusals_are_not_blindly_retried(status, code, kind):

@@ -123,3 +123,34 @@ def split_message(text: str, limit: int = 3900) -> list[str]:
             chunks.append(_render(characters[start:stop]))
         start = max(end, start + 1)
     return chunks
+
+
+def split_wire_message(text: str, limit: int = 3600) -> list[str]:
+    """Bound raw HTML characters, including reopened tags and escaped entities.
+
+    MAX limits the string supplied to its API. Preserve every visible character,
+    including boundary whitespace, while leaving room for live prayer reminders.
+    """
+    if not 100 <= limit <= 4000:
+        raise ValueError('Wire limit must be between 100 and 4000')
+    characters = _characters(text)
+    chunks, start = [], 0
+    while start < len(characters):
+        low, high = start + 1, min(len(characters), start + limit)
+        end = start
+        while low <= high:
+            middle = (low + high) // 2
+            if len(_render(characters[start:middle])) <= limit:
+                end, low = middle, middle + 1
+            else:
+                high = middle - 1
+        if end == start:
+            raise ValueError('HTML markup exceeds the wire limit')
+        if end < len(characters):
+            boundaries = [i + 1 for i in range(start + (end-start)//2, end)
+                          if characters[i].text.isspace()]
+            if boundaries:
+                end = boundaries[-1]
+        chunks.append(_render(characters[start:end]))
+        start = end
+    return chunks

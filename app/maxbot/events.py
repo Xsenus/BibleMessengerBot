@@ -20,6 +20,31 @@ def authorized(expected: str, supplied: str | None) -> bool:
                 and secrets.compare_digest(expected.encode('utf-8'), supplied.encode('utf-8')))
 
 
+def validate_message(message, *, allow_empty_body=False):
+    if not isinstance(message,dict):
+        raise ValueError('Invalid MAX message')
+    recipient = message.get('recipient')
+    if not isinstance(recipient,dict) or recipient.get('chat_type') not in {'dialog','chat','channel'}:
+        raise ValueError('Invalid MAX recipient')
+    valid_external_id(recipient.get('chat_id'))
+    sender = message.get('sender')
+    if sender is not None:
+        if not isinstance(sender,dict):
+            raise ValueError('Invalid MAX sender')
+        valid_external_id(sender.get('user_id'))
+    body = message.get('body')
+    if body is None and allow_empty_body:
+        return None  # Official API allows a forward-only message with no body.
+    if not isinstance(body,dict):
+        raise ValueError('Invalid MAX message body')
+    mid,text = body.get('mid'),body.get('text')
+    if not isinstance(mid,str) or not 1 <= len(mid) <= 256:
+        raise ValueError('Invalid MAX message ID')
+    if text is not None and (not isinstance(text,str) or len(text)>4000):
+        raise ValueError('Invalid MAX message text')
+    return mid
+
+
 def parse_event(raw: bytes) -> tuple[str, dict]:
     if not raw or len(raw) > MAX_EVENT_BYTES:
         raise ValueError('MAX event exceeds size limit')
@@ -37,25 +62,7 @@ def parse_event(raw: bytes) -> tuple[str, dict]:
         raise ValueError('Invalid MAX event timestamp')
     identity = None
     if kind == 'message_created':
-        message = event.get('message')
-        if not isinstance(message, dict) or not isinstance(message.get('body'), dict):
-            raise ValueError('Invalid MAX message')
-        mid = message['body'].get('mid')
-        text = message['body'].get('text')
-        if not isinstance(mid, str) or not 1 <= len(mid) <= 256:
-            raise ValueError('Invalid MAX message ID')
-        if text is not None and (not isinstance(text, str) or len(text) > 4000):
-            raise ValueError('Invalid MAX message text')
-        recipient = message.get('recipient')
-        if not isinstance(recipient, dict) or recipient.get('chat_type') not in {'dialog', 'chat', 'channel'}:
-            raise ValueError('Invalid MAX recipient')
-        valid_external_id(recipient.get('chat_id'))
-        sender = message.get('sender')
-        if sender is not None:
-            if not isinstance(sender, dict):
-                raise ValueError('Invalid MAX sender')
-            valid_external_id(sender.get('user_id'))
-        identity = mid
+        identity = validate_message(event.get('message'),allow_empty_body=True)
     elif kind == 'message_callback':
         callback = event.get('callback')
         if not isinstance(callback, dict):
@@ -70,6 +77,8 @@ def parse_event(raw: bytes) -> tuple[str, dict]:
         if not isinstance(actor, dict):
             raise ValueError('Invalid MAX callback user')
         valid_external_id(actor.get('user_id'))
+        if event.get('message') is not None:
+            validate_message(event['message'])
     elif kind in {'bot_started', 'bot_stopped', 'bot_added', 'bot_removed',
                   'dialog_removed', 'chat_title_changed', 'bot_admin_permissions_changed'}:
         valid_external_id(event.get('chat_id'))
@@ -86,7 +95,12 @@ def parse_event(raw: bytes) -> tuple[str, dict]:
 async def ingest(connection: Any, raw: bytes) -> bool:
     """True only for a newly committed event; a repeated webhook creates no new job."""
     key, event = parse_event(raw)
-    result = await connection.fetchval('''INSERT INTO max_inbox(event_key,payload)
-        VALUES($1,$2::jsonb) ON CONFLICT(event_key) DO NOTHING RETURNING id''',
-        key, json.dumps(event, ensure_ascii=False))
+    message = event.get('message') or {}
+    recipient = message.get('recipient') or {}
+    chat = event.get('chat_id') or recipient.get('chat_id')
+    actor = (event.get('callback') or {}).get('user') or {}
+    chat_key = str(chat) if chat is not None else 'user:' + str(actor.get('user_id'))
+    result = await connection.fetchval('''INSERT INTO max_inbox(event_key,payload,chat_key)
+        VALUES($1,$2::jsonb,$3) ON CONFLICT(event_key) DO NOTHING RETURNING id''',
+        key, json.dumps(event, ensure_ascii=False), chat_key)
     return result is not None

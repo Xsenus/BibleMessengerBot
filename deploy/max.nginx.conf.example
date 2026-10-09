@@ -1,0 +1,33 @@
+# Example only. Use a dedicated host and an issued certificate before enabling.
+# Never expose the operations/admin receiver through this virtual host.
+limit_req_zone $binary_remote_addr zone=max_events:10m rate=20r/s;
+server {
+    listen 443 ssl;
+    server_name max-bible.example.com;
+    ssl_certificate /etc/letsencrypt/live/max-bible.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/max-bible.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 64k;
+    location = /max/webhook {
+        limit_req zone=max_events burst=100 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+        proxy_read_timeout 15s;
+        access_log off;
+    }
+    location = /max/payments/yookassa {
+        limit_req zone=max_events burst=30 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+        proxy_read_timeout 35s;
+        access_log off;
+    }
+    location = /max/payments/return {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+        access_log off;
+    }
+    location / { return 404; }
+}

@@ -62,3 +62,17 @@ def test_webhook_secret_cannot_be_empty_or_default():
     assert not authorized('default', 'default')
     assert not authorized('fixture-very-private-secret', 'wrong')
     assert authorized('fixture-very-private-secret', 'fixture-very-private-secret')
+
+
+def test_forward_only_message_with_nullable_body_is_well_formed():
+    event=fixture_event()
+    event['message']['body']=None
+    assert parse_event(json.dumps(event).encode())[1]==event
+
+
+def test_callback_original_message_is_validated_before_dispatch():
+    event={'update_type':'message_callback','timestamp':123,'message':fixture_event()['message'],
+           'callback':{'callback_id':'fixture','user':{'user_id':101},'payload':'maxcmd:/random'}}
+    event['message']['recipient']['chat_id']=True
+    with pytest.raises(ValueError):
+        parse_event(json.dumps(event).encode())

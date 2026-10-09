@@ -1,6 +1,6 @@
 name: bible-messenger-bot
 x-app: &app
-  image: bible-messenger-bot:1.17.0
+  image: bible-messenger-bot:1.18.0
   build:
     context: .
     dockerfile: Dockerfile
@@ -153,6 +153,38 @@ services:
       interval: 15s
       timeout: 10s
       retries: 10
+
+  max-web:
+    <<: *app
+    profiles: [max]
+    mem_limit: 256m
+    cpus: 0.5
+    command: [uvicorn, app.maxbot.web:app, --host, 0.0.0.0, --port, '8081', --no-proxy-headers]
+    depends_on: *ready
+    ports: ['127.0.0.1:${MAX_HOST_PORT:-8081}:8081']
+    healthcheck:
+      test: [CMD, curl, -fsS, 'http://127.0.0.1:8081/ready']
+      start_period: 30s
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  maxbot:
+    <<: *app
+    profiles: [max]
+    mem_limit: 384m
+    cpus: 0.5
+    command: [python, -m, app.maxbot.main]
+    depends_on:
+      postgres: {condition: service_healthy}
+      bootstrap: {condition: service_completed_successfully}
+      max-web: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -m, app.healthcheck, maxbot]
+      start_period: 60s
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   illustrator:
     <<: *app

@@ -10,7 +10,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.services import bible
 from app.services.errors import SendError, UserError
-from app.services.formatting import escape, plain_text, split_message
+from app.services.formatting import escape, plain_text, split_message, split_wire_message
 from app.services.i18n import tr, ui_for_language
 
 PAGE_SIZE = 6
@@ -183,7 +183,9 @@ async def available(connection, card):
     return sorted(chosen.values(), key=lambda e: (e['language_code'] != source, e['language_code']))
 
 
-def pages(text):
+def pages(text, platform='telegram'):
+    if platform == 'max':
+        return split_wire_message(str(text), 3600)
     if len(text.encode('utf-8')) <= 24000:
         return [str(text)]
     return split_message(str(text), 3900)
@@ -227,7 +229,7 @@ async def keyboard(connection, card, *, editions=None, text_pages=None):
     rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
     if count > 1:
         rows.append([button('◀', 'p', (page - 1) % count), button(f'🌐 {page + 1}/{count}', 'p', page), button('▶', 'p', (page + 1) % count)])
-    text_pages = text_pages or pages(card['current_html'])
+    text_pages = text_pages or pages(card['current_html'], card.get('platform','telegram'))
     if len(text_pages) > 1:
         current = min(card['text_page'], len(text_pages) - 1)
         rows.append([button('‹', 't', (current - 1) % len(text_pages)), button(f'📖 {current + 1}/{len(text_pages)}', 't', current), button('›', 't', (current + 1) % len(text_pages))])
@@ -240,7 +242,7 @@ async def outgoing(connection, chat_id, chunk):
         WHERE r.id=$1 AND r.telegram_chat_id=$2''', chunk['card_id'], chat_id)
     if not card or (chunk['kind'] == 'rich_edit' and card['telegram_message_id'] != chunk.get('message_id')):
         raise SendError('rejected')
-    content = pages(card['current_html'])
+    content = pages(card['current_html'], card.get('platform','telegram'))
     result = dict(chunk, text=content[min(card['text_page'], len(content) - 1)], image_id=card['image_id'])
     if card.get('prayer_at'):
         from app.services.prayers import reminder
@@ -272,7 +274,7 @@ async def select(connection, chat_id, message_id, card_id, action, value):
                 raise UserError('invalid')
             state['language_page'] = value
         elif action == 't':
-            if not 0 <= value < len(pages(card['current_html'])):
+            if not 0 <= value < len(pages(card['current_html'], card.get('platform','telegram'))):
                 raise UserError('invalid')
             state['text_page'] = value
         else:

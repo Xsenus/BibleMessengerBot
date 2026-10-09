@@ -43,7 +43,7 @@ async def prepare(connection, delivery_id, row, edition, sub, chat, day):
         for translation in await message_languages.available(connection,card):
             html=await message_languages.render(connection,card,translation)
             locale=card['ui_language'] if translation['id']==card['source_translation_id'] else ui_for_language(translation['language_code']) or card['ui_language']
-            for page,part in enumerate(message_languages.pages(html)):
+            for page,part in enumerate(message_languages.pages(html,chat.get('platform','telegram'))):
                 text=speech.spoken_text(part,translation,locale)
                 if not text:
                     raise ValueError('Empty prepared audio track')

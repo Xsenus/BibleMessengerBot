@@ -7,7 +7,7 @@ import signal
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 
-from app.bot.transport import TelegramSender
+from app.services.platform_sender import PlatformTransports
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
 from app.logging import configure_logging
@@ -28,6 +28,7 @@ async def worker() -> None:
     await wait_for_database(settings)
     pool = await create_pool(settings)
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode='HTML'))
+    transports = PlatformTransports(bot, settings)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     installed_signals = []
@@ -44,7 +45,7 @@ async def worker() -> None:
             if not await owner.fetchval('SELECT pg_try_advisory_lock($1)', lock_key('singleton-worker', 1)):
                 raise RuntimeError('Another delivery worker is already running for this database')
             await recover_ambiguous(owner)
-            sender = asyncio.create_task(send_loop(pool, lambda connection: TelegramSender(bot, connection, settings), stop))
+            sender = asyncio.create_task(send_loop(pool, transports.sender, stop))
             shutdown = asyncio.create_task(stop.wait())
             tasks = [asyncio.create_task(heartbeat(owner)), asyncio.create_task(prepare_loop(pool, settings)), sender, shutdown]
             try:
@@ -62,6 +63,7 @@ async def worker() -> None:
         for signum in installed_signals:
             loop.remove_signal_handler(signum)
         await bot.session.close()
+        await transports.close()
         await close_pool()
 
 
