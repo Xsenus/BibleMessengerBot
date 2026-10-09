@@ -129,6 +129,7 @@ services:
 
   worker:
     <<: *app
+    volumes: ['./certs:/app/certs:ro']
     mem_limit: 512m
     cpus: 0.75
     command: [python, -m, app.worker.main]
@@ -156,6 +157,7 @@ services:
 
   max-web:
     <<: *app
+    volumes: ['./certs:/app/certs:ro']
     profiles: [max]
     mem_limit: 256m
     cpus: 0.5
@@ -171,6 +173,7 @@ services:
 
   maxbot:
     <<: *app
+    volumes: ['./certs:/app/certs:ro']
     profiles: [max]
     mem_limit: 384m
     cpus: 0.5

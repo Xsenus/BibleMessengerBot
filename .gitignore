@@ -16,6 +16,7 @@ cache/
 .vscode/
 
 runtime-evidence/
+certs/
 MANIFEST.sha256
 BUILD-DEPENDENCIES.txt
 .serena/

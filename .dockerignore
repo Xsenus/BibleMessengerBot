@@ -17,6 +17,7 @@ database-audit.json
 TEST-RESULTS*
 
 runtime-evidence
+certs
 .serena
 work
 git
