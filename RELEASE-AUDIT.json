@@ -1,25 +1,53 @@
 {
   "version": "1.16.0",
   "date": "2026-10-09",
-  "status": "candidate_verified_deployment_pending",
+  "status": "verified",
+  "verified_code_commit": "c4f88463804756ccaefd369a933b57a7cb3587ee",
+  "github_ci_url": "https://github.com/Xsenus/BibleMessengerBot/actions/runs/37881010388",
   "tests": {
-    "vps_linux_postgres": {
+    "github_final_linux_postgres": {
+      "passed": 835,
+      "skipped": 0,
+      "seconds": 148.99,
+      "status": "success"
+    },
+    "vps_candidate_full_linux_postgres": {
       "passed": 831,
       "skipped": 0,
-      "seconds": 149.12
+      "seconds": 149.12,
+      "scope": "Before the final model-output and large-backup robustness additions"
     },
-    "windows_targeted": {
-      "passed": 101,
-      "skipped": 1,
-      "skip_reason": "Tesseract is tested on Linux"
+    "vps_final_affected_tests": {
+      "passed": 77,
+      "skipped": 0,
+      "seconds": 26.61
+    },
+    "windows_large_backup_tests": {
+      "passed": 16,
+      "skipped": 0,
+      "seconds": 0.51
     }
+  },
+  "deployment": {
+    "healthy_services": 8,
+    "schema_migrations": 17,
+    "editions": 14,
+    "languages": 12,
+    "verse_rows": 414980,
+    "original_database_tables_sha256_preserved": 43
   },
   "image_review": {
     "existing_samples": 31,
-    "stability_instruction_pages_rejected": 4,
-    "visually_and_ocr_approved_replacements": 4,
+    "instruction_pages_rejected": 4,
+    "new_visually_and_ocr_approved_replacements": 4,
     "unused_unreadable_manuscript_quarantined": 1,
-    "ocr_limit": "English/Russian confident writing; not a general image understanding guarantee"
+    "changed_original_images": 4,
+    "original_prayer_labels_removed": 2,
+    "telegram_acknowledged_edits": 6,
+    "unique_original_messages_edited": 5,
+    "remaining_bad_reading_cards": 0,
+    "new_images_s3_verified": 4,
+    "original_source_text_and_current_language_and_audio_preserved": true
   },
   "prayer_schedule": {
     "morning_local": "09:38",
@@ -28,19 +56,34 @@
       "09:00",
       "21:00"
     ],
-    "timezone_source": "Explicit destination setting; Telegram does not expose user timezone",
-    "prayer_clock_label_removed": true
+    "timezone_source": "Explicit destination setting, selectable through settings or /timezone",
+    "technical_label_removed": true,
+    "existing_destination_zones": "Both existing destinations retained Asia/Novosibirsk; other locations must select their actual city once",
+    "future_occurrences_checked": 4,
+    "fully_prepared_future_readings": 6,
+    "telegram_timezone_command_confirmed": true
   },
-  "deployment": {
-    "state": "pending",
-    "original_message_edits": "pending",
-    "forwarded_copies": "Cannot edit user-forwarded copies",
-    "monthly_budget_unchanged": true,
-    "paid_history_unchanged": true
+  "image_budget": {
+    "monthly_limit": "10",
+    "daily_limit": 10,
+    "openai_daily_scope": "provider",
+    "configured_keys": 4,
+    "reserved_monthly": "3.2000"
+  },
+  "backups": {
+    "pre_update_encrypted_s3_readback": "verified",
+    "post_update_encrypted_s3_readback": "verified",
+    "post_update_bytes": 96990295,
+    "post_update_sha256": "601b62431291c6774c27025b1f758faa69061374e58e4b3c622c5ff06af46fb6",
+    "multipart_chunks_bytes": 8388608,
+    "timer": "active",
+    "new_restore_test": false
   },
   "limitations": [
-    "Real Stability scene planner rejected a scroll description before a paid request; the provider is skipped for unsafe scene output.",
-    "No new paid external generation was run for incident acceptance.",
-    "Deleted, forbidden and otherwise non-editable Telegram originals may reject edits."
+    "OCR is an English/Russian writing filter, not a general artistic, semantic or theological review. An unreadable manuscript was removed by human review even though OCR approved it.",
+    "The local scene model rejected a scroll description before a paid Stability request; unsafe or malformed scene output skips that service.",
+    "No new paid image-generation request was made for incident acceptance. HTTP provider failures are simulated in tests; the image corpus and Telegram edits were real.",
+    "The bot cannot edit copies forwarded by users, deleted originals or inaccessible chats. All six requested edits in this incident were acknowledged.",
+    "Telegram does not expose user timezone; existing defaults cannot identify a person’s actual location. Users choose their city once."
   ]
 }
