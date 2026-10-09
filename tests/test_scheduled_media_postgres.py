@@ -1,5 +1,6 @@
 import os
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 from unittest.mock import AsyncMock
 
 import pytest
@@ -89,6 +90,19 @@ async def test_ready_bundle_sends_once_and_language_switch_reuses_ready_audio(db
         fresh=await c.fetchrow('SELECT a.* FROM reading_cards c JOIN reading_audio a ON a.id=c.audio_id WHERE c.id=$1',card_id)
         assert fresh['state']=='ready' and fresh['attempts']==1
     assert await c.fetchval('SELECT count(*) FROM audio_generation_attempts')==0
+
+
+async def test_outgoing_countdown_reads_destination_timezone(db):
+    c,_,path=db
+    _,_,card_id=await setup(c,path)
+    prayer_at=datetime.now(UTC).replace(second=0,microsecond=0)+timedelta(minutes=38)
+    await c.execute('UPDATE reading_cards SET prayer_at=$1 WHERE id=$2',prayer_at,card_id)
+    for zone in ('Europe/Moscow','Asia/Novosibirsk'):
+        await c.execute('UPDATE telegram_chats SET timezone=$1 WHERE telegram_chat_id=101',zone)
+        outgoing,_=await message_languages.outgoing(c,101,dict(kind='rich',card_id=card_id))
+        clock=prayer_at.astimezone(ZoneInfo(zone)).strftime('%H:%M')
+        assert f'({clock}).</b>' in outgoing['text']
+        assert zone not in outgoing['text']
 
 
 async def test_audio_can_prepare_before_ack_but_not_after_cancel(db):

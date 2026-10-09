@@ -29,7 +29,7 @@ async def lifespan(_: FastAPI):
         await close_pool()
 
 
-app = FastAPI(title='BibleMessengerBot read-only operations',version='1.16.0',lifespan=lifespan,
+app = FastAPI(title='BibleMessengerBot read-only operations',version='1.16.1',lifespan=lifespan,
               docs_url=None,redoc_url=None,openapi_url=None)
 
 
@@ -53,7 +53,7 @@ def require_key(x_admin_key: Annotated[str | None,Header()] = None) -> None:
 @app.get('/health')
 async def health() -> dict[str,str]:
     """Liveness does not claim that imported content is ready."""
-    return {'status':'alive','version':'1.16.0'}
+    return {'status':'alive','version':'1.16.1'}
 
 
 @app.get('/ready')
@@ -81,7 +81,7 @@ async def operator_data() -> dict[str,Any]:
         heartbeats = await connection.fetch('SELECT service,last_seen FROM service_heartbeats')
         preparations=await connection.fetch("SELECT state,count(*) AS count FROM scheduled_readings GROUP BY state")
         prayers=await connection.fetch('SELECT id,scheduled_for,state,delivery_id FROM prayer_occurrences ORDER BY scheduled_for DESC LIMIT 100')
-    return {'version':'1.16.0','database':audit,'chats':[dict(r) for r in chats],
+    return {'version':'1.16.1','database':audit,'chats':[dict(r) for r in chats],
         'subscriptions':[dict(r) for r in subscriptions],'deliveries':[dict(r) for r in deliveries],
         'heartbeats':[dict(r) for r in heartbeats],'preparations':[dict(r) for r in preparations],
         'prayers':[dict(r) for r in prayers]}
@@ -99,7 +99,7 @@ async def dashboard() -> HTMLResponse:
     """Escaped preformatted diagnostic output, without scripts or external resources."""
     data = json.dumps(await operator_data(),ensure_ascii=False,indent=2,default=str)
     return HTMLResponse('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
-        '<title>BibleMessengerBot · Operations</title><h1>BibleMessengerBot 1.16.0</h1>'
+        '<title>BibleMessengerBot · Operations</title><h1>BibleMessengerBot 1.16.1</h1>'
         '<p>Read-only operations. Change destination settings through /settings in Telegram.</p><pre>'+
         escape(data)+'</pre></html>',headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
         'Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'; base-uri 'none'"})

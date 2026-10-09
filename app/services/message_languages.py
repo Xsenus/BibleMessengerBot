@@ -235,14 +235,16 @@ async def keyboard(connection, card, *, editions=None, text_pages=None):
 
 
 async def outgoing(connection, chat_id, chunk):
-    card = await connection.fetchrow('SELECT * FROM reading_cards WHERE id=$1 AND telegram_chat_id=$2', chunk['card_id'], chat_id)
+    card = await connection.fetchrow('''SELECT r.*, c.timezone AS prayer_timezone
+        FROM reading_cards r JOIN telegram_chats c USING (telegram_chat_id)
+        WHERE r.id=$1 AND r.telegram_chat_id=$2''', chunk['card_id'], chat_id)
     if not card or (chunk['kind'] == 'rich_edit' and card['telegram_message_id'] != chunk.get('message_id')):
         raise SendError('rejected')
     content = pages(card['current_html'])
     result = dict(chunk, text=content[min(card['text_page'], len(content) - 1)], image_id=card['image_id'])
     if card.get('prayer_at'):
         from app.services.prayers import reminder
-        result['text']=reminder(card['prayer_at'],card['ui_language'])+'\n\n'+result['text']
+        result['text']=reminder(card['prayer_at'],card['ui_language'],timezone_name=card['prayer_timezone'])+'\n\n'+result['text']
     from app.services.speech import media
     audio = await media(connection,card)
     result['audio_id'] = audio['id'] if audio else None

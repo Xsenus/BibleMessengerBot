@@ -27,15 +27,16 @@ INTENTIONS = {
 }
 
 
-def reminder(prayer_at, locale='ru', *, now=None):
+def reminder(prayer_at, locale='ru', *, timezone_name='UTC', now=None):
     remaining=math.ceil((prayer_at-(now or datetime.now(UTC))).total_seconds()/60)
+    clock=prayer_at.astimezone(ZoneInfo(timezone_name)).strftime('%H:%M')
     if locale=='ru':
         if remaining>0:
             number=remaining%100
             unit='минуту' if remaining%10==1 and number!=11 else 'минуты' if remaining%10 in {2,3,4} and number not in {12,13,14} else 'минут'
-            return f'🕊 <b>До совместной молитвы — {remaining} {unit}.</b>\nПусть это чтение поможет настроить сердце. Не забудьте уделить время молитве.'
+            return f'🕊 <b>До совместной молитвы — {remaining} {unit} ({clock}).</b>\nПусть это чтение поможет настроить сердце. Не забудьте уделить время молитве.'
         return '🕊 <b>Время совместной молитвы.</b>\nОстановимся на минуту и обратимся к Богу.'
-    return (f'🕊 <b>Shared prayer begins in {remaining} minute'+('s' if remaining!=1 else '')+'.</b>\nLet this reading prepare your heart. Remember to make time for prayer.') if remaining>0 else '🕊 <b>It is time to pray together.</b>'
+    return (f'🕊 <b>Shared prayer begins in {remaining} minute'+('s' if remaining!=1 else '')+f' ({clock}).</b>\nLet this reading prepare your heart. Remember to make time for prayer.') if remaining>0 else '🕊 <b>It is time to pray together.</b>'
 
 
 async def nearby_time(connection, sub, day):

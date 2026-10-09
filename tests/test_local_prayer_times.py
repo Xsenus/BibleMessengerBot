@@ -1,9 +1,9 @@
-from datetime import date, time
+from datetime import date, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.bot.commands import decode_callback, parse_command
 from app.bot.timezones import menu
-from app.services.prayers import invitation
+from app.services.prayers import invitation, reminder
 from app.services.scheduling import on_date
 
 
@@ -18,6 +18,15 @@ def test_same_prayer_wall_time_is_different_utc_in_moscow_and_novosibirsk():
             novosibirsk.astimezone(ZoneInfo("Asia/Novosibirsk")).time().replace(tzinfo=None)
             == clock
         )
+
+
+def test_countdown_uses_chat_local_clock_for_morning_and_evening():
+    for zone in ("Europe/Moscow", "Asia/Novosibirsk"):
+        for clock in (time(9, 38), time(21, 13)):
+            instant = on_date(date(2026, 10, 9), clock, zone)
+            result = reminder(instant, timezone_name=zone, now=instant-timedelta(minutes=38))
+            assert f"38 минут ({clock:%H:%M})." in result
+            assert zone not in result
 
 
 def test_city_picker_carries_authorized_destination_and_zone():
