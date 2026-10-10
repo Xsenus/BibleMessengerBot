@@ -12,7 +12,7 @@ import pytest
 from app.bot import handlers
 from app.bot.commands import parse_command
 from app.bot.transport import TelegramSender
-from app.services import artwork, bible, illustrations,readings
+from app.services import artwork, illustrations,readings
 from app.services.destinations import configure_chat
 from app.worker.delivery import decoded, process_delivery
 from tests.test_devotional_artwork import jpeg

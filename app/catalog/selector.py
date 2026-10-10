@@ -82,7 +82,7 @@ def select_translations(
             rejected.append(item)
 
     selected: list[SelectionItem] = []
-    for language_code, items in accepted_by_language.items():
+    for _language_code, items in accepted_by_language.items():
         items.sort(key=lambda item: item.score, reverse=True)
         if profile == "all-open":
             selected.extend(items)

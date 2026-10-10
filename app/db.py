@@ -4,11 +4,12 @@ import asyncio
 import hashlib
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
+from collections.abc import AsyncIterator
 from app.config import Settings
 from app.services.locks import lock_key
 if TYPE_CHECKING:
-    import asyncpg
+    pass
 
 _pool: Any = None
 
@@ -53,7 +54,7 @@ async def wait_for_database(settings: Settings, attempts: int = 60, delay: float
             connection = await asyncpg.connect(normalize_asyncpg_dsn(settings.database_url),timeout=5)
             await connection.close()
             return
-        except (OSError, asyncio.TimeoutError, asyncpg.PostgresError):
+        except (TimeoutError, OSError, asyncpg.PostgresError):
             if attempt + 1 < attempts:
                 await asyncio.sleep(delay)
     raise RuntimeError(f'PostgreSQL not ready after {attempts} attempts')

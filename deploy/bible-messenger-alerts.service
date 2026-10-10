@@ -1,0 +1,10 @@
+[Unit]
+Description=BibleMessengerBot operator alerts
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/bible-messenger-bot
+ExecStart=/usr/bin/docker compose --profile maintenance run --rm --no-deps alerts
+Nice=10

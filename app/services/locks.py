@@ -2,7 +2,8 @@
 from __future__ import annotations
 import hashlib
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any
+from collections.abc import AsyncIterator
 
 
 def lock_key(namespace: str, identifier: object) -> int:

@@ -487,7 +487,7 @@ async def language_menu(connection: Any, chat: Any, page: int=0) -> tuple[str,An
     rows = [[button(bible.display_language(code,chat['ui_language']),'lang',chat['telegram_chat_id'],code) for code in chosen[i:i+3]] for i in range(0,len(chosen),3)]
     navigation=[]
     for delta,key in [(-1,'previous_page'),(1,'next_page')]:
-        if 0<=page+delta and (page+delta)*36<len(codes):
+        if page+delta >= 0 and (page+delta)*36<len(codes):
             navigation.append(button(tr(chat['ui_language'],key),'langs',chat['telegram_chat_id'],str(page+delta)))
     if navigation:rows.append(navigation)
     rows.append([button(tr(chat['ui_language'],'back'),'settings',chat['telegram_chat_id'])])
@@ -519,7 +519,7 @@ async def edition_menu(connection: Any, chat: Any, page: int, language: str | No
     # Filter state is encoded explicitly, so next-page clicks cannot accidentally change language scope.
     nav = []
     for delta,key in [(-1,'previous_page'),(1,'next_page')]:
-        if 0<=page+delta and (page+delta)*8<len(editions):
+        if page+delta >= 0 and (page+delta)*8<len(editions):
             nav.append(button(tr(locale,key),'editions',identifier,f'{page+delta},{language or ""}'))
     if nav:
         rows.append(nav)

@@ -3,9 +3,7 @@ from __future__ import annotations
 import ast
 import asyncio
 from dataclasses import replace
-from datetime import datetime,time,timezone
-import hashlib
-import json
+from datetime import datetime,time,UTC
 from pathlib import Path
 import re
 import string
@@ -13,9 +11,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import httpx
 import pytest
-from app.bot.commands import parse_command,encode_callback,decode_callback,mode_name
+from app.bot.commands import parse_command,encode_callback,decode_callback
 from app.catalog.audit import audit_corpus,CORE,OT,NT
-from app.catalog.models import TranslationMeta,LicenseInfo,VerseReference,DownloadedTranslation
+from app.catalog.models import TranslationMeta,LicenseInfo,VerseReference
 from app.catalog.policy import decide_license
 from app.catalog.references import parse_reference_lines,pair_verses,with_ordinals
 from app.catalog.source import BibleNlpSource,SOURCE_REVISION
@@ -23,7 +21,7 @@ from app.config import Settings
 from app.logging import redact
 from app.services import bible
 from app.services.formatting import escape,split_message,plain_text,utf16_length
-from app.services.i18n import available_ui,catalogs,tr,ui_for_language
+from app.services.i18n import available_ui,catalogs,ui_for_language
 from app.services.outbox import Envelope,dispatch_chunk
 from app.services.errors import SendError,UserError
 from app.services.plans import plan_window
@@ -48,7 +46,8 @@ def metadata(**updates):
 def test_every_catalog_complete_and_splittable(locale):
     data = catalogs()[locale]
     assert set(data)==set(catalogs()['en'])
-    fields = lambda s: sorted(field for _,field,_,_ in string.Formatter().parse(s) if field is not None)
+    def fields(s):
+        return sorted(field for _,field,_,_ in string.Formatter().parse(s) if field is not None)
     for key,value in data.items():
         assert fields(value)==fields(catalogs()['en'][key])
     text = '<blockquote>'+escape((' '.join(v for k,v in data.items() if not k.startswith('_'))+' 😀 ') * 5)+'</blockquote>'
@@ -90,13 +89,13 @@ def test_invalid_weekdays(days):
 
 
 def test_dst_spring_gap_moves_forward():
-    now = datetime(2026,3,29,0,0,tzinfo=timezone.utc)
-    assert next_occurrence(time(2,30),'Europe/Amsterdam',now=now)==datetime(2026,3,29,1,30,tzinfo=timezone.utc)
+    now = datetime(2026,3,29,0,0,tzinfo=UTC)
+    assert next_occurrence(time(2,30),'Europe/Amsterdam',now=now)==datetime(2026,3,29,1,30,tzinfo=UTC)
 
 
 def test_dst_fall_fold_never_sends_a_second_time_same_date():
-    now = datetime(2026,10,25,0,45,tzinfo=timezone.utc)
-    assert next_occurrence(time(2,30),'Europe/Amsterdam',now=now)==datetime(2026,10,26,1,30,tzinfo=timezone.utc)
+    now = datetime(2026,10,25,0,45,tzinfo=UTC)
+    assert next_occurrence(time(2,30),'Europe/Amsterdam',now=now)==datetime(2026,10,26,1,30,tzinfo=UTC)
 
 
 def test_naive_now_rejected():

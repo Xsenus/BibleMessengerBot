@@ -5,8 +5,8 @@ from dataclasses import asdict, dataclass
 from typing import Any
 from app.catalog.models import TranslationMeta, VerseReference
 
-OT = 'GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH EST JOB PSA PRO ECC SNG ISA JER LAM EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP HAG ZEC MAL'.split()
-NT = 'MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV'.split()
+OT = ['GEN', 'EXO', 'LEV', 'NUM', 'DEU', 'JOS', 'JDG', 'RUT', '1SA', '2SA', '1KI', '2KI', '1CH', '2CH', 'EZR', 'NEH', 'EST', 'JOB', 'PSA', 'PRO', 'ECC', 'SNG', 'ISA', 'JER', 'LAM', 'EZK', 'DAN', 'HOS', 'JOL', 'AMO', 'OBA', 'JON', 'MIC', 'NAM', 'HAB', 'ZEP', 'HAG', 'ZEC', 'MAL']
+NT = ['MAT', 'MRK', 'LUK', 'JHN', 'ACT', 'ROM', '1CO', '2CO', 'GAL', 'EPH', 'PHP', 'COL', '1TH', '2TH', '1TI', '2TI', 'TIT', 'PHM', 'HEB', 'JAS', '1PE', '2PE', '1JN', '2JN', '3JN', 'JUD', 'REV']
 CORE = set(OT + NT)
 
 
@@ -54,7 +54,7 @@ def audit_corpus(metadata: TranslationMeta, references: list[VerseReference],
     missing_chapters = [f'{b} {c}' for b in sorted(actual) for c in sorted(expected[b] - actual[b])]
     missing_core = sorted(CORE - actual_set)
     nt_complete = set(NT) <= actual_set and all(expected[b] <= actual[b] for b in NT)
-    full = CORE <= actual_set and all(expected[b] <= actual[b] for b in CORE)
+    full = actual_set >= CORE and all(expected[b] <= actual[b] for b in CORE)
     ot_complete = set(OT) <= actual_set and all(expected[b] <= actual[b] for b in OT)
     coverage = 'full' if full else 'nt' if nt_complete and not actual_set.intersection(OT) else 'ot' if ot_complete and not actual_set.intersection(NT) else 'partial'
     warnings: list[str] = []

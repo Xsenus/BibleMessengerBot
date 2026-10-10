@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from app.config import Settings
 from app.db import normalize_asyncpg_dsn
@@ -24,7 +24,7 @@ def container_started_at(proc_root: Path = Path('/proc')) -> datetime | None:
         boot_seconds = int(boot_line.split()[1])
         ticks_per_second = os.sysconf('SC_CLK_TCK')
         return datetime.fromtimestamp(boot_seconds + start_ticks / ticks_per_second + 1,
-                                      tz=timezone.utc)
+                                      tz=UTC)
     except (OSError, ValueError, IndexError, StopIteration, AttributeError, ZeroDivisionError):
         return None
 

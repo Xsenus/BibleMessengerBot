@@ -113,7 +113,7 @@ def start(ip, interface):
             '--cap-add','SETUID','--cap-add','SETGID','--cap-add','CHOWN',
             '--health-cmd','nginx -t','--health-interval','30s','--health-timeout','5s',
             '--health-retries','3',*mounts,IMAGE)
-    for attempt in range(30):
+    for _attempt in range(30):
         if ready(ip):
             break
         time.sleep(2)

@@ -2,7 +2,7 @@
 from __future__ import annotations
 import hashlib
 import json
-from datetime import datetime,timezone,timedelta
+from datetime import datetime,timedelta, UTC
 from typing import Any
 from zoneinfo import ZoneInfo
 from app.services import bible
@@ -36,7 +36,7 @@ async def insert_payload(connection: Any, chat: Any, translation: Any, text: str
         VALUES($1,$2,$3,$4,$5,$6,'pending',$7,$8::jsonb,$9::jsonb,$10,$11,$12,$13)
         ON CONFLICT(telegram_chat_id,payload_key) DO NOTHING RETURNING id''',
         subscription['id'] if subscription else None,chat['telegram_chat_id'],translation['id'],mode,key,
-        subscription['next_run_at'] if subscription else datetime.now(timezone.utc),text[:1000],
+        subscription['next_run_at'] if subscription else datetime.now(UTC),text[:1000],
         json.dumps(chunks,ensure_ascii=False),json.dumps(progress),subscription['revision'] if subscription else None,
         chat['revision'],chat['ui_language'],chat['message_thread_id'])
     if identifier is None:
@@ -51,7 +51,7 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
         return None
     async with chat_lock(connection,row['telegram_chat_id']),connection.transaction():
         sub = await connection.fetchrow('SELECT * FROM subscriptions WHERE id=$1 FOR UPDATE',subscription_id)
-        if not sub or not sub['is_enabled'] or sub['completed'] or not sub['next_run_at'] or sub['next_run_at']>datetime.now(timezone.utc)+timedelta(seconds=lead_seconds):
+        if not sub or not sub['is_enabled'] or sub['completed'] or not sub['next_run_at'] or sub['next_run_at']>datetime.now(UTC)+timedelta(seconds=lead_seconds):
             return None
         chat = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1',sub['telegram_chat_id'])
         if not chat or not chat['is_active']:
@@ -222,7 +222,7 @@ class SqlCheckpoints:
             status = 'retry' if (editing and kind in {'retry','forbidden','uncertain'}) or kind=='retry' and failures<=10 else 'uncertain' if kind=='uncertain' else 'failed'
             if editing and status=='retry':
                 retry_after=max(retry_after,min(3600,3*2**min(failures,11)))
-            retry_at = datetime.now(timezone.utc)+timedelta(seconds=max(retry_after,3)) if status=='retry' else None
+            retry_at = datetime.now(UTC)+timedelta(seconds=max(retry_after,3)) if status=='retry' else None
             await self.connection.execute('''UPDATE delivery_log SET status=$2,error_code=$3,error_message=$3,
                 retry_at=$4,consecutive_failures=$5,sending_chunk=CASE WHEN $2='uncertain' THEN sending_chunk ELSE NULL END,
                 updated_at=now() WHERE id=$1''',envelope.id,status,kind,retry_at,failures)
@@ -245,7 +245,7 @@ async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> st
             s.revision AS current_subscription_revision,s.is_enabled FROM delivery_log d
             JOIN telegram_chats c ON c.telegram_chat_id=d.telegram_chat_id LEFT JOIN subscriptions s ON s.id=d.subscription_id
             WHERE d.id=$1''',delivery_id)
-        if row['status'] not in {'pending','retry'} or row['retry_at'] and row['retry_at']>datetime.now(timezone.utc):
+        if row['status'] not in {'pending','retry'} or row['retry_at'] and row['retry_at']>datetime.now(UTC):
             return 'not_due'
         if not row['is_active'] or row['subscription_id'] and not row['is_enabled']:
             return 'paused'
@@ -278,10 +278,10 @@ async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> st
         if not valid:
             await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='stale_configuration',updated_at=now() WHERE id=$1",delivery_id)
             return 'stale'
-        if row['scheduled_for']>datetime.now(timezone.utc):
+        if row['scheduled_for']>datetime.now(UTC):
             return 'not_due'
         from app.services import scheduled_media, prayers
-        if row['mode']=='prayer' and datetime.now(timezone.utc)>row['scheduled_for']+timedelta(minutes=3):
+        if row['mode']=='prayer' and datetime.now(UTC)>row['scheduled_for']+timedelta(minutes=3):
             await connection.execute("UPDATE delivery_log SET status='skipped',error_code='prayer_expired',updated_at=now() WHERE id=$1",delivery_id)
             return 'expired'
         readiness=await scheduled_media.ready(connection,row)

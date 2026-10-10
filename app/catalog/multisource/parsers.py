@@ -143,12 +143,12 @@ def native_audit(metadata: TranslationMeta, records: list[Record], numbering: st
     def covered(books: list[str]) -> bool:
         return all(set(range(1,CHAPTER_FLOOR[b]+1)) <= actual[b] for b in books)
     nt_complete = set(NT)<=set(actual) and covered(NT) and nt_rows>=6000
-    full = CORE<=set(actual) and covered(OT+NT) and nt_complete and core_rows>=25000
+    full = set(actual) >= CORE and covered(OT+NT) and nt_complete and core_rows>=25000
     ot_complete = set(OT)<=set(actual) and covered(OT) and core_rows-nt_rows>=18000
     scope = ('full' if full else 'nt' if nt_complete and not set(actual).intersection(OT)
              else 'ot' if ot_complete and not set(actual).intersection(NT) else 'partial')
     messages = list(base.warnings)+warnings
-    if CORE<=set(actual) and not full:
+    if set(actual) >= CORE and not full:
         messages.append("66 book names alone do not prove full structural coverage")
     return replace(base,coverage=scope,canonical_66_complete=full,nt_complete=nt_complete,
         numbering=numbering,missing_reference_chapters=missing,
@@ -159,7 +159,7 @@ def native_audit(metadata: TranslationMeta, records: list[Record], numbering: st
 def _measured_metadata(meta: TranslationMeta, records: list[Record]) -> TranslationMeta:
     """Set structural fields missing from catalog from parsed coordinates; originals stay in raw evidence."""
     books=defaultdict(set); verses=Counter()
-    for code,chapter,_,_,_,_ in records:
+    for code,_chapter,_,_,_,_ in records:
         section='ot' if code in OT else 'nt' if code in NT else 'dc'
         books[section].add(code); verses[section]+=1
     chapters=defaultdict(set)

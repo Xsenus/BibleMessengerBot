@@ -4,12 +4,10 @@ They are SKIPPED, not counted as passed, when asyncpg or RUN_DB_TESTS=1 is absen
 No Telegram request and no real Bible download is made in these tests.
 """
 from __future__ import annotations
-import asyncio
 from dataclasses import replace
-from datetime import datetime,time,timezone,timedelta
+from datetime import time
 import hashlib
 import os
-from pathlib import Path
 from urllib.parse import urlsplit,urlunsplit
 from uuid import uuid4
 import pytest

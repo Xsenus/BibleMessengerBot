@@ -9,7 +9,7 @@ import time
 from collections import Counter
 from contextlib import contextmanager
 from dataclasses import asdict, replace
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -81,9 +81,9 @@ async def acquire_corpus(root: Path,options: ImportOptions,*,store: Any=None,dis
     if not discover_only and not options.download_only and store is None:
         raise ValueError('An import needs a persistence store; use --download-only explicitly')
     started=time.monotonic()
-    run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid4().hex[:8]
+    run_id=datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid4().hex[:8]
     report={'format_version':1,'application_version':'1.20.0','run_id':run_id,'status':'running',
-        'started_at':datetime.now(timezone.utc).isoformat(),'options':asdict(options),
+        'started_at':datetime.now(UTC).isoformat(),'options':asdict(options),
         'scope':'Configured sources and explicit open licenses only; not all Bibles worldwide',
         'items':[],'sources':{},'source_errors':[]}
     reports=root/'reports';reports.mkdir(parents=True,exist_ok=True)
@@ -199,7 +199,7 @@ async def acquire_corpus(root: Path,options: ImportOptions,*,store: Any=None,dis
     finally:
         report.pop('current',None)
         report['elapsed_seconds']=round(time.monotonic()-started,3)
-        report['finished_at']=datetime.now(timezone.utc).isoformat()
+        report['finished_at']=datetime.now(UTC).isoformat()
         report['network']={'requests':d.requests,'downloaded_bytes':d.downloaded_bytes,'cache_hits':d.cache_hits,'resumes':d.resumes}
         report['report_file']=str(reports/(run_id+'.json'))
         try:

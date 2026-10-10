@@ -57,7 +57,7 @@ class Settings:
     public_base_url: str
 
     @classmethod
-    def from_env(cls, *, require_bot_token: bool = True) -> "Settings":
+    def from_env(cls, *, require_bot_token: bool = True) -> Settings:
         bot_token = os.getenv("BOT_TOKEN", "").strip()
         if require_bot_token and not bot_token:
             raise RuntimeError("BOT_TOKEN is required")

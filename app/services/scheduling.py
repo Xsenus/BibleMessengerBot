@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, UTC
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
@@ -17,7 +17,7 @@ def next_reading(mode: str, clock: time, timezone_name: str, days=None, *, now=N
 
 def on_date(day, clock: time, timezone_name: str) -> datetime:
     """Use exactly the same gap/fold policy as the regular scheduler."""
-    start=datetime.combine(day,time(),tzinfo=ZoneInfo(timezone_name)).astimezone(timezone.utc)
+    start=datetime.combine(day,time(),tzinfo=ZoneInfo(timezone_name)).astimezone(UTC)
     candidate=next_occurrence(clock,timezone_name,now=start-timedelta(microseconds=1))
     if candidate.astimezone(ZoneInfo(timezone_name)).date()!=day:
         raise ValueError('Schedule date does not exist in this timezone')
@@ -51,10 +51,10 @@ def next_occurrence(send_time: time, timezone_name: str,
     if send_time.tzinfo is not None or send_time.second or send_time.microsecond:
         raise ValueError('send_time must be a naive HH:MM time')
     zone = ZoneInfo(validate_timezone(timezone_name))
-    current = now or datetime.now(timezone.utc)
+    current = now or datetime.now(UTC)
     if current.tzinfo is None:
         raise ValueError('now must be timezone-aware')
-    current_utc = current.astimezone(timezone.utc)
+    current_utc = current.astimezone(UTC)
     allowed = set(range(1, 8) if days_of_week is None else days_of_week)
     if not allowed or any(type(day) is not int or not 1 <= day <= 7 for day in allowed):
         raise ValueError('days_of_week values must be ISO weekdays 1..7')
@@ -64,7 +64,7 @@ def next_occurrence(send_time: time, timezone_name: str,
         if day.isoweekday() not in allowed:
             continue
         requested = datetime.combine(day, send_time, tzinfo=zone).replace(fold=0)
-        candidate = requested.astimezone(timezone.utc)
+        candidate = requested.astimezone(UTC)
         normalized = candidate.astimezone(zone)
         if normalized.date() != day:
             continue

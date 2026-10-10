@@ -3,15 +3,12 @@ from __future__ import annotations
 import csv
 import io
 import json
-from dataclasses import replace
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import pytest
-from app.catalog.multisource.runner import acquire_corpus,process_lock,selected,finalize_status
-from app.catalog.multisource.cli import parser,run,exit_code,options_from_args
-from app.catalog.multisource.sources import BibleNlp,GetBible,HelloAO
-from app.catalog.multisource.types import ImportOptions
+from app.catalog.multisource.runner import acquire_corpus,process_lock,selected
+from app.catalog.multisource.cli import parser,run,exit_code
+from app.catalog.multisource.sources import BibleNlp,GetBible
 from app.catalog.multisource.store import UpdateHeld
 from app.catalog.multisource.transport import DiskLimitError
 from app.services import bible

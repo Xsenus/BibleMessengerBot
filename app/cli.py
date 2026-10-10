@@ -13,9 +13,6 @@ import asyncpg
 
 from app.bootstrap import bootstrap
 from app.catalog.importer import run_import
-from app.catalog.report import selection_summary
-from app.catalog.selector import select_translations
-from app.catalog.source import BibleNlpSource
 from app.config import Settings
 from app.db import apply_schema, normalize_asyncpg_dsn, wait_for_database, maintenance
 from app.logging import configure_logging

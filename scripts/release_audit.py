@@ -5,7 +5,6 @@ Running this script writes runtime-evidence/offline/ and preserves published rel
 Docker, silently install dependencies, or turn skipped tests into passed tests.
 """
 from __future__ import annotations
-import hashlib
 import importlib.util
 import json
 import os
@@ -14,7 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -111,7 +110,7 @@ def main() -> int:
     ok=all(c['status']=='passed' for c in checks)
     profiles=json.loads((ROOT/'data/language_profiles.json').read_text())
     report={'project':'BibleMessengerBot','version':(ROOT/'VERSION').read_text().strip(),
-            'generated_at_machine_clock':datetime.now(timezone.utc).isoformat(),'release_context_date':'2026-09-22',
+            'generated_at_machine_clock':datetime.now(UTC).isoformat(),'release_context_date':'2026-09-22',
             'status':'OFFLINE_PASS_LIVE_UNVERIFIED' if ok else 'OFFLINE_FAILED',
             'tests':tests,'checks':checks,'environment':env,
             'ui_catalogs':len(list((ROOT/'locales').glob('*.json'))),

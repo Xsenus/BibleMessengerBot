@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import asyncpg
 import pytest
 
-from app.services import artwork, bible, devotionals,readings
+from app.services import artwork, devotionals,readings
 from app.services.subscriptions import create_or_update_subscription
 from app.worker.delivery import decoded, prepare_subscription, process_delivery
 from tests.test_devotional_artwork import jpeg

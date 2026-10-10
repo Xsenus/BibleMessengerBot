@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from app.catalog.audit import CorpusAudit
@@ -60,7 +59,7 @@ class ImportOptions:
             safe_id(identifier)
 
     @classmethod
-    def from_env(cls, **changes: Any) -> "ImportOptions":
+    def from_env(cls, **changes: Any) -> ImportOptions:
         def csv(name: str, default: str = "") -> tuple[str, ...]:
             return tuple(s.strip() for s in os.getenv(name, default).split(",") if s.strip())
         values: dict[str, Any] = dict(

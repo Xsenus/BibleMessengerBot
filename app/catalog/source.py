@@ -10,7 +10,7 @@ import json
 import logging
 import re
 import tempfile
-from datetime import date, datetime, timezone
+from datetime import date, datetime, UTC
 from pathlib import Path
 from typing import Any
 
@@ -86,7 +86,7 @@ class BibleNlpSource:
         )
         self._corpus_index: dict[str, str] | None = None
 
-    async def __aenter__(self) -> "BibleNlpSource":
+    async def __aenter__(self) -> BibleNlpSource:
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -376,5 +376,5 @@ class BibleNlpSource:
             "path": str(self.cache_dir),
             "files": len(files),
             "bytes": sum(item.stat().st_size for item in files),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
         }

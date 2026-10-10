@@ -8,7 +8,7 @@ import pytest
 
 from app.bot import handlers
 from app.bot.commands import parse_command
-from app.services import bible, devotionals, message_languages, speech
+from app.services import devotionals, message_languages, speech
 from app.services.accounts import upsert_chat
 from tests.test_postgres_integration import db as db, create_destination, load_fixture
 from tests.test_message_languages_postgres import card

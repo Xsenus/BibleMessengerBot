@@ -15,7 +15,7 @@ import re
 import shutil
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -82,7 +82,7 @@ def retry_seconds(value: str | None, attempt: int) -> float:
             delay = float(value)
         except ValueError:
             try:
-                delay = (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()
+                delay = (parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds()
             except (ValueError, TypeError, OverflowError):
                 delay = 2**attempt
         if 0 <= delay <= 86400:
@@ -109,7 +109,7 @@ class Downloader:
         self.resumes = 0
         self._usage = sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
 
-    async def __aenter__(self) -> "Downloader":
+    async def __aenter__(self) -> Downloader:
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -264,14 +264,14 @@ class Downloader:
                         self._usage -= target.stat().st_size
                     part.replace(target)
                     write_json(info, {"url": url, "sha256": digest, "size": size,
-                        "etag": etag, "fetched_at": datetime.now(timezone.utc).isoformat()})
+                        "etag": etag, "fetched_at": datetime.now(UTC).isoformat()})
                     part_info.unlink(missing_ok=True)
                     return target
             except OSError as exc:
                 if exc.errno in {errno.ENOSPC, errno.EDQUOT}:
                     raise DiskLimitError('Filesystem space/quota exhausted; acquisition stopped') from exc
                 raise
-            except (httpx.TransportError, asyncio.TimeoutError) as exc:
+            except (TimeoutError, httpx.TransportError) as exc:
                 error = exc
                 if attempt < self.options.attempts:
                     await asyncio.sleep(delay)

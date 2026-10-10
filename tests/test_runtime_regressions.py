@@ -5,7 +5,7 @@ import asyncio
 import re
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -162,7 +162,7 @@ def test_container_start_probe_accounts_for_kernel_rounding(tmp_path, monkeypatc
     (tmp_path / '1' / 'stat').write_text('1 (name with ) parentheses) ' + ' '.join(fields))
     (tmp_path / 'stat').write_text('cpu 1 2 3\nbtime 1000\n')
     monkeypatch.setattr(healthcheck.os, 'sysconf', lambda name: 100, raising=False)
-    assert healthcheck.container_started_at(tmp_path) == datetime.fromtimestamp(1003.5, timezone.utc)
+    assert healthcheck.container_started_at(tmp_path) == datetime.fromtimestamp(1003.5, UTC)
 
 
 @pytest.mark.asyncio

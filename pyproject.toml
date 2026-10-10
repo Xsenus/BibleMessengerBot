@@ -17,5 +17,6 @@ line-length = 100
 exclude = ["cache", "backups"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
-ignore = ["E501"]
+select = ["E", "F", "B", "UP", "SIM"]
+# The codebase uses a deliberately dense one-line style; formatting rules are not enforced.
+ignore = ["E501", "E701", "E702", "E402", "E741", "SIM117", "SIM102", "SIM105"]

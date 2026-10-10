@@ -6,10 +6,11 @@ from contextlib import asynccontextmanager
 from html import escape
 from typing import Annotated,Any
 from fastapi import Depends,FastAPI,Header,HTTPException,Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse,PlainTextResponse
 from fastapi.security import HTTPBasic,HTTPBasicCredentials
 from app.config import Settings
 from app.db import close_pool,create_pool,wait_for_database,acquire_runtime_guard
+from app.services.metrics import collect as collect_metrics
 from app.services.verification import verify_database
 
 settings = Settings.from_env(require_bot_token=False)
@@ -92,6 +93,15 @@ async def api_stats(response: Response) -> dict[str,Any]:
     """Read-only API; no CSRF-capable form mutation endpoints are exposed."""
     response.headers['Cache-Control'] = 'no-store'
     return await operator_data()
+
+
+@app.get('/metrics',response_class=PlainTextResponse,dependencies=[Depends(require_basic)])
+async def metrics() -> PlainTextResponse:
+    """Prometheus text format (HTTP basic auth: user admin, password ADMIN_API_KEY); derived from durable tables."""
+    pool = await create_pool(settings)
+    async with pool.acquire() as connection:
+        body = (await collect_metrics(connection)).render()
+    return PlainTextResponse(body,media_type='text/plain; version=0.0.4',headers={'Cache-Control':'no-store'})
 
 
 @app.get('/admin',response_class=HTMLResponse,dependencies=[Depends(require_basic)])

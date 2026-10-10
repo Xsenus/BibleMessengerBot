@@ -19,7 +19,7 @@ from app.catalog.source import SOURCE_REVISION
 from app.catalog.policy import decide_license
 from app.services.locks import lock_key
 from app.catalog.report import selection_summary
-from app.catalog.selector import SelectionItem, SelectionResult, select_translations
+from app.catalog.selector import SelectionResult, select_translations
 from app.catalog.source import BibleNlpSource
 from app.config import Settings
 

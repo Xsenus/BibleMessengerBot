@@ -1,12 +1,9 @@
 """Three real acquisition adapters, each with separate identifiers and attribution."""
 from __future__ import annotations
 
-import json
 import os
 import re
 from dataclasses import replace
-from pathlib import Path
-from typing import Any
 
 from app.catalog.audit import audit_corpus
 from app.catalog.models import DownloadedTranslation, LicenseInfo, TranslationMeta
@@ -16,7 +13,7 @@ from app.catalog.multisource.transport import Downloader, HttpStatusError, diges
 from app.catalog.multisource.types import Candidate, Prepared, safe_id
 from app.catalog.profiles import ISO_639_1_TO_3
 from app.catalog.references import pair_verses, parse_reference_lines
-from app.catalog.source import BibleNlpSource, SOURCE_REVISION, _to_date
+from app.catalog.source import BibleNlpSource, SOURCE_REVISION
 
 
 # Source language codes remain distinct: modern/biblical Hebrew and Arabic dialects are not one language.

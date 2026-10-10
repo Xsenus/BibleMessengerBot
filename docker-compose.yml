@@ -212,6 +212,15 @@ services:
     command: [python, -m, app.backup_admin, status]
     volumes: ['./backups:/app/backups']
 
+  alerts:
+    <<: *app
+    profiles: [maintenance]
+    mem_limit: 128m
+    cpus: 0.25
+    restart: 'no'
+    command: [python, -m, app.alerts]
+    depends_on: *ready
+
 volumes:
   prayer_models:
   postgres_data:

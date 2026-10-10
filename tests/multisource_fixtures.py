@@ -1,7 +1,6 @@
 """Synthetic protocol fixtures. These are NOT biblical texts and never enter a production catalog."""
 from __future__ import annotations
 import json
-from dataclasses import replace
 from pathlib import Path
 import httpx
 from app.catalog.multisource.types import Candidate, ImportOptions

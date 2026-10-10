@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from app.services import neural_speech as neural, speech,russian_speech
+from app.services import neural_speech as neural, speech
 
 
 def test_profiles_are_distinct_and_neural_chunks_are_lossless():
