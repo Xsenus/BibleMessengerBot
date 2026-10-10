@@ -23,13 +23,16 @@ from app.services.locks import chat_lock
 from app.services.scheduling import parse_hhmm
 from app.services.subscriptions import create_or_update_subscription,set_enabled
 from app.bot.common import authorize,button,destination,enum_value,register_context,reply  # noqa: F401
+from app.bot.branding import commands_for
 from app.bot.dispatch import run_command
+from app.services import usage
 from app.bot.menus import (  # noqa: F401 - re-exported for tests and callers
     change_language,change_voice,command_target_suffix,daily_confirmation,edition_menu,
     enable_devotions,help_text,language_menu,modes_menu,settings_keyboard,settings_text,status_text,ui_menu,voices_menu)
 
 router = Router(name='localized-destinations')
 LOGGER = logging.getLogger(__name__)
+KNOWN_COMMANDS = frozenset({c.command for c in commands_for('en')}|{'start','help'})
 
 
 @router.message(F.text.startswith('/'))
@@ -49,6 +52,8 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
             await register_context(connection,message.from_user,message.chat,settings,
                 allow_blocked=parsed.name in {'paysupport','donations','terms'})
             locale = await connection.fetchval('SELECT ui_language FROM telegram_chats WHERE telegram_chat_id=$1',message.chat.id)
+            if parsed.name in KNOWN_COMMANDS:
+                await usage.record(connection,'cmd:'+parsed.name,getattr(bot,'platform','telegram'))
             if parsed.name in {'donate','donations','paysupport','terms'}:
                 donation_command = (parsed.name,' '.join(parsed.arguments))
             elif parsed.name=='start' and parsed.arguments==('donate',):
@@ -144,6 +149,7 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
             await register_context(connection,callback.from_user,callback.message.chat,settings)
             chat = await destination(connection,bot,callback.message.chat,callback.from_user.id,chat_id,settings)
             locale = chat['ui_language']
+            await usage.record(connection,'cb:'+action[:24].lower(),getattr(bot,'platform','telegram'))
             if action=='voices':
                 text,markup=voices_menu(chat)
             elif action=='voice':

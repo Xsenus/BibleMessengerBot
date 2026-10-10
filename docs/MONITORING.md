@@ -40,3 +40,14 @@ sudo systemctl daemon-reload && sudo systemctl enable --now bible-messenger-aler
 ```
 
 Разовая проверка: `docker compose --profile maintenance run --rm --no-deps alerts`.
+
+## Анонимная статистика использования
+
+Таблица `usage_events` (миграция 023) хранит только суточные счётчики `день × платформа × событие`
+(`cmd:daily`, `cb:lang` и т. п.). Идентификаторы пользователей, чатов и текст сообщений не сохраняются.
+Топ за 7 дней доступен в метрике `bible_usage_events_7d{platform,event}`; запрос вручную:
+
+```sql
+SELECT platform, event, sum(count) FROM usage_events
+WHERE day > current_date - 7 GROUP BY 1, 2 ORDER BY 3 DESC;
+```

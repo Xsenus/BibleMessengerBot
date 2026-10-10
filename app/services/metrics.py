@@ -64,4 +64,8 @@ async def collect(connection: Any, monthly_budget_usd: Decimal | float = 10) -> 
         'SELECT kind,EXTRACT(EPOCH FROM now()-max(verified_at)) AS age FROM cloud_backup_receipts GROUP BY kind')}
     for kind, age in backups.items():
         out.add('bible_backup_age_seconds', 'Seconds since the last verified cloud backup', age, {'kind': kind})
+    for row in await connection.fetch("""SELECT platform,event,sum(count)::bigint AS n FROM usage_events
+            WHERE day>(now() AT TIME ZONE 'UTC')::date-7 GROUP BY platform,event ORDER BY n DESC LIMIT 30"""):
+        out.add('bible_usage_events_7d', 'Anonymous feature usage during the last 7 days', row['n'],
+                {'platform': row['platform'], 'event': row['event']})
     return out

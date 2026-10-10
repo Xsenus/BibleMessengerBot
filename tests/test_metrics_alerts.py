@@ -10,6 +10,8 @@ from app.services.metrics import Exposition, collect
 
 class FakeConnection:
     async def fetch(self, sql, *args):
+        if 'usage_events' in sql:
+            return []
         if 'FROM delivery_log GROUP BY status' in sql:
             return [{'status': 'sent', 'n': 5}, {'status': 'uncertain', 'n': 1}]
         if 'service_heartbeats' in sql:
@@ -79,4 +81,10 @@ async def test_collect_runs_against_real_schema(db):
     assert 'bible_chats_active 1' in text
     assert 'bible_service_heartbeat_age_seconds{service="worker"}' in text
     assert 'bible_image_budget_spent_usd 0' in text
+    from app.services import usage
+    await usage.record(db, 'cmd:daily')
+    await usage.record(db, 'cmd:daily')
+    await usage.record(db, 'Not Valid!')
+    assert await usage.top_events(db) == [{'platform': 'telegram', 'event': 'cmd:daily', 'total': 2}]
+    assert 'bible_usage_events_7d{event="cmd:daily",platform="telegram"} 2' in (await collect(db, 10)).render()
     assert evaluate(samples_from(await collect(db, 10))) == {}
