@@ -1,5 +1,6 @@
 """Passage addressing, image boundaries and opt-in daily delivery contracts."""
 
+from tests.bot_patch import patch_bot
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -139,12 +140,12 @@ async def test_photo_timeout_remains_uncertain_and_is_not_automatically_replayed
 
 async def test_daily_command_creates_explicit_schedule_in_destination_timezone(monkeypatch):
     chat = {"telegram_chat_id": 101, "ui_language": "ru", "timezone": "Asia/Novosibirsk"}
-    monkeypatch.setattr(handlers, "destination", AsyncMock(return_value=chat))
+    patch_bot(monkeypatch, "destination", AsyncMock(return_value=chat))
     monkeypatch.setattr(handlers.bible, "chat_translation", AsyncMock(return_value={"id": 2}))
     create = AsyncMock(
         return_value={"send_time": __import__("datetime").time(9), "timezone": "Asia/Novosibirsk"}
     )
-    monkeypatch.setattr(handlers, "create_or_update_subscription", create)
+    patch_bot(monkeypatch, "create_or_update_subscription", create)
     from app.bot.commands import parse_command
 
     text, _ = await handlers.run_command(

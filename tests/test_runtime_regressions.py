@@ -1,6 +1,7 @@
 """Runtime regressions: lost lock sessions, unavailable plans, and authentication."""
 from __future__ import annotations
 
+from tests.bot_patch import patch_bot
 import asyncio
 import re
 from contextlib import asynccontextmanager
@@ -139,8 +140,8 @@ async def test_liveness_does_not_mask_missing_database(monkeypatch):
 async def test_status_resolution_commands_are_copyable_in_private_and_group_chat(monkeypatch, chat_id):
     from app.bot import handlers
     from app.bot.commands import parse_command
-    monkeypatch.setattr(handlers, 'settings_text', AsyncMock(return_value='fixture'))
-    monkeypatch.setattr(handlers, 'list_subscriptions', AsyncMock(return_value=[]))
+    patch_bot(monkeypatch, 'settings_text', AsyncMock(return_value='fixture'))
+    patch_bot(monkeypatch, 'list_subscriptions', AsyncMock(return_value=[]))
     connection = SimpleNamespace(fetch=AsyncMock(side_effect=[[{
         'id': 7, 'status': 'uncertain', 'next_chunk': 0, 'total': 1,
     }],[]]))

@@ -1,5 +1,6 @@
 """Real SQL tests for distinct choices, race-safe budgets and durable generation."""
 
+from tests.bot_patch import patch_bot
 import asyncio
 import os
 from datetime import UTC, date, datetime, time, timedelta
@@ -197,7 +198,7 @@ async def test_time_preserves_distinct_devotional_clocks(db, monkeypatch):
     c, settings, path = db
     await setup(c, path)
     chat = await c.fetchrow("SELECT * FROM telegram_chats WHERE telegram_chat_id=101")
-    monkeypatch.setattr(handlers, "destination", AsyncMock(return_value=chat))
+    patch_bot(monkeypatch, "destination", AsyncMock(return_value=chat))
     message = SimpleNamespace(
         from_user=SimpleNamespace(id=101), chat=SimpleNamespace(type="private")
     )

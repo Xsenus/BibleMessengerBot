@@ -1,3 +1,4 @@
+import os
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -68,6 +69,7 @@ from tests.test_postgres_integration import db as db  # noqa: E402,F401
 from tests.test_postgres_integration import create_destination  # noqa: E402
 
 
+@pytest.mark.skipif(os.getenv('RUN_DB_TESTS') != '1', reason='needs PostgreSQL')
 @pytest.mark.asyncio
 async def test_collect_runs_against_real_schema(db):
     db = db[0]

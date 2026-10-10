@@ -20,3 +20,39 @@ exclude = ["cache", "backups"]
 select = ["E", "F", "B", "UP", "SIM"]
 # The codebase uses a deliberately dense one-line style; formatting rules are not enforced.
 ignore = ["E501", "E701", "E702", "E402", "E741", "SIM117", "SIM102", "SIM105"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+# Ratchet: modules below carry pre-existing findings. Fix one, delete it from the list;
+# every other module (including all new code) is checked by CI.
+
+[[tool.mypy.overrides]]
+module = [
+    "app.bootstrap",
+    "app.bot.donations",
+    "app.bot.dispatch",
+    "app.bot.handlers",
+    "app.catalog.multisource.licenses",
+    "app.catalog.multisource.parsers",
+    "app.catalog.multisource.runner",
+    "app.catalog.multisource.sources",
+    "app.donations_admin",
+    "app.maxbot.bridge",
+    "app.maxbot.transport",
+    "app.services.devotionals",
+    "app.services.illustrations",
+    "app.services.verification",
+]
+ignore_errors = true
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["*/__pycache__/*"]
+
+[tool.coverage.report]
+# Measured 77% on 2026-10-10; raise as coverage grows.
+fail_under = 75
+skip_covered = true

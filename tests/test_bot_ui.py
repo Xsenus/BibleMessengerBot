@@ -1,6 +1,7 @@
 """Native navigation exercises the existing authorization and command contracts."""
 from __future__ import annotations
 
+from tests.bot_patch import patch_bot
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -73,7 +74,7 @@ async def test_blocked_user_cannot_use_keyboard_to_run_actions(monkeypatch):
     run = AsyncMock()
     monkeypatch.setattr(handlers, 'run_command', run)
     response = AsyncMock()
-    monkeypatch.setattr(handlers, 'reply', response)
+    patch_bot(monkeypatch, 'reply', response)
     await handlers.private_text_handler(message(main_keyboard('ru').keyboard[0][0].text), None,
         pool_for(connection), SimpleNamespace(default_timezone='UTC'))
     run.assert_not_awaited()
@@ -93,7 +94,7 @@ async def test_prompt_commands_work_without_telegram_requests(monkeypatch, comma
     chat = {'telegram_chat_id': 101, 'ui_language': 'ru', 'timezone': 'UTC'}
     connection = SimpleNamespace(execute=AsyncMock(), fetchrow=AsyncMock(return_value=chat))
     bot = SimpleNamespace(get_chat=AsyncMock(), get_me=AsyncMock(), get_chat_member=AsyncMock())
-    monkeypatch.setattr(handlers, 'upsert_chat', AsyncMock())
+    patch_bot(monkeypatch, 'upsert_chat', AsyncMock())
     text, markup = await handlers.run_command(connection, bot, SimpleNamespace(default_timezone='UTC'),
         message(command), parse_command(command))
     assert expected in text and markup is None
@@ -105,7 +106,7 @@ async def test_prompt_commands_work_without_telegram_requests(monkeypatch, comma
 @pytest.mark.asyncio
 async def test_start_returns_one_welcome_with_collapsible_keyboard(monkeypatch):
     chat = {'telegram_chat_id': 101, 'ui_language': 'ru', 'timezone': 'UTC'}
-    monkeypatch.setattr(handlers, 'destination', AsyncMock(return_value=chat))
+    patch_bot(monkeypatch, 'destination', AsyncMock(return_value=chat))
     monkeypatch.setattr(handlers.bible, 'chat_translation', AsyncMock(return_value={'title': '<Edition> & source'}))
     text, markup = await handlers.run_command(None, None, None, message('/start'), parse_command('/start'))
     assert isinstance(markup, ReplyKeyboardMarkup) and not markup.is_persistent
@@ -124,10 +125,10 @@ async def test_forged_settings_callback_cannot_change_unauthorized_group(monkeyp
         get_chat_member=AsyncMock(side_effect=[SimpleNamespace(status='member'), SimpleNamespace(status='administrator')]),
     )
     connection = SimpleNamespace(execute=AsyncMock())
-    monkeypatch.setattr(handlers, 'register_context', AsyncMock())
+    patch_bot(monkeypatch, 'register_context', AsyncMock())
     configure = AsyncMock()
-    monkeypatch.setattr(handlers, 'configure_chat', configure)
-    monkeypatch.setattr(handlers, 'reply', AsyncMock())
+    patch_bot(monkeypatch, 'configure_chat', configure)
+    patch_bot(monkeypatch, 'reply', AsyncMock())
     monkeypatch.setattr(CallbackQuery, 'answer', AsyncMock())
     await handlers.callback_handler(callback, bot, pool_for(connection), SimpleNamespace(default_timezone='UTC'))
     configure.assert_not_awaited()
@@ -139,7 +140,7 @@ async def test_private_settings_callback_avoids_unnecessary_get_chat(monkeypatch
     chat = message('/settings').chat
     connection = SimpleNamespace(execute=AsyncMock(), fetchrow=AsyncMock(return_value={'telegram_chat_id':101}))
     bot = SimpleNamespace(get_chat=AsyncMock(), get_me=AsyncMock(), get_chat_member=AsyncMock())
-    monkeypatch.setattr(handlers, 'upsert_chat', AsyncMock())
+    patch_bot(monkeypatch, 'upsert_chat', AsyncMock())
     await handlers.destination(connection, bot, chat, 101, 101, SimpleNamespace(default_timezone='UTC'))
     bot.get_chat.assert_not_awaited()
     bot.get_me.assert_not_awaited()
@@ -201,12 +202,12 @@ async def test_optional_cache_failure_does_not_duplicate_delivered_photo(tmp_pat
 ])
 async def test_welcome_photo_only_on_private_start_with_one_response(monkeypatch, command, chat_id, chat_type, photo_ok, photos, replies):
     connection = SimpleNamespace(fetchval=AsyncMock(return_value='ru'))
-    monkeypatch.setattr(handlers, 'register_context', AsyncMock())
+    patch_bot(monkeypatch, 'register_context', AsyncMock())
     monkeypatch.setattr(handlers, 'run_command', AsyncMock(return_value=('Welcome', main_keyboard('ru'))))
     photo = AsyncMock(return_value=photo_ok)
     reply = AsyncMock()
-    monkeypatch.setattr(handlers, 'send_welcome', photo)
-    monkeypatch.setattr(handlers, 'reply', reply)
+    patch_bot(monkeypatch, 'send_welcome', photo)
+    patch_bot(monkeypatch, 'reply', reply)
     await handlers.command_handler(message(command, chat_id=chat_id, chat_type=chat_type), None,
         pool_for(connection), None)
     assert photo.await_count == photos and reply.await_count == replies

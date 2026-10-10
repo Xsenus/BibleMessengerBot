@@ -1,4 +1,5 @@
 """Persisted user choices and context navigation, with fake message transports."""
+from tests.bot_patch import patch_bot
 import os
 from datetime import date
 from types import SimpleNamespace
@@ -22,7 +23,7 @@ async def test_voice_and_hidden_keyboard_persist_without_changing_progress(db,mo
     chat=await create_destination(c,language='ru')
     async def destination(*args):
         return await c.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=101')
-    monkeypatch.setattr(handlers,'destination',destination)
+    patch_bot(monkeypatch, 'destination',destination)
     message=SimpleNamespace(from_user=SimpleNamespace(id=101),chat=SimpleNamespace(id=101,type='private'))
     before=chat['revision']
     _,keyboard=await handlers.run_command(c,None,settings,message,parse_command('/hide_keyboard'))
