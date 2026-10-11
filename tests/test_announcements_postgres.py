@@ -1,6 +1,6 @@
 """Объявления в БД: запуск по расписанию, повторы, пропуск опоздавших, паузы и восстановление."""
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
