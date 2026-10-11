@@ -1,8 +1,6 @@
-"""Edition-native reading units, without rewriting or summarizing Scripture.
+"""Смысловые единицы чтения издания без переписывания и пересказа Писания.
 
-The curated Synodal catalog is deliberately scoped to its exact source edition.
-Other editions use complete native chapters, never a borrowed
-Psalm numbering table. Explicit /read addresses bypass automatic selection.
+Каталог выверенных отрывков относится строго к своему изданию (Синодальный перевод). Другие издания читаются целыми главами, без заимствованной нумерации псалмов. Явные адреса `/read` обходят автоматический выбор.
 """
 
 from __future__ import annotations
@@ -20,6 +18,7 @@ from app.services.formatting import escape
 
 @lru_cache(maxsize=1)
 def catalog():
+    """Каталог выверенных смысловых блоков Синодального перевода (`data/synodal_readings.json`), кэшируется."""
     return json.loads(
         (Path(__file__).resolve().parents[1] / "data/synodal_readings.json").read_text(
             encoding="utf-8"
@@ -28,16 +27,18 @@ def catalog():
 
 
 def curated(edition):
+    """Относится ли издание к тому, для которого составлен каталог блоков (проверка источника и идентификатора)."""
     data = catalog()
     return all(edition.get(k) == data[k] for k in ("source_name", "source_translation_id"))
 
 
 def complete(text):
+    """Заканчивается ли текст законченным предложением (знаки конца, кавычки и скобки допустимы)."""
     return bool(re.search(r'[.!?。！？׃·;;]["»”\')\]]*\s*$', text))
 
 
 def fragment(text):
-    """Roster entries and dependent list items are unsuitable automatic readings."""
+    """Признак «обрывка»: слишком короткий текст, перечни имён и порядковых названий, зависимые пункты списков — такие нельзя брать автоматическим чтением."""
     value = text.strip()
     return (
         len(value) < 20
@@ -53,6 +54,7 @@ def fragment(text):
 
 
 def dependent(text):
+    """Начинается ли текст с зависимого оборота («ибо», «но», «потому», местоимения…), которому нужен предыдущий контекст."""
     return bool(
         re.match(
             r"^(?:ибо\b|но\b|потому\b|посему\b|так что\b|и (?:сказал|не только|ответил)\b|он[аи]?\b|ему\b|их\b|это\b|but\b|for\b|therefore\b|because\b|and (?:he|she|they|not only)\b|he\b|she\b|they\b|this\b)",
@@ -63,12 +65,14 @@ def dependent(text):
 
 
 def attach(anchor, rows):
+    """Прикрепить к опорному стиху строки читаемого отрывка."""
     result = dict(anchor)
     result["reading_rows"] = [dict(r) for r in rows]
     return result
 
 
 def approved_unit(anchor, rows, first, last):
+    """Выверенный блок: строки отрывка плюс при наличии пояснение контекста из каталога."""
     result = attach(anchor, rows)
     key = f"{anchor['book_code']}:{anchor['chapter']}:{first}:{last}"
     result['context_note'] = catalog().get('notes', {}).get(key, {})
@@ -76,6 +80,7 @@ def approved_unit(anchor, rows, first, last):
 
 
 def valid_unit(rows, first, last):
+    """Проверить целостность отрывка: непрерывные стихи от первого до последнего с текстом, размер меньше 18000 байт."""
     if (
         not rows
         or rows[0]["verse"] != first
@@ -91,6 +96,7 @@ def valid_unit(rows, first, last):
 
 
 async def units(connection, edition):
+    """Все выверенные блоки, реально присутствующие и целые в издании (только для Синодального перевода)."""
     if not curated(edition):
         return []
     definitions = [
@@ -117,7 +123,7 @@ async def units(connection, edition):
 
 
 async def contextual(connection, edition, anchor):
-    """Use reviewed meaning boundaries; punctuation alone cannot establish context."""
+    """Смысловой отрывок вокруг стиха: выверенный блок каталога или, для прочих изданий, вся глава целиком (без догадок о границах сцены); если блока нет — None."""
     if not anchor:
         return None
     rows = [
@@ -147,6 +153,7 @@ async def contextual(connection, edition, anchor):
 
 
 async def choose(connection, edition, *, seed=None):
+    """Выбрать отрывок для чтения: из выверенных блоков, а иначе подбором ограниченного числа случайных стихов (24 попытки) с переходом к их смысловому отрывку; при `seed` результат повторяем."""
     available = await units(connection, edition)
     if available:
         index = (
@@ -173,10 +180,12 @@ async def choose(connection, edition, *, seed=None):
 
 
 async def daily(connection, edition, chat_id, day):
+    """Отрывок дня для чата и местной даты (стабильный выбор по зерну)."""
     return await choose(connection, edition, seed=f"reading-v2:{edition['id']}:{chat_id}:{day}")
 
 
 async def render(connection, row, edition, locale):
+    """Оформить отрывок: заголовок «Книга глава:стихи», при наличии пояснение контекста, стихи с номерами и подпись издания."""
     rows = row["reading_rows"]
     name = await bible._book_name(
         connection, row["book_code"], edition["language_code"], edition["id"]

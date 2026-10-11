@@ -20,14 +20,14 @@ class Envelope:
 
 class Checkpoints(Protocol):
     """Контракт хранения контрольных точек: `begin` (пометить начало отправки), `acknowledge` (записать подтверждение), `fail` (записать сбой). Ошибки хранилища должны быть громкими и никогда не означать успех."""
-    async def begin(self, envelope: Envelope) -> bool: ...
-    async def acknowledge(self, envelope: Envelope, message_id: int) -> None: ...
-    async def fail(self, envelope: Envelope, kind: str, retry_after: float) -> None: ...
+    async def begin(self, envelope: Envelope) -> bool: ...  # пометить часть как отправляемую; False — её уже взял другой процесс
+    async def acknowledge(self, envelope: Envelope, message_id: int) -> None: ...  # записать подтверждение и ID сообщения
+    async def fail(self, envelope: Envelope, kind: str, retry_after: float) -> None: ...  # записать сбой и время повтора
 
 
 class Sender(Protocol):
     """Контракт отправителя: известные отказы API — SendError, сетевая неопределённость — `uncertain`."""
-    async def send(self, chat_id: int, text: str | dict, thread_id: int | None) -> int: ...
+    async def send(self, chat_id: int, text: str | dict, thread_id: int | None) -> int: ...  # отправить часть, вернуть ID сообщения
 
 
 async def dispatch_chunk(envelope: Envelope, checkpoints: Checkpoints, sender: Sender) -> str:

@@ -1,4 +1,4 @@
-"""Local, free AI selects prayer intentions from date-checked primary news feeds."""
+"""Молитва дня: локальная бесплатная модель (или правила по ключевым словам) выбирает темы прошений по свежим новостям ООН, а формулировки меняются по датам."""
 from __future__ import annotations
 
 import hashlib
@@ -137,7 +137,7 @@ COMMON_PRAYER = {
 
 
 def with_common_prayer(text, locale):
-    """Fixed petitions cannot be omitted by AI or lost during a news outage."""
+    """Гарантировать наличие обязательных прошений (о близких, здоровье, церкви, дарах, мире и конфликтах): их нельзя потерять ни из-за нейросети, ни из-за недоступных новостей; «Аминь» остаётся в конце."""
     common = COMMON_PRAYER['ru' if locale=='ru' else 'en']
     if common in text:
         return text
@@ -149,6 +149,7 @@ def with_common_prayer(text, locale):
 
 
 def reminder(prayer_at, locale='ru', *, timezone_name='UTC', now=None):
+    """Напоминание перед молитвой: сколько минут осталось и местное время (например, «До совместной молитвы — 38 минут (09:38)»), а в момент молитвы — приглашение остановиться."""
     remaining=math.ceil((prayer_at-(now or datetime.now(UTC))).total_seconds()/60)
     clock=prayer_at.astimezone(ZoneInfo(timezone_name)).strftime('%H:%M')
     if locale=='ru':
@@ -161,6 +162,7 @@ def reminder(prayer_at, locale='ru', *, timezone_name='UTC', now=None):
 
 
 async def nearby_time(connection, sub, day):
+    """Время молитвы, связанное с подпиской: для утра/вечера — его собственное, для остальных режимов — ближайшее время молитвы того же чата в течение часа после чтения."""
     if sub['mode'] in {'morning_verse','evening_verse'}:
         return on_date(day,sub['send_time'],sub['timezone'])
     candidates=await connection.fetch("SELECT * FROM subscriptions WHERE telegram_chat_id=$1 AND is_enabled AND mode IN ('morning_verse','evening_verse')",sub['telegram_chat_id'])
@@ -209,6 +211,7 @@ def parse_feed(data, day, timezone_name, *, now=None):
 
 
 async def fetch_news(day, timezone_name, locale, *, client=None, now=None):
+    """Загрузить заголовки UN News (русская лента, при её пустоте — английская) с ограничением размера; ошибки логируются, результат — свежие записи или пустой список."""
     feeds=('ru','en') if locale=='ru' else ('en',)
     owned=client is None
     client=client or httpx.AsyncClient(timeout=20,follow_redirects=False)
@@ -238,7 +241,7 @@ async def fetch_news(day, timezone_name, locale, *, client=None, now=None):
 
 
 async def intentions(news, *, client=None):
-    """Only a local model is allowed. No key, billing or paid fallback exists."""
+    """Спросить локальную модель, какие темы (до трёх из фиксированного списка) подходят к заголовкам; заголовки — недоверенные данные, ответ строго проверяется (ValueError при неверном), адрес модели разрешён только локальный."""
     endpoint=os.getenv('PRAYER_AI_URL','http://prayer-ai:8080')
     url=urlsplit(endpoint)
     if url.scheme!='http' or url.hostname not in {'prayer-ai','127.0.0.1','localhost'} or url.username or url.query or url.fragment:
@@ -359,6 +362,7 @@ async def brief(connection, day, timezone_name, slot, locale):
 
 
 def invitation(prepared, locale, clock):
+    """Оформить приглашение на молитву: заголовок, короткое вступление и текст молитвы (источники новостей не показываются)."""
     is_ru=locale=='ru'
     title='🕊 Давайте помолимся вместе' if is_ru else '🕊 Let us pray together'
     intro='Оставим на минуту суету и обратим сердце к Богу. Можно произнести эти слова или помолиться своими.' if is_ru else 'Pause for a moment and turn your heart to God. Use these words or pray in your own words.'
@@ -366,7 +370,7 @@ def invitation(prepared, locale, clock):
 
 
 async def prepare_due(connection, *, now=None):
-    """Prepare invitations in advance; media and a late reading never delay prayer."""
+    """Заранее (за 30 минут) подготовить приглашения на молитву: проверить актуальность подписки и чата, составить или найти текст молитвы и поставить задание в очередь; просроченные и отменённые события закрываются."""
     from app.worker.delivery import insert_payload
     from app.services import bible
     current=now or datetime.now(UTC)
@@ -408,7 +412,7 @@ async def prepare_due(connection, *, now=None):
 
 
 async def plan(connection, *, now=None):
-    """Prayer still happens if reading was missed or enabled after the hour."""
+    """Запланировать молитву на ближайший день для включённых утренних и вечерних подписок (молитва придёт, даже если чтение пропущено или подписка включена после начала часа)."""
     from app.services import artwork, bible, devotionals
     from app.services.scheduling import next_occurrence
     current=now or datetime.now(UTC)
@@ -435,7 +439,7 @@ async def plan(connection, *, now=None):
 
 
 async def artwork_for_send(connection, delivery):
-    """Use prepared artwork if available, without spending or waiting at prayer time."""
+    """К моменту отправки подставить в приглашение готовую картинку (без новых платных запросов и ожидания) и актуальный текст молитвы."""
     progress=json.loads(delivery['progress']) if isinstance(delivery['progress'],str) else delivery['progress']
     image=await connection.fetchval("""SELECT i.id FROM prayer_occurrences p JOIN verse_illustrations i ON i.id=p.image_id
         WHERE p.id=$1 AND i.status='ready'""",progress.get('occurrence_id'))

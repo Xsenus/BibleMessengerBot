@@ -150,6 +150,7 @@ def native_audit(metadata: TranslationMeta, records: list[Record], numbering: st
     nt_rows = sum(1 for r in records if r[0] in NT and not r[4])
     core_rows = sum(1 for r in records if r[0] in CORE and not r[4])
     def covered(books: list[str]) -> bool:
+        """Все ли главы перечисленных книг (по независимому порогу) присутствуют в издании."""
         return all(set(range(1,CHAPTER_FLOOR[b]+1)) <= actual[b] for b in books)
     nt_complete = set(NT)<=set(actual) and covered(NT) and nt_rows>=6000
     full = set(actual) >= CORE and covered(OT+NT) and nt_complete and core_rows>=25000

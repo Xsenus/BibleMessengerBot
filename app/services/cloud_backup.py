@@ -1,4 +1,4 @@
-"""Private, immutable S3 copies with read-back verification and encrypted DB dumps."""
+"""Приватные неизменяемые копии в S3 с проверкой чтением обратно и шифрование дампов БД."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ PREFIX = "bible-messenger/v1/"
 
 @dataclass(frozen=True)
 class CloudSettings:
+    """Настройки облачного хранилища S3: адрес, корзина, ключи доступа, ключ шифрования и регион (секреты скрыты из repr)."""
     endpoint: str
     bucket: str
     access_key: str = field(repr=False)
@@ -31,6 +32,7 @@ class CloudSettings:
 
     @classmethod
     def from_env(cls):
+        """Прочитать настройки из S3_* и BACKUP_ENCRYPTION_KEY; адрес обязан быть HTTPS-источником без пути, при заданном адресе нужны корзина и ключи."""
         s = cls(
             os.getenv("S3_ENDPOINT", ""),
             os.getenv("S3_BUCKET", ""),
@@ -56,9 +58,11 @@ class CloudSettings:
 
     @property
     def enabled(self):
+        """Облачное копирование включено, если заданы адрес и корзина."""
         return bool(self.endpoint and self.bucket)
 
     def client(self):
+        """Создать клиент S3 (подпись v4, адресация по пути, повторы, тайм-ауты)."""
         return boto3.client(
             "s3",
             endpoint_url=self.endpoint,
@@ -78,6 +82,7 @@ class CloudSettings:
 
 
 def digest_file(path):
+    """SHA-256 файла блоками по 1 МБ."""
     digest = hashlib.sha256()
     with Path(path).open("rb") as f:
         while block := f.read(1024 * 1024):
@@ -86,6 +91,7 @@ def digest_file(path):
 
 
 def encryption_bytes(value):
+    """Проверить и получить 32-байтовый ключ шифрования из 64 шестнадцатеричных символов."""
     try:
         key = bytes.fromhex(value)
     except ValueError as e:
@@ -96,6 +102,7 @@ def encryption_bytes(value):
 
 
 def encrypt_file(source, target, key):
+    """Зашифровать файл AES-256-GCM (заголовок BMBK1 + nonce + данные + тег); файл создаётся с правами 600 и не перезаписывается."""
     nonce = secrets.token_bytes(12)
     cipher = Cipher(algorithms.AES(encryption_bytes(key)), modes.GCM(nonce)).encryptor()
     target = Path(target)
@@ -111,6 +118,7 @@ def encrypt_file(source, target, key):
 
 
 def decrypt_file(source, target, key):
+    """Расшифровать резервную копию с проверкой формата, целостности и тега; результат пишется во временный файл и атомарно переименовывается, существующий файл не перезаписывается."""
     source, target = Path(source), Path(target)
     temporary = target.with_name(target.name + ".part")
     if target.exists() or temporary.exists():
@@ -150,6 +158,7 @@ def decrypt_file(source, target, key):
 def upload_checked(
     client, bucket, key, data, *, content_type="application/octet-stream", metadata=None
 ):
+    """Загрузить объект в S3 только внутри префикса приложения и проверить: размер и SHA-256 в метаданных, затем чтение обратно с пересчётом хеша. Возвращает квитанцию (ключ, хеш, размер)."""
     if not key.startswith(PREFIX):
         raise ValueError("Object is outside application prefix")
     if isinstance(data, Path):
@@ -208,6 +217,7 @@ def upload_checked(
 
 
 async def backup_images(connection, settings: CloudSettings, *, limit=20):
+    """Скопировать в S3 готовые картинки, ещё не сохранённые (до `limit`): изображение по хешу и манифест с координатами стиха и происхождением; после проверки отметить в БД и записать квитанцию."""
     import asyncio
 
     if not settings.enabled:
@@ -269,6 +279,7 @@ async def backup_images(connection, settings: CloudSettings, *, limit=20):
 
 
 async def record_receipt(connection, kind, receipt):
+    """Записать (или обновить время проверки) квитанцию о резервной копии."""
     await connection.execute(
         """INSERT INTO cloud_backup_receipts(kind,object_key,sha256,byte_count)
         VALUES($1,$2,$3,$4) ON CONFLICT(object_key) DO UPDATE SET verified_at=now()""",
@@ -280,7 +291,7 @@ async def record_receipt(connection, kind, receipt):
 
 
 def prune_local(directory: Path, *, keep=7, maximum_bytes=4 * 1024**3):
-    """Only our own regular snapshot files; retain the newest snapshot at minimum."""
+    """Удалить старые локальные дампы: сохраняются новейший и до `keep` последних в пределах размера; трогаются только собственные обычные файлы с известным именем."""
     import re
 
     root = directory.resolve()
@@ -313,6 +324,7 @@ def prune_local(directory: Path, *, keep=7, maximum_bytes=4 * 1024**3):
 
 
 async def upload_database(connection, settings: CloudSettings, path: Path):
+    """Зашифровать дамп PostgreSQL (формат custom, заголовок PGDMP), загрузить его в S3 с проверкой и записать квитанцию."""
     import asyncio
 
     if not settings.enabled:

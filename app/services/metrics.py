@@ -1,7 +1,6 @@
-"""Operational metrics in Prometheus text format, computed from PostgreSQL on demand.
+"""Метрики для оператора в формате Prometheus, вычисляемые из PostgreSQL по запросу.
 
-No extra dependency and no in-process counters: every number is derived from durable
-tables, so all services (and restarts) report consistent values.
+Счётчиков в памяти процессов нет: все числа берутся из постоянных таблиц, поэтому одинаковы для всех служб и переживают перезапуск.
 """
 from __future__ import annotations
 
@@ -13,18 +12,21 @@ PROVIDERS = ('openai', 'gemini', 'bfl', 'ideogram', 'stability')
 
 
 def _label(value: Any) -> str:
+    """Подготовить значение метки: экранировать обратную косую, кавычки и переводы строк."""
     return str(value).replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
 
 
 class Exposition:
-    """Minimal text-format writer (HELP/TYPE emitted once per metric)."""
+    """Составитель текста метрик: описания HELP/TYPE выводятся один раз на метрику."""
 
     def __init__(self) -> None:
+        """Подготовить пустой список строк и множество уже объявленных метрик."""
         self.lines: list[str] = []
         self._declared: set[str] = set()
 
     def add(self, name: str, help_text: str, value: float | int | Decimal, labels: dict[str, Any] | None = None,
             kind: str = 'gauge') -> None:
+        """Добавить значение метрики с метками и (при первом добавлении) строки HELP и TYPE."""
         if name not in self._declared:
             self._declared.add(name)
             self.lines += [f'# HELP {name} {help_text}', f'# TYPE {name} {kind}']
@@ -32,10 +34,12 @@ class Exposition:
         self.lines.append(f'{name}{tag} {float(value):.6g}')
 
     def render(self) -> str:
+        """Собрать текст метрик целиком (строки через перевод строки, с завершающим переводом)."""
         return '\n'.join(self.lines) + '\n'
 
 
 async def collect(connection: Any, monthly_budget_usd: Decimal | float = 10) -> Exposition:
+    """Собрать метрики: доставки по статусам и возраст самой старой неотправленной, отправленные за час и неудачные за сутки, сигналы жизни служб, число чатов и подписок, расход бюджета картинок за месяц, задания и блокировки провайдеров, возраст бэкапов и анонимное использование функций за 7 дней."""
     out = Exposition()
     counts = {r['status']: r['n'] for r in await connection.fetch('SELECT status,count(*) AS n FROM delivery_log GROUP BY status')}
     for status in DELIVERY_STATUSES:

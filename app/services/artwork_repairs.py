@@ -1,4 +1,4 @@
-"""Quarantine defective assets and edit their original messages through the outbox."""
+"""Карантин бракованных картинок и замена их правкой исходных сообщений через общую очередь отправки."""
 
 from __future__ import annotations
 
@@ -12,14 +12,17 @@ IDENTITY = ("translation_id", "book_code", "chapter", "verse", "text_sha256", "a
 
 
 def decoded(value):
+    """Привести JSON-значение из БД к Python-объекту."""
     return json.loads(value) if isinstance(value, str) else value
 
 
 def clean_prayer_label(text):
+    """Убрать из текста молитвы техническую строку «ЧЧ:ММ · часовой пояс» (один раз)."""
     return re.sub(r"\n<i>\d{2}:\d{2} · [A-Za-z_+-]+/[A-Za-z_+\-/]+</i>(?=\n)", "", text, count=1)
 
 
 async def quarantine(connection, image_id, reason):
+    """Поместить картинку в карантин: статус `failed`, запись о необходимой замене и отметка ручной проверки."""
     async with connection.transaction():
         await connection.execute(
             "UPDATE verse_illustrations SET status='failed',updated_at=now() WHERE id=$1", image_id
@@ -39,7 +42,7 @@ async def quarantine(connection, image_id, reason):
 
 
 async def replace(connection, old_id, new_id, reason):
-    """Retain historical sends and paid attempts. Repeated calls cannot duplicate edits."""
+    """Заменить картинку новой с тем же неизменным источником (нужно одобрение качества): обновить планы и ожидающие запросы и поставить в очередь правки всех уже отправленных исходных сообщений (в том числе молитв без карточек). Повторные вызовы дублей правок не создают. Возвращает идентификаторы заданий."""
     from app.worker.delivery import insert_payload
 
     old = await connection.fetchrow("SELECT * FROM verse_illustrations WHERE id=$1", old_id)
@@ -167,7 +170,7 @@ async def replace(connection, old_id, new_id, reason):
 
 
 async def clean_sent_prayers(connection):
-    """Remove technical timezone labels from original prayer invitations, once."""
+    """Убрать технические подписи часового пояса из уже отправленных приглашений на молитву правкой исходных сообщений (один раз на сообщение)."""
     from app.worker.delivery import insert_payload
 
     identifiers = []
