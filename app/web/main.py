@@ -8,11 +8,12 @@ import secrets
 from contextlib import asynccontextmanager
 from html import escape
 from typing import Annotated,Any
-from fastapi import Depends,FastAPI,Header,HTTPException,Response
-from fastapi.responses import HTMLResponse,PlainTextResponse
+from fastapi import Depends,FastAPI,Header,HTTPException,Request,Response
+from fastapi.responses import HTMLResponse,JSONResponse,PlainTextResponse
 from fastapi.security import HTTPBasic,HTTPBasicCredentials
 from app.config import Settings
 from app.db import close_pool,create_pool,wait_for_database,acquire_runtime_guard
+from app.services.errors import UserError
 from app.services.metrics import collect as collect_metrics
 from app.services.verification import verify_database
 
@@ -52,6 +53,17 @@ def require_key(x_admin_key: Annotated[str | None,Header()] = None) -> None:
     """Зависимость FastAPI: требует ключ администратора в заголовке `X-Admin-Key` (не в строке запроса)."""
     if not x_admin_key or not valid_key(x_admin_key):
         raise HTTPException(401,'Authentication required')
+
+
+from app.web.api import build_router  # noqa: E402  (нужны require_key и settings, определённые выше)
+
+@app.exception_handler(UserError)
+async def user_error(_request: Request, error: UserError) -> JSONResponse:
+    """Ожидаемая ошибка сервиса → 403/404/422 с кодом без внутренних подробностей."""
+    return JSONResponse({'detail': error.key}, status_code={'forbidden': 403, 'no_result': 404}.get(error.key, 422))
+
+
+app.include_router(build_router(require_key, lambda: create_pool(settings)))
 
 
 @app.get('/health')
