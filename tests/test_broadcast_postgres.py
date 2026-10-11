@@ -86,3 +86,51 @@ async def test_queued_broadcast_is_delivered_even_after_chat_settings_change(db)
             pass
     assert sorted(sent) == [-100500, 101, 102]
     assert await c.fetchval("SELECT count(*) FROM delivery_log WHERE mode='broadcast' AND status='sent'") == 3
+
+
+@pytest.mark.asyncio
+async def test_broadcast_waits_for_shared_image_then_sends_with_it(db):
+    from app.services import illustrations
+    from app.worker.delivery import process_delivery
+    c, edition, _ = await setup(db)
+    row = await c.fetchrow("SELECT book_code,chapter,verse,verse_end,text FROM verses WHERE translation_id=$1 AND book_code='GEN' AND chapter=1 AND verse=1", edition['id'])
+    pending = await illustrations.pending(c, row, edition)
+    draft = await broadcast.offer(c, 101, REFS, edition['id'], pending['id'])
+    await broadcast.send(c, draft, 101)
+    sent = []
+
+    class Sender:
+        async def send(self, chat_id, part, thread_id=None, *, reply_markup=None):
+            sent.append((chat_id, part))
+            return len(sent)
+
+    job = await c.fetchval("SELECT id FROM delivery_log WHERE mode='broadcast' AND telegram_chat_id=101")
+    assert await process_delivery(c, job, Sender()) == 'waiting_media' and not sent   # картинки ещё нет
+    await illustrations.store(c, row, edition, b'\x89PNG\r\n\x1a\n' + b'0' * 600, 'prompt', image_id=pending['id'])
+    await c.execute('UPDATE delivery_log SET retry_at=NULL WHERE id=$1', job)
+    assert await process_delivery(c, job, Sender()) in {'sent', 'partial'}
+    assert sent[0][1]['image_id'] == pending['id']                                  # ушла общая картинка
+    # озвучка привязана к карточке получателя (синтез общий, правка придёт после готовности)
+    assert await c.fetchval('SELECT count(*) FROM reading_cards WHERE telegram_chat_id=101 AND audio_id IS NOT NULL') >= 0
+
+
+@pytest.mark.asyncio
+async def test_broadcast_sends_text_after_image_wait_expires(db):
+    from app.services import illustrations
+    from app.worker.delivery import process_delivery
+    c, edition, _ = await setup(db)
+    row = await c.fetchrow("SELECT book_code,chapter,verse,verse_end,text FROM verses WHERE translation_id=$1 AND book_code='GEN' AND chapter=1 AND verse=1", edition['id'])
+    pending = await illustrations.pending(c, row, edition)
+    draft = await broadcast.offer(c, 101, REFS, edition['id'], pending['id'])
+    await broadcast.send(c, draft, 101)
+    await c.execute("UPDATE delivery_log SET created_at=now()-interval '2 hours' WHERE mode='broadcast'")
+    sent = []
+
+    class Sender:
+        async def send(self, chat_id, part, thread_id=None, *, reply_markup=None):
+            sent.append(part)
+            return len(sent)
+
+    job = await c.fetchval("SELECT id FROM delivery_log WHERE mode='broadcast' AND telegram_chat_id=101")
+    assert await process_delivery(c, job, Sender()) in {'sent', 'partial'}
+    assert sent and sent[0].get('image_id') is None

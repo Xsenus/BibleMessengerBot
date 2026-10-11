@@ -45,16 +45,18 @@ def refs_from_reference(reference: Any, book: str) -> list[dict]:
     return [dict(book=book, chapter=reference.chapter, first=reference.first, last=reference.last)]
 
 
-async def offer(connection: Any, actor_id: int, refs: list[dict], translation_id: int | None) -> int | None:
+async def offer(connection: Any, actor_id: int, refs: list[dict], translation_id: int | None,
+                image_id: int | None = None) -> int | None:
     """Если автор команды — владелец бота, создать черновик рассылки и запомнить его номер.
 
-    Не владельцу и пустому результату ничего не предлагается. Возвращает номер черновика или None.
+    Не администратору и пустому результату ничего не предлагается. `image_id` — картинка, созданная (или заказанная)
+    при поиске: она уйдёт всем получателям. Возвращает номер черновика или None.
     """
     if not refs or not await is_admin(connection, actor_id):
         return None
     draft = await connection.fetchval(
-        'INSERT INTO broadcasts(created_by,refs,source_translation_id) VALUES($1,$2::jsonb,$3) RETURNING id',
-        actor_id, json.dumps(refs[:MAX_REFS]), translation_id)
+        'INSERT INTO broadcasts(created_by,refs,source_translation_id,image_id) VALUES($1,$2::jsonb,$3,$4) RETURNING id',
+        actor_id, json.dumps(refs[:MAX_REFS]), translation_id, image_id)
     _offer.set(draft)
     return draft
 
@@ -113,7 +115,19 @@ async def cancel(connection: Any, draft_id: int, actor_id: int) -> None:
     await connection.execute("UPDATE broadcasts SET status='cancelled',updated_at=now() WHERE id=$1 AND status='draft'", draft_id)
 
 
-async def render_for(connection: Any, edition: Any, refs: list[dict], locale: str) -> Any | None:
+async def image_of(connection: Any, text: Any) -> int | None:
+    """Картинка результата поиска: готовая или заказанная (ожидающая генерации); None, если её нет."""
+    image = getattr(text, 'image_id', None)
+    if image:
+        return image
+    request = getattr(text, 'request_id', None)
+    if request:
+        return await connection.fetchval('SELECT image_id FROM illustration_requests WHERE id=$1', request)
+    return None
+
+
+async def render_for(connection: Any, edition: Any, refs: list[dict], locale: str,
+                     image_id: int | None = None) -> Any | None:
     """Текст рассылки в издании получателя; если любого из отрывков в издании нет — None."""
     from app.services.message_languages import combine
     pieces = []
@@ -124,7 +138,13 @@ async def render_for(connection: Any, edition: Any, refs: list[dict], locale: st
             return None
         reference = passage.Reference(item['book'], item['chapter'], item['first'], item['last'])
         pieces.append(await passage.render(connection, edition, (reference, item['book'], rows), locale))
-    return pieces[0] if len(pieces) == 1 else combine(pieces)
+    text = pieces[0] if len(pieces) == 1 else combine(pieces)
+    if image_id is None:
+        return text
+    from app.services.illustrations import ReadingText
+    from app.services.message_languages import inherit
+    # Карточка чтения с общей картинкой: к ней же привяжутся кнопки языков и озвучка.
+    return inherit(ReadingText(str(text), image_id, None), text)
 
 
 async def send(connection: Any, draft_id: int, actor_id: int, max_length: int = 3900) -> dict[str, int]:
@@ -149,12 +169,12 @@ async def send(connection: Any, draft_id: int, actor_id: int, max_length: int = 
             async with chat_lock(connection, target['telegram_chat_id']), connection.transaction():
                 chat = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1', target['telegram_chat_id'])
                 edition = await bible.chat_translation(connection, target['telegram_chat_id'])
-                text = await render_for(connection, edition, refs, chat['ui_language']) if edition and chat['is_active'] else None
+                text = await render_for(connection, edition, refs, chat['ui_language'], draft['image_id']) if edition and chat['is_active'] else None
                 if text is None:
                     skipped += 1
                     continue
                 await insert_payload(connection, chat, edition, text, f'broadcast:{draft_id}', 'broadcast',
-                                     {'kind': 'broadcast', 'broadcast_id': draft_id}, max_length=max_length)
+                                     {'kind': 'broadcast', 'broadcast_id': draft_id, 'image_id': draft['image_id']}, max_length=max_length)
                 queued += 1
         except Exception as error:
             skipped += 1
@@ -166,3 +186,31 @@ async def send(connection: Any, draft_id: int, actor_id: int, max_length: int = 
         "INSERT INTO operator_events(actor_id,action,details) VALUES($1,'broadcast',$2::jsonb)", actor_id,
         json.dumps({'broadcast_id': draft_id, 'recipients': len(targets), 'queued': queued, 'skipped': skipped}))
     return {'recipients': len(targets), 'queued': queued, 'skipped': skipped}
+
+
+IMAGE_WAIT = 1800  # секунд: сколько ждать картинку, прежде чем отправить текст без неё
+
+
+async def media_state(connection: Any, delivery: Any) -> str:
+    """Готовность картинки задания рассылки: `ready` (можно отправлять), `wait` (картинка ещё создаётся) или `strip`
+    (срок ожидания вышел — отправить без картинки). Задания без картинки всегда `ready`."""
+    progress = delivery['progress']
+    progress = json.loads(progress) if isinstance(progress, str) else progress
+    image = (progress or {}).get('image_id')
+    if not image:
+        return 'ready'
+    status = await connection.fetchval('SELECT status FROM verse_illustrations WHERE id=$1', image)
+    if status == 'ready':
+        return 'ready'
+    waited = await connection.fetchval('SELECT EXTRACT(EPOCH FROM now()-$1)', delivery['created_at'])
+    return 'strip' if status in {'failed', None} or waited > IMAGE_WAIT else 'wait'
+
+
+async def strip_image(connection: Any, delivery: Any) -> None:
+    """Убрать картинку из частей задания (текст рассылки уходит без неё)."""
+    chunks = delivery['chunks']
+    chunks = json.loads(chunks) if isinstance(chunks, str) else chunks
+    for chunk in chunks:
+        if isinstance(chunk, dict):
+            chunk['image_id'] = None
+    await connection.execute('UPDATE delivery_log SET chunks=$2::jsonb WHERE id=$1', delivery['id'], json.dumps(chunks))

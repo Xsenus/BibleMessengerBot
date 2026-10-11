@@ -261,7 +261,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
                 text = await illustrations.decorate(connection,text,result[2][0],edition,chat=chat,
                     request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id)
             # Владельцу бота предлагается разослать найденный отрывок всем (кнопка появится под результатом).
-            await broadcast.offer(connection,user.id,broadcast.refs_from_reference(result[0],result[1]),edition['id'])
+            await broadcast.offer(connection,user.id,broadcast.refs_from_reference(result[0],result[1]),edition['id'],await broadcast.image_of(connection,text))
             return text,None
         if name=='read':
             return search_prompt(locale),None
@@ -273,11 +273,13 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         raise UserError('invalid')
     if row:
         text = await bible.render_verse(connection,row,edition,ui_language=locale)
+        decorated = await illustrations.decorate(connection,text,row,edition,chat=chat,
+            request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id)
         shown = row.get('reading_rows') or [row]
         await broadcast.offer(connection,user.id,[dict(book=row['book_code'],chapter=row['chapter'],
-            first=shown[0]['verse'],last=shown[-1].get('verse_end') or shown[-1]['verse'])],edition['id'])
-        return await illustrations.decorate(connection,text,row,edition,chat=chat,
-            request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id),None
+            first=shown[0]['verse'],last=shown[-1].get('verse_end') or shown[-1]['verse'])],edition['id'],
+            await broadcast.image_of(connection,decorated))
+        return decorated,None
     return tr(locale,'no_result'),None
 
 

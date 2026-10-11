@@ -285,6 +285,16 @@ async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> st
         if row['mode']=='prayer' and datetime.now(UTC)>row['scheduled_for']+timedelta(minutes=3):
             await connection.execute("UPDATE delivery_log SET status='skipped',error_code='prayer_expired',updated_at=now() WHERE id=$1",delivery_id)
             return 'expired'
+        if row['mode']=='broadcast':
+            # Рассылка ждёт общую картинку (создана при поиске администратора), но не дольше установленного срока.
+            from app.services import broadcast
+            state=await broadcast.media_state(connection,row)
+            if state=='wait':
+                await connection.execute("UPDATE delivery_log SET retry_at=now()+interval '30 seconds' WHERE id=$1 AND status IN ('pending','retry')",delivery_id)
+                return 'waiting_media'
+            if state=='strip':
+                await broadcast.strip_image(connection,row)
+                row=dict(row,chunks=(await connection.fetchval('SELECT chunks FROM delivery_log WHERE id=$1',delivery_id)))
         readiness=await scheduled_media.ready(connection,row)
         if readiness!='ready':
             return readiness
