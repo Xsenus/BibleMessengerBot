@@ -1,4 +1,4 @@
-"""News/prayer preparation is isolated from time-critical Telegram sends."""
+"""Служба подготовки молитв: составляет тексты заранее и не мешает срочной отправке в Telegram."""
 import asyncio
 import contextlib
 import logging
@@ -12,6 +12,7 @@ LOGGER=logging.getLogger(__name__)
 
 
 async def heartbeat(pool):
+    """Каждые 20 секунд записывать в БД сигнал жизни службы `composer` для проверки работоспособности."""
     while True:
         async with pool.acquire() as connection:
             await connection.execute("INSERT INTO service_heartbeats(service) VALUES('composer') ON CONFLICT(service) DO UPDATE SET last_seen=now()")
@@ -19,6 +20,7 @@ async def heartbeat(pool):
 
 
 async def worker():
+    """Запустить службу: взять блокировки (единственный экземпляр), запустить сигнал жизни и каждые 10 секунд готовить приглашения на молитву, срок которых близок."""
     settings=Settings.from_env(require_bot_token=False)
     await wait_for_database(settings)
     pool=await create_pool(settings)

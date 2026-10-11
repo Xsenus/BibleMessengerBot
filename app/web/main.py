@@ -1,4 +1,4 @@
-"""Read-only, locally bound operational dashboard. Settings are changed in Telegram."""
+"""Локальная панель оператора: только чтение, слушает только локальный интерфейс. Настройки меняются в Telegram."""
 from __future__ import annotations
 import json
 import os
@@ -22,7 +22,7 @@ security = HTTPBasic()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Connect at startup, close pooled sockets on graceful termination."""
+    """Жизненный цикл приложения: при старте подключиться к БД и взять разделяемую блокировку обслуживания, при остановке закрыть пул соединений."""
     await wait_for_database(settings)
     pool = await create_pool(settings)
     try:
@@ -38,31 +38,31 @@ app = FastAPI(title='BibleMessengerBot read-only operations',version='1.20.0',li
 
 
 def valid_key(value: str) -> bool:
-    """An empty/default key cannot authenticate the operator."""
+    """Проверить ключ администратора: длина не менее 24 символов и постоянное по времени сравнение; пустой или стандартный ключ войти не позволяет."""
     return len(settings.admin_api_key)>=24 and secrets.compare_digest(value.encode('utf-8'),settings.admin_api_key.encode('utf-8'))
 
 
 def require_basic(credentials: Annotated[HTTPBasicCredentials,Depends(security)]) -> None:
-    """Expose the dashboard only through a local listener or authenticated SSH tunnel."""
+    """Зависимость FastAPI: требует HTTP Basic (пользователь `admin`, пароль — ключ администратора)."""
     if credentials.username!='admin' or not valid_key(credentials.password):
         raise HTTPException(401,'Authentication required',headers={'WWW-Authenticate':'Basic'})
 
 
 def require_key(x_admin_key: Annotated[str | None,Header()] = None) -> None:
-    """JSON operator API uses a header, never a query-string secret."""
+    """Зависимость FastAPI: требует ключ администратора в заголовке `X-Admin-Key` (не в строке запроса)."""
     if not x_admin_key or not valid_key(x_admin_key):
         raise HTTPException(401,'Authentication required')
 
 
 @app.get('/health')
 async def health() -> dict[str,str]:
-    """Liveness does not claim that imported content is ready."""
+    """Проверка «жив»: не утверждает, что корпус Библии готов."""
     return {'status':'alive','version':'1.20.0'}
 
 
 @app.get('/ready')
 async def ready() -> dict[str,Any]:
-    """Readiness is a real database query; empty/unaudited required content returns 503."""
+    """Проверка готовности: реальный запрос к БД и аудит корпуса; если БД недоступна или нет нужных изданий, ответ 503."""
     try:
         pool = await create_pool(settings)
         async with pool.acquire() as connection:
@@ -75,7 +75,7 @@ async def ready() -> dict[str,Any]:
 
 
 async def operator_data() -> dict[str,Any]:
-    """Bounded status output; message text, usernames and bot credentials are omitted."""
+    """Ограниченный по размеру срез состояния для оператора: аудит БД, чаты, подписки, доставки, сигналы служб, подготовка чтений и молитвы. Текст сообщений, имена пользователей и токены не включаются."""
     pool = await create_pool(settings)
     async with pool.acquire() as connection:
         audit = await verify_database(connection,profile=settings.bible_profile,full=False)
@@ -93,7 +93,7 @@ async def operator_data() -> dict[str,Any]:
 
 @app.get('/api/stats',dependencies=[Depends(require_key)])
 async def api_stats(response: Response) -> dict[str,Any]:
-    """Read-only API; no CSRF-capable form mutation endpoints are exposed."""
+    """JSON-версия среза состояния (по ключу администратора), без кэширования."""
     response.headers['Cache-Control'] = 'no-store'
     return await operator_data()
 
@@ -103,12 +103,13 @@ _metrics_cache: list = [0.0,'']  # [expires_at (monotonic), rendered text]: boun
 
 
 def settings_budget() -> Decimal:
+    """Месячный бюджет картинок в долларах из IMAGE_MONTHLY_BUDGET_USD (по умолчанию 10)."""
     return Decimal(os.getenv('IMAGE_MONTHLY_BUDGET_USD','10'))
 
 
 @app.get('/metrics',response_class=PlainTextResponse,dependencies=[Depends(require_basic)])
 async def metrics() -> PlainTextResponse:
-    """Prometheus text format (HTTP basic auth: user admin, password ADMIN_API_KEY); derived from durable tables."""
+    """Метрики Prometheus (HTTP Basic). Результат кэшируется на 10 секунд, поэтому частые опросы не нагружают БД."""
     now = time.monotonic()
     if _metrics_cache[0] < now:
         pool = await create_pool(settings)
@@ -121,7 +122,7 @@ async def metrics() -> PlainTextResponse:
 
 @app.get('/admin',response_class=HTMLResponse,dependencies=[Depends(require_basic)])
 async def dashboard() -> HTMLResponse:
-    """Escaped preformatted diagnostic output, without scripts or external resources."""
+    """HTML-страница оператора: экранированный JSON-срез без скриптов и внешних ресурсов, с жёсткой политикой безопасности."""
     data = json.dumps(await operator_data(),ensure_ascii=False,indent=2,default=str)
     return HTMLResponse('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
         '<title>BibleMessengerBot · Operations</title><h1>BibleMessengerBot 1.20.0</h1>'

@@ -1,4 +1,4 @@
-"""Single active scheduler with independent preparation and bounded concurrent sends."""
+"""Основной воркер доставки: один активный экземпляр, подготовка и отправка работают независимо."""
 from __future__ import annotations
 
 import asyncio
@@ -17,13 +17,14 @@ from app.worker.scheduler import prepare_loop, send_loop
 
 
 async def heartbeat(owner):
-    """Check the singleton's owning session even during slow preparation/sends."""
+    """Каждые 15 секунд записывать сигнал жизни `worker` через соединение-владельца блокировки (так видно, что именно он жив)."""
     while True:
         await owner.execute("INSERT INTO service_heartbeats(service) VALUES('worker') ON CONFLICT(service) DO UPDATE SET last_seen=now()")
         await asyncio.sleep(15)
 
 
 async def worker() -> None:
+    """Запустить воркер: обработать сигналы остановки, взять блокировку единственного воркера, разобрать неопределённые отправки после падения и запустить циклы подготовки, отправки и сигнала жизни; при остановке дать текущим отправкам завершиться."""
     settings = Settings.from_env()
     await wait_for_database(settings)
     pool = await create_pool(settings)

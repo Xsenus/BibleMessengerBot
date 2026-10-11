@@ -1,4 +1,4 @@
-"""Durable native orders, verified receipts and full refunds. No card data stored."""
+"""Журнал платежей картой/СБП: заказы, проверенные квитанции и полные возвраты. Данные карт не хранятся."""
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -12,7 +12,7 @@ PRESETS = (100, 250, 500, 1000)
 
 
 def validate_payment(order, payment, shop_id):
-    """Only an authenticated GET/POST response can be passed to this function."""
+    """Сверить ответ платёжного сервиса с нашим заказом: идентификатор платежа, сумма в копейках, приложение, номер заказа, получатель (магазин), признак тестового платежа, статус и способ оплаты. При любом расхождении — PaymentError. Принимает только ответ, полученный авторизованным запросом. Возвращает (идентификатор платежа, статус)."""
     if (not isinstance(payment,dict) or not isinstance(payment.get('metadata'),dict) or
             not isinstance(payment.get('recipient'),dict) or
             not isinstance(payment.get('payment_method',{}),dict)):
@@ -40,6 +40,7 @@ def validate_payment(order, payment, shop_id):
 
 
 async def new_order(connection, *, user_id, chat_id, rubles, method, request_key, platform='max'):
+    """Создать заказ на поддержку (100–10000 ₽, карта или СБП) в личном чате владельца. Повторный запрос с тем же ключом возвращает прежний заказ; конфликтующие параметры отклоняются."""
     if platform not in {'max','telegram'}:
         raise PaymentError('invalid_platform')
     if type(rubles) is not int or not 100 <= rubles <= 10000 or method not in {'bank_card', 'sbp'}:
@@ -62,6 +63,7 @@ async def new_order(connection, *, user_id, chat_id, rubles, method, request_key
 
 
 async def notify(connection, order, *, refund=False):
+    """Поставить в очередь сообщение пользователю об успешной оплате или возврате (на языке чата, с пометкой для тестового платежа)."""
     chat = await connection.fetchrow("SELECT * FROM telegram_chats WHERE telegram_chat_id=$1 AND platform=$2", order['chat_id'],order.get('platform','max'))
     if not chat:
         raise PaymentError('destination_mismatch')
@@ -81,6 +83,7 @@ async def notify(connection, order, *, refund=False):
 
 
 async def record_payment(connection, order_id, payment, shop_id):
+    """Записать проверенное состояние платежа в заказ под блокировкой строки; подтверждённый статус не откатывается устаревшим ответом; при первой успешной оплате отправляется уведомление."""
     async with connection.transaction():
         order = await connection.fetchrow('SELECT * FROM native_payment_orders WHERE id=$1 FOR UPDATE', order_id)
         if not order:
@@ -107,6 +110,7 @@ async def record_payment(connection, order_id, payment, shop_id):
 
 async def checkout(connection, api, order):
     # A session advisory lock spans the network call without an open transaction.
+    """Создать платёж у провайдера или перечитать существующий (сетевой вызов под сессионной блокировкой, без открытой транзакции). Если потерянному запросу больше 23 часов — требуется ручная сверка, чтобы не создать двойное списание."""
     key = lock_key('native-payment-create', str(order['id']))
     await connection.execute('SELECT pg_advisory_lock($1)', key)
     try:
@@ -125,6 +129,7 @@ async def checkout(connection, api, order):
 
 
 async def record_refund(connection, refund, result):
+    """Записать состояние возврата, проверив соответствие заказу, платежу и сумме; подтверждённый статус не откатывается; при первом успехе уведомляет пользователя."""
     async with connection.transaction():
         order = await connection.fetchrow('SELECT * FROM native_payment_orders WHERE id=$1 FOR UPDATE', refund['order_id'])
         current = await connection.fetchrow('SELECT * FROM native_payment_refunds WHERE order_id=$1 FOR UPDATE', refund['order_id'])
@@ -148,7 +153,7 @@ async def record_refund(connection, refund, result):
 
 
 async def full_refund(connection, api, order_id):
-    """Operator-only caller; user requests are tickets, never an automatic refund."""
+    """Полный возврат по заказу — только для оператора (обращения пользователей возвраты автоматически не запускают). Сначала перечитывает платёж у провайдера, затем создаёт или перечитывает возврат."""
     key = lock_key('native-payment-refund', str(order_id))
     await connection.execute('SELECT pg_advisory_lock($1)', key)
     try:
@@ -172,7 +177,7 @@ async def full_refund(connection, api, order_id):
 
 
 async def notification(connection, api, event):
-    """Incoming statuses are hints only. Always GET the object with merchant auth."""
+    """Обработать входящее уведомление ЮKassa. Статус из уведомления — лишь подсказка: платёж или возврат всегда перечитывается авторизованным запросом. Возвращает False, если объект пока неизвестен (провайдер повторит доставку)."""
     if not isinstance(event, dict) or event.get('type') != 'notification':
         raise PaymentError('invalid_notification')
     kind = event.get('event')

@@ -1,4 +1,4 @@
-"""Prepare ahead of time and dispatch a bounded number of independent chats."""
+"""Планировщик: подготовка заданий заранее и отправка с ограниченным числом одновременно обрабатываемых чатов."""
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +14,7 @@ SEND_POLL_SECONDS = 0.25
 
 
 async def prepare_once(connection, settings):
+    """Один проход подготовки: заморозить задания для подписок, срок которых наступает в ближайшие сутки (приостанавливая неисправные), и проверить готовность медиа у заданий, ожидающих картинку или озвучку."""
     due = await connection.fetch('''SELECT s.id FROM subscriptions s JOIN telegram_chats c
         ON c.telegram_chat_id=s.telegram_chat_id WHERE s.is_enabled AND NOT s.completed AND c.is_active
         AND s.next_run_at<=now()+interval '24 hours' AND NOT EXISTS(SELECT 1 FROM delivery_log d
@@ -48,6 +49,7 @@ async def prepare_once(connection, settings):
 
 
 async def prepare_loop(pool, settings):
+    """Бесконечный цикл подготовки с паузой `worker_poll_seconds` (не меньше 0,25 с)."""
     while True:
         async with pool.acquire() as connection:
             await prepare_once(connection, settings)
@@ -55,7 +57,7 @@ async def prepare_loop(pool, settings):
 
 
 async def due_jobs(connection, busy_chats, limit):
-    """One job per free chat, with prayers first; incomplete media cannot starve others."""
+    """Выбрать готовые к отправке задания: не более одного на свободный чат, молитвы первыми; задания с неготовыми медиа не блокируют остальные."""
     return await connection.fetch('''SELECT id,telegram_chat_id FROM (
         SELECT DISTINCT ON (d.telegram_chat_id) d.id,d.telegram_chat_id,d.mode,d.scheduled_for
         FROM delivery_log d JOIN telegram_chats c ON c.telegram_chat_id=d.telegram_chat_id
@@ -71,10 +73,11 @@ async def due_jobs(connection, busy_chats, limit):
 
 
 async def send_loop(pool, sender_factory, stop, *, concurrency=SEND_CONCURRENCY, poll=SEND_POLL_SECONDS):
-    """A slow chat occupies one slot; other chats continue without waiting for a batch."""
+    """Основной цикл отправки: до `concurrency` чатов одновременно, медленный чат занимает один слот. При остановке новые задания не берутся, текущие успевают сохранить подтверждения до истечения 45 секунд."""
     active = {}
 
     async def send_one(job):
+        """Обработать одно задание в отдельном соединении; если медиа внезапно перестало быть готовым — отложить проверку на 5 секунд."""
         async with pool.acquire() as connection:
             result = await process_delivery(connection, job['id'], sender_factory(connection))
             if result == 'preparing_media':

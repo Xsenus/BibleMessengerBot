@@ -1,4 +1,4 @@
-"""Prepare tomorrow's artwork independently of the time-critical Telegram worker."""
+"""Служба иллюстраций: готовит картинки заранее, независимо от срочной отправки в Telegram."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 async def heartbeat(pool):
+    """Каждые 20 секунд записывать сигнал жизни службы `illustrator`."""
     while True:
         async with pool.acquire() as c:
             await c.execute(
@@ -26,6 +27,7 @@ async def heartbeat(pool):
 
 
 async def mirror(pool, cloud):
+    """Фоновое зеркалирование готовых картинок в облачное хранилище каждые 30 секунд; сбой откладывается, но не останавливает службу."""
     while True:
         try:
             async with pool.acquire() as c:
@@ -36,6 +38,7 @@ async def mirror(pool, cloud):
 
 
 async def worker():
+    """Запустить службу: единственный экземпляр, восстановление прерванных заданий и в цикле каждые 10 секунд — обновление промптов, планирование на завтра, рассылка готовых картинок и генерация очередных заданий через роутер провайдеров."""
     settings = Settings.from_env(require_bot_token=False)
     art = artwork.ArtSettings.from_env()
     if art.provider == 'openai':
