@@ -1,4 +1,4 @@
-"""Durable failover with daily provider limits and one monthly paid-request budget."""
+"""Надёжное переключение между провайдерами картинок: суточные лимиты по провайдерам и один общий месячный бюджет платных запросов."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from app.services.locks import lock_key
 
 
 def providers(settings):
+    """Список настроенных провайдеров в порядке приоритета (для OpenAI — по каждому ключу); провайдеры без ключа пропускаются."""
     from app.services.openai_credentials import image_keys
     keys = {"openai": settings.key, **settings.extra_keys}
     return [
@@ -24,15 +25,17 @@ def providers(settings):
 
 
 def attempt_limit(settings):
+    """Максимальное число попыток на задание: не меньше 5 и не меньше числа провайдеров."""
     return max(5, len(providers(settings)))
 
 
 def fingerprint(provider):
+    """Отпечаток ключа (SHA-256) — по нему различают ключи, не раскрывая значение."""
     return hashlib.sha256(provider.key.encode()).hexdigest()
 
 
 async def configure(connection, settings):
-    """New keys get independent breakers; existing cooldowns/history are retained."""
+    """Завести состояние здоровья для новых ключей (существующие блокировки и история сохраняются) и вернуть в очередь задания, остановленные из-за авторизации или квоты, если появился другой провайдер."""
     for provider in providers(settings):
         await connection.execute(
             """INSERT INTO image_provider_health(provider,key_fingerprint)
@@ -49,7 +52,7 @@ async def configure(connection, settings):
 
 
 async def reserve(connection, job_id, settings):
-    """Select provider and reserve budget atomically across jobs/processes."""
+    """Атомарно выбрать провайдера и зарезервировать бюджет: учитываются уже использованные для задания, суточные лимиты, блокировки по ошибкам и месячный бюджет. Возвращает (попытка, провайдер, причина отказа); при отсутствии кандидатов задание откладывается или помечается исчерпанным."""
     async with connection.transaction():
         await connection.execute("SELECT pg_advisory_xact_lock($1)", lock_key("image-budget", 1))
         job = await connection.fetchrow(
@@ -150,6 +153,7 @@ async def reserve(connection, job_id, settings):
 
 
 async def fail(connection, job_id, attempt, provider, error, *, max_attempts=5):
+    """Записать неудачную попытку: код ошибки, исход (`failed` или `uncertain`), состояние задания (повтор или окончательный отказ; модерация окончательна) и блокировку ключа на время (сутки для auth/quota)."""
     async with connection.transaction():
         await connection.execute(
             "UPDATE image_generation_attempts SET state=$2,error_code=$3 WHERE id=$1",
@@ -183,7 +187,7 @@ async def fail(connection, job_id, attempt, provider, error, *, max_attempts=5):
 
 
 async def recover(connection):
-    """Resume accepted async tasks after restart, quarantine submissions without IDs."""
+    """После перезапуска продолжить принятые асинхронные задачи (есть адрес опроса), а отправки без идентификатора пометить неопределёнными, чтобы не дублировать оплату."""
     async with connection.transaction():
         await connection.execute("""UPDATE image_generation_jobs j SET state='retry',retry_at=now(),
             error_code=NULL,updated_at=now() WHERE state='running' AND EXISTS
@@ -197,6 +201,7 @@ async def recover(connection):
 
 
 async def process_job(connection, job_id, settings, *, generator=None):
+    """Обработать одно задание картинки: проверить, что текст стиха не изменился, при необходимости получить описание сцены у локальной модели (для Stability), зарезервировать провайдера или продолжить опрос принятой задачи, сгенерировать, проверить OCR-фильтром на надписи и сохранить картинку; при любом неясном сбое сохранения платный запрос не повторяется. Возвращает короткий код результата."""
     job = await connection.fetchrow(
         """SELECT j.*,i.translation_id,i.book_code,i.chapter,i.verse,
         i.text_sha256,i.artwork_scope,i.status AS image_status FROM image_generation_jobs j
@@ -259,6 +264,7 @@ async def process_job(connection, job_id, settings, *, generator=None):
             return reason
 
     async def accepted(identifier, url):
+        """Сохранить идентификатор и адрес опроса принятой удалённой задачи до начала ожидания (чтобы после перезапуска не платить дважды)."""
         await connection.execute(
             "UPDATE image_generation_attempts SET request_id=$2,polling_url=$3 WHERE id=$1",
             attempt,

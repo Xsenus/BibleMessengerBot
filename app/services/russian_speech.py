@@ -1,4 +1,4 @@
-"""Pinned Russian voices; CPU inference is isolated, with Piper retained separately."""
+"""Закреплённые русские голоса Silero; вывод на CPU в изолированном процессе, прежний Piper хранится отдельно как запасной."""
 from __future__ import annotations
 
 import hashlib
@@ -17,16 +17,19 @@ SPEAKERS = MODEL['speakers']
 
 
 def profile(speaker='aidar'):
+    """Идентификатор профиля голоса (`aidar` — Давид, `kseniya` — Мария) с отпечатком модели."""
     if speaker not in SPEAKERS.values():
         raise ValueError('unsupported_russian_voice')
     return f"neural-v2:silero:{MODEL['sha256'][:16]}:{speaker}"
 
 
 def directory():
+    """Каталог файла модели Silero."""
     return neural_speech.cache_root() / ('silero-' + MODEL['sha256'][:16])
 
 
 def complete(*, verify=False):
+    """Проверить, что файл модели на месте и имеет точный размер (при `verify` — ещё и SHA-256)."""
     path = directory() / MODEL['name']
     try:
         if path.stat().st_size != MODEL['bytes']:
@@ -40,7 +43,7 @@ def complete(*, verify=False):
 
 
 async def prepare(*, client=None):
-    """Never import the model package before its exact bytes/hash are verified."""
+    """Скачать модель потоково с проверкой размера и SHA-256; пакет модели не импортируется, пока байты не проверены."""
     if complete(verify=True):
         return
     root=directory()
@@ -70,12 +73,13 @@ async def prepare(*, client=None):
 
 
 def spoken_input(text):
-    """Spell source numerals out; the model otherwise silently drops digits."""
+    """Заменить числа словами (иначе модель молча пропускает цифры)."""
     from num2words import num2words
     return re.sub(r'\b[0-9]+\b',lambda match:num2words(int(match[0]),lang='ru'),text)
 
 
 def render(text, target, speaker='aidar'):
+    """Синтезировать русскую речь выбранным голосом в WAV (48 кГц) по фрагментам с паузами; пустая или некорректная волна — ошибка."""
     if speaker not in SPEAKERS.values() or not complete(verify=True):
         raise ValueError('russian_voice_not_installed')
     import torch

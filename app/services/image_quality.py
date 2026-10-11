@@ -1,4 +1,4 @@
-"""Bounded local OCR gate: manuscript/poster output must never be published."""
+"""Локальная проверка картинок распознаванием текста (OCR): рукописи, плакаты и надписи публиковать нельзя."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import json
 
 
 def classify(tsv):
+    """Оценить результат Tesseract (TSV): считает уверенно распознанные слова и строки; много уверенного текста или связная строка из нескольких слов — `rejected` (видимая надпись), иначе `approved`. Слабый «шум» на листве и камне не считается."""
     words = []
     for row in csv.DictReader(io.StringIO(tsv), delimiter="\t"):
         try:
@@ -47,7 +48,7 @@ def classify(tsv):
 
 
 async def assess(data, *, timeout=30):
-    """OCR consumes image bytes through stdin; no external text/image API."""
+    """Прогнать картинку через локальный Tesseract (английский и русский) без внешних сервисов, с тайм-аутом; при недоступности OCR или некорректном ответе вердикт `unavailable`."""
     process = None
     try:
         process = await asyncio.create_subprocess_exec(
@@ -80,6 +81,7 @@ async def assess(data, *, timeout=30):
 
 
 async def record(connection, image_id, attempt_id, result, *, data=None):
+    """Сохранить результат проверки в `image_quality_reviews` (отклонённая картинка сохраняется для разбора)."""
     await connection.execute(
         """INSERT INTO image_quality_reviews(image_id,attempt_id,verdict,reason,metrics,rejected_data)
         VALUES($1,$2,$3,$4,$5::jsonb,$6)""",
@@ -93,6 +95,7 @@ async def record(connection, image_id, attempt_id, result, *, data=None):
 
 
 async def gate(connection, image_id, attempt_id, data):
+    """Проверить картинку, записать результат и вернуть вердикт (`approved`, `rejected`, `unavailable`)."""
     result = await assess(data)
     await record(connection, image_id, attempt_id, result, data=data)
     return result["verdict"]
