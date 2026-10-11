@@ -5,11 +5,13 @@ import os
 import time
 from decimal import Decimal
 import secrets
+from pathlib import Path
 from contextlib import asynccontextmanager
 from html import escape
 from typing import Annotated,Any
 from fastapi import Depends,FastAPI,Header,HTTPException,Request,Response
 from fastapi.responses import HTMLResponse,JSONResponse,PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic,HTTPBasicCredentials
 from app.config import Settings
 from app.db import close_pool,create_pool,wait_for_database,acquire_runtime_guard
@@ -64,6 +66,26 @@ async def user_error(_request: Request, error: UserError) -> JSONResponse:
 
 
 app.include_router(build_router(require_key, lambda: create_pool(settings)))
+
+
+PANEL_DIR = Path(__file__).parent / 'static' / 'panel'
+
+
+@app.middleware('http')
+async def panel_headers(request: Request, call_next):
+    """Заголовки безопасности для статической панели и API: без кэша, без вложения в чужие страницы, скрипты только свои."""
+    response = await call_next(request)
+    if request.url.path.startswith(('/panel', '/api/admin')):
+        response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        response.headers.setdefault('Content-Security-Policy',
+            "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        if request.url.path.startswith('/api/admin'):
+            response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+if PANEL_DIR.is_dir():
+    app.mount('/panel', StaticFiles(directory=PANEL_DIR, html=True), name='panel')
 
 
 @app.get('/health')

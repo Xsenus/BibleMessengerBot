@@ -36,3 +36,5 @@ ARCHIVE-TESTS.txt
 ARCHIVE-VERIFICATION.json
 DELIVERY.json
 DELIVERY.md
+admin-ui/node_modules
+app/web/static/panel
