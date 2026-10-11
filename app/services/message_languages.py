@@ -12,6 +12,7 @@ from app.services import bible
 from app.services.errors import SendError, UserError
 from app.services.formatting import escape, plain_text, split_message, split_wire_message
 from app.services.i18n import tr, ui_for_language
+from app.services.platforms import is_bridged
 
 PAGE_SIZE = 6
 
@@ -196,7 +197,7 @@ async def available(connection, card):
 
 def pages(text, platform='telegram'):
     """Разбить текст карточки на страницы: для MAX — по 3600 символов сырого HTML, для Telegram — одной страницей до 24000 байт, иначе по 3900 единиц."""
-    if platform == 'max':
+    if is_bridged(platform):
         return split_wire_message(str(text), 3600)
     if len(text.encode('utf-8')) <= 24000:
         return [str(text)]

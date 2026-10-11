@@ -98,7 +98,14 @@ async def announcements_section(connection: Any, actor_id: int, chat: Any, argum
     return await announcements.section(connection, actor_id, chat, argument)
 
 
-SECTIONS = {'home': home, 'admins': admins, 'invite': invite, 'stats': stats, 'ann': announcements_section}
+async def sources_section(connection: Any, actor_id: int, chat: Any, argument: str = '') -> tuple[str, InlineKeyboardMarkup]:
+    """Раздел «Источники» (см. services.chat_sources.section)."""
+    from app.services import chat_sources
+    return await chat_sources.section(connection, actor_id, chat, argument)
+
+
+SECTIONS = {'home': home, 'admins': admins, 'invite': invite, 'stats': stats, 'ann': announcements_section,
+            'src': sources_section}
 
 
 async def callback(connection: Any, actor_id: int, chat: Any, value: str) -> tuple[str, InlineKeyboardMarkup]:
@@ -109,6 +116,8 @@ async def callback(connection: Any, actor_id: int, chat: Any, value: str) -> tup
         return await remove(connection, actor_id, chat, value[2:])
     if value[:2] in {'ap', 'ar', 'an', 'ad'} and value[2:].isdigit():
         return await announcements_section(connection, actor_id, chat, value)
+    if value[:2] in {'sx', 'sm'} and value[2:].isdigit():
+        return await sources_section(connection, actor_id, chat, value)
     section = SECTIONS.get(value)
     if section is None:
         raise UserError('invalid')

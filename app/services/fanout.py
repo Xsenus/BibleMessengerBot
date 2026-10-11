@@ -19,25 +19,30 @@ CHAT_TYPES = ('private', 'group', 'supergroup', 'channel')
 
 
 def normalize_audience(audience: dict | None) -> dict:
-    """Привести аудиторию к допустимому виду: {'platforms': [...], 'chat_types': [...]} (пустое — все)."""
+    """Привести аудиторию к допустимому виду: {'platforms': [...], 'chat_types': [...], 'chat_ids': [...]} (пустое — все)."""
     audience = audience or {}
     platforms = [p for p in audience.get('platforms') or [] if p in PLATFORMS]
     kinds = [t for t in audience.get('chat_types') or [] if t in {'private', 'group', 'channel'}]
-    return {k: v for k, v in (('platforms', platforms), ('chat_types', kinds)) if v}
+    ids = [int(x) for x in audience.get('chat_ids') or [] if str(x).lstrip('-').isdigit()]
+    return {k: v for k, v in (('platforms', platforms), ('chat_types', kinds), ('chat_ids', ids)) if v}
 
 
-async def recipients(connection: Any, audience: dict | None = None) -> list[Any]:
+async def recipients(connection: Any, audience: dict | None = None, exclude: tuple = ()) -> list[Any]:
     """Активные назначения по аудитории: личные чаты незаблокированных пользователей, группы и каналы.
 
     Группы Telegram бывают `group` и `supergroup` — для фильтра это один вид «group».
     """
     audience = normalize_audience(audience)
+    only = audience.get('chat_ids', [])
     rows = await connection.fetch('''SELECT c.* FROM telegram_chats c
         LEFT JOIN telegram_users u ON c.chat_type='private' AND u.telegram_user_id=c.telegram_chat_id
         WHERE c.is_active AND NOT COALESCE(u.is_blocked,false)
         AND (cardinality($1::text[])=0 OR c.platform=ANY($1::text[]))
         AND (cardinality($2::text[])=0 OR CASE WHEN c.chat_type='supergroup' THEN 'group' ELSE c.chat_type END=ANY($2::text[]))
-        ORDER BY c.telegram_chat_id''', audience.get('platforms', []), audience.get('chat_types', []))
+        AND (cardinality($3::bigint[])=0 OR c.telegram_chat_id=ANY($3::bigint[]))
+        AND NOT (c.telegram_chat_id=ANY($4::bigint[]))
+        ORDER BY c.telegram_chat_id''', audience.get('platforms', []), audience.get('chat_types', []), only,
+        [int(x) for x in exclude])
     return rows
 
 
@@ -62,13 +67,14 @@ def chunks_for(platform: str, text: str, asset_id: int | None, max_length: int =
 
 
 async def enqueue(connection: Any, *, key: str, text: str, mode: str, audience: dict | None = None,
-                  asset_id: int | None = None, progress: dict | None = None, max_length: int = 3900) -> dict[str, int]:
+                  asset_id: int | None = None, progress: dict | None = None, max_length: int = 3900,
+                  exclude: tuple = ()) -> dict[str, int]:
     """Поставить сообщение в очередь доставки каждому назначению аудитории. Возвращает {recipients, queued, skipped}.
 
     `key` уникален для рассылки: заданию каждого чата присваивается ключ `key`, повторная постановка безопасна.
     """
     from app.worker.delivery import insert_payload
-    targets = await recipients(connection, audience)
+    targets = await recipients(connection, audience, exclude)
     queued = skipped = 0
     for target in targets:
         try:

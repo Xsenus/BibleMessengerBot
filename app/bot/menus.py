@@ -76,14 +76,24 @@ async def enable_devotions(connection: Any,chat: Any,actor_id:int) -> str:
     return f"🌅 <b>Morning and evening enabled</b>\nReading: 09:00 and 21:00\n🕊 Prayer: 09:38 and 21:13 · {escape(chat['timezone'])}\nArtwork and all available narrations are prepared in advance.\nTurn off: /devotions off"
 
 
+async def _external_chat_id(connection: Any, chat: Any) -> int:
+    """Внешний (видимый пользователю) ID чата: для MAX и ВКонтакте внутренний ключ БД заменяется идентификатором платформы."""
+    platform = chat.get('platform','telegram')
+    if platform == 'max':
+        from app.maxbot.identities import external
+        return await external(connection,'chat',chat['telegram_chat_id'])
+    if platform == 'vk':
+        from app.vkbot.identities import external as vk_external
+        return await vk_external(connection,'chat',chat['telegram_chat_id'])
+    return chat['telegram_chat_id']
+
+
 async def settings_text(connection: Any, chat: Any) -> str:
     """Текст настроек чата: назначение, язык интерфейса и Библии, издание, часовой пояс, покрытие и число книг и стихов."""
     locale = chat['ui_language']
     edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
     display_id = chat['telegram_chat_id']
-    if chat.get('platform','telegram') == 'max':
-        from app.maxbot.identities import external
-        display_id = await external(connection,'chat',display_id)
+    display_id = await _external_chat_id(connection,chat)
     lines = [f"<b>{tr(locale,'settings')}</b>",f"{tr(locale,'destination')}: <code>{display_id}</code>",
         f"{tr(locale,'ui_language')}: {escape(native_ui_name(locale))}",
         f"{tr(locale,'language')}: {escape(bible.display_language(edition['language_code'],locale) if edition else '—')}",
@@ -99,11 +109,10 @@ async def settings_text(connection: Any, chat: Any) -> str:
 
 async def command_target_suffix(connection: Any, chat: Any) -> str:
     """Суффикс цели для подсказок команд: для групп Telegram — ID чата, для групп MAX — внешний ID (внутренний ключ БД не показывается), для личного чата пусто."""
-    if chat.get('platform','telegram') == 'max':
+    if chat.get('platform','telegram') in {'max','vk'}:
         if chat['chat_type']=='private':
             return ''
-        from app.maxbot.identities import external
-        return f" chat:{await external(connection,'chat',chat['telegram_chat_id'])}"
+        return f" chat:{await _external_chat_id(connection,chat)}"
     return f" {chat['telegram_chat_id']}" if chat['telegram_chat_id'] < 0 else ''
 
 

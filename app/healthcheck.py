@@ -26,7 +26,7 @@ def container_started_at(proc_root: Path = Path('/proc')) -> datetime | None:
 
 async def probe(service: str) -> bool:
     """Вернуть True, если у службы есть свежий (не старше 180 секунд) сигнал жизни, записанный уже после старта этого контейнера. Неизвестная служба — False."""
-    if service not in {'bot','worker','illustrator','speaker','composer','maxbot'}:
+    if service not in {'bot','worker','illustrator','speaker','composer','maxbot','vkbot'}:
         return False
     started_at = container_started_at()
     if started_at is None:

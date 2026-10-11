@@ -8,6 +8,7 @@ from aiogram.types import Message,ReplyKeyboardRemove
 from app.bot.commands import mode_name
 from app.bot.ui import main_keyboard,welcome_text,menu_hint,search_prompt
 from app.services import bible, broadcast
+from app.services.platforms import is_bridged
 from app.services import passage,illustrations,readings
 from app.services.accounts import claim_owner,redeem_admin_invite
 from app.services.destinations import configure_chat,ensure_resolved,cancel_queued
@@ -52,17 +53,17 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         return voices_menu(chat)
     # /hide_keyboard — скрыть нижнюю клавиатуру (только личный чат Telegram)
     if name=='hide_keyboard':
-        if enum_value(message.chat.type)!='private' or getattr(bot,'platform',None)=='max':
+        if enum_value(message.chat.type)!='private' or is_bridged(getattr(bot,'platform',None)):
             raise UserError('invalid')
         await connection.execute('UPDATE telegram_chats SET keyboard_hidden=true WHERE telegram_chat_id=$1',message.chat.id)
         return ('Кнопки скрыты. Вернуть их: /menu. Команды доступны через кнопку «Меню».' if locale=='ru' else
                 'Buttons hidden. Restore them with /menu. Commands remain available in Menu.'),ReplyKeyboardRemove()
     # /start в личном чате — приветствие и главная клавиатура
     if name=='start' and enum_value(message.chat.type)=='private':
-        if getattr(bot,'platform',None)!='max' and connection is not None:
+        if not is_bridged(getattr(bot,'platform',None)) and connection is not None:
             await connection.execute('UPDATE telegram_chats SET keyboard_hidden=false WHERE telegram_chat_id=$1',message.chat.id)
         edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
-        return welcome_text(locale,bible.display_title(edition) if edition else None),main_keyboard(locale,collapsible=getattr(bot,'platform',None)!='max')
+        return welcome_text(locale,bible.display_title(edition) if edition else None),main_keyboard(locale,collapsible=not is_bridged(getattr(bot,'platform',None)))
     # /settings, /register — показать настройки
     if name in {'start','settings','register'}:
         return await settings_text(connection,chat),settings_keyboard(chat)
@@ -71,7 +72,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
     if name=='menu_hint':
         return menu_hint(locale),None
     if name=='menu':
-        if enum_value(message.chat.type)=='private' and getattr(bot,'platform',None)!='max':
+        if enum_value(message.chat.type)=='private' and not is_bridged(getattr(bot,'platform',None)):
             await connection.execute('UPDATE telegram_chats SET keyboard_hidden=false WHERE telegram_chat_id=$1',message.chat.id)
             return menu_hint(locale),main_keyboard(locale)
         return menu_hint(locale),None
@@ -117,6 +118,10 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         raw = (message.text or '').split(None,1)
         text,markup = await announcements.command(connection,user.id,chat,raw[1] if len(raw)>1 else '')
         return text,(markup if markup.inline_keyboard else None)
+    # /post ID | /post ignore ID — копия поста источника всем / пропустить
+    if name=='post':
+        from app.services import chat_sources
+        return await chat_sources.command(connection,user.id,args,locale=='ru'),None
     # /admin — меню администратора (доступно администраторам и владельцу)
     if name=='admin':
         from app.bot import admin

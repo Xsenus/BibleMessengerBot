@@ -182,6 +182,14 @@ class MaxDispatcher:
             content = (incoming.get('body') or {}).get('text')
             if not source_user or source_user.get('is_bot') or not content:
                 return
+            recipient_info = incoming.get('recipient') or {}
+            if recipient_info.get('chat_type') in {'chat', 'channel'} and not content.startswith('/'):
+                # Сообщения групп и каналов MAX — кандидаты в источники контента (если источник включён).
+                from app.services.chat_sources import ingest_post
+                async with self.pool.acquire() as connection:
+                    await ingest_post(connection, 'max', recipient_info['chat_id'], incoming['body']['mid'], content, {},
+                                      posted_at=(incoming.get('timestamp') or 0) // 1000 or None)
+                return
             recipient = incoming['recipient']
             chat_type = {'dialog':'private','chat':'group','channel':'channel'}[recipient['chat_type']]
             actor, chat = await self._context(source_user,recipient['chat_id'],chat_type,locale)

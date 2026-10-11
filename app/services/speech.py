@@ -382,7 +382,7 @@ async def upgrade_profiles(connection, settings=None):
   JOIN telegram_chats ch USING(telegram_chat_id)
   JOIN reading_audio a ON a.id=c.audio_id JOIN jsonb_each_text($1::jsonb) p
   ON p.key=CASE WHEN a.language_code='rus' THEN 'rus:'||ch.audio_voice ELSE a.language_code END
-  WHERE a.provider_mode=$2 AND a.voice_profile<>p.value AND (c.platform='max' OR c.audio_sent_id IS NULL)
+  WHERE a.provider_mode=$2 AND a.voice_profile<>p.value AND (c.platform<>'telegram' OR c.audio_sent_id IS NULL)
   ORDER BY c.id LIMIT 100''',json.dumps(profiles),settings.provider)
  for card in cards:
   async with chat_lock(connection,card['telegram_chat_id']),connection.transaction():
@@ -419,14 +419,14 @@ async def dispatch(connection):
  cards=await connection.fetch("""SELECT c.id,c.telegram_chat_id FROM reading_cards c JOIN reading_audio a ON a.id=c.audio_id
   JOIN telegram_chats t ON t.telegram_chat_id=c.telegram_chat_id AND t.is_active
   WHERE a.state='ready' AND c.telegram_message_id IS NOT NULL
-  AND CASE WHEN c.platform='max' THEN c.audio_offered_id IS DISTINCT FROM c.audio_id
+  AND CASE WHEN c.platform<>'telegram' THEN c.audio_offered_id IS DISTINCT FROM c.audio_id
       ELSE c.audio_sent_id IS DISTINCT FROM c.audio_id END
   ORDER BY c.id LIMIT 100""")
  count=0
  for hint in cards:
   async with chat_lock(connection,hint['telegram_chat_id']),connection.transaction():
    card=await connection.fetchrow('SELECT * FROM reading_cards WHERE id=$1 FOR UPDATE',hint['id'])
-   confirmed=card.get('audio_offered_id') if card.get('platform')=='max' else card['audio_sent_id']
+   confirmed=card.get('audio_offered_id') if card.get('platform','telegram')!='telegram' else card['audio_sent_id']
    if not await media(connection,card) or card['audio_id']==confirmed:
     continue
    chat=await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1',card['telegram_chat_id'])

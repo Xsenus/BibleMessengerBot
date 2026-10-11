@@ -189,6 +189,22 @@ services:
       timeout: 10s
       retries: 3
 
+  vkbot:
+    <<: *app
+    profiles: [vk]
+    mem_limit: 384m
+    cpus: 0.5
+    command: [python, -m, app.vkbot.main]
+    depends_on:
+      postgres: {condition: service_healthy}
+      bootstrap: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -m, app.healthcheck, vkbot]
+      start_period: 60s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   illustrator:
     <<: *app
     mem_limit: 384m

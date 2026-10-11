@@ -6,6 +6,7 @@ from aiogram.types import InlineKeyboardButton
 from aiogram.exceptions import TelegramAPIError
 from app.bot.commands import encode_callback
 from app.bot.transport import TelegramSender
+from app.services.platforms import is_bridged
 from app.services import illustrations
 from app.services.accounts import upsert_user,upsert_chat
 from app.services.errors import UserError,SendError
@@ -76,7 +77,7 @@ async def destination(connection: Any, bot: Any, current_chat: Any, actor_id: in
 async def reply(bot: Any, connection: Any, settings: Any, chat_id: int, text: str,
                 markup: Any = None, thread: int | None = None) -> None:
     """Отправить ответ: в MAX — через очередь, в Telegram — безопасно разбив HTML на части и подготовив кнопки языков. Неопределённый результат отправки автоматически не повторяется."""
-    if getattr(bot,'platform',None)=='max':
+    if is_bridged(getattr(bot,'platform',None)):
         await bot.queue_response(connection,settings,chat_id,text,markup)
         return
     parts = illustrations.chunks(text,getattr(text,'image_id',None),settings.max_message_length)

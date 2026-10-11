@@ -23,6 +23,7 @@ from aiogram.types import (
 )
 
 from app.services.errors import SendError
+from app.services.platforms import is_bridged
 from app.services.formatting import plain_text, utf16_length
 from app.services.rate_limit import wait_send_slot
 
@@ -40,7 +41,7 @@ class TelegramSender:
         self, chat_id: int, text: Any, thread_id: int | None = None, *, reply_markup: Any = None
     ) -> int:
         """Отправить одну часть (текст, фото или «богатое» сообщение) и вернуть ID сообщения. Для MAX делегирует отправителю MAX. Ошибки разделяются: ограничение скорости (`retry` со временем ожидания), запрет (`forbidden`), отказ (`rejected`) и неясный сетевой сбой (`uncertain`); правка сообщения при сбое безопасно повторяется."""
-        if getattr(self.bot,'platform',None)=='max':
+        if is_bridged(getattr(self.bot,'platform',None)):
             return await self.bot.sender(self.connection).send(chat_id,text,thread_id,reply_markup=reply_markup)
         await wait_send_slot(
             self.connection,

@@ -13,6 +13,7 @@ from aiogram.types import FSInputFile, KeyboardButton, ReplyKeyboardMarkup
 
 from app.services.formatting import escape, plain_text, utf16_length
 from app.services.features import support_enabled
+from app.services.platforms import is_bridged
 from app.services.i18n import available_ui, tr
 from app.services.rate_limit import wait_send_slot
 
@@ -135,7 +136,7 @@ async def send_welcome(bot: Any, connection: Any, settings: Any, chat_id: int,
                        text: str, markup: ReplyKeyboardMarkup,
                        *, image_path: Path | None = None) -> bool:
     """Отправить приветствие одним фото (повторно используется file_id Telegram). Возвращает False, если нужно отправить обычный текст: подпись длиннее лимита, нет файла или фото не отправилось."""
-    if getattr(bot,'platform',None)=='max':
+    if is_bridged(getattr(bot,'platform',None)):
         await bot.queue_welcome(connection,settings,chat_id,text,markup)
         return True
     path = image_path or WELCOME_PATH

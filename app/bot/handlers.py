@@ -32,7 +32,7 @@ from app.bot.menus import (  # noqa: F401 - re-exported for tests and callers
 
 router = Router(name='localized-destinations')
 LOGGER = logging.getLogger(__name__)
-KNOWN_COMMANDS = frozenset({c.command for c in commands_for('en')}|{'start','help','admin','claim','announce'})
+KNOWN_COMMANDS = frozenset({c.command for c in commands_for('en')}|{'start','help','admin','claim','announce','post'})
 
 
 @router.message(F.text.startswith('/'))
@@ -250,6 +250,34 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
             LOGGER.error('Callback failed: %s',type(error).__name__)
             text,markup = tr(locale,'not_ready'),None
         await reply(bot,connection,settings,callback.message.chat.id,text,markup,callback.message.message_thread_id)
+
+
+@router.channel_post()
+async def channel_post_handler(message: Message,bot: Any,db_pool: Any) -> None:
+    """Пост канала, где бот состоит администратором: передаётся в источники контента (если источник включён)."""
+    from app.services.chat_sources import ingest_post
+    text = message.text or message.caption or ''
+    image = None
+    if message.photo:
+        try:
+            buffer = await bot.download(message.photo[-1])
+            image = buffer.read() if buffer else None
+        except Exception as error:
+            LOGGER.warning('Channel photo download failed: %s',type(error).__name__)
+    async with db_pool.acquire() as connection:
+        await ingest_post(connection,'telegram',message.chat.id,str(message.message_id),text,{},
+            posted_at=int(message.date.timestamp()),title=message.chat.title or '',image=image)
+
+
+@router.message(F.chat.type.in_({'group','supergroup'}),F.text,~F.text.startswith('/'))
+async def group_message_handler(message: Message,db_pool: Any) -> None:
+    """Обычное сообщение группы: передаётся в источники контента (работает только для включённого администратором источника)."""
+    if not message.from_user or message.from_user.is_bot:
+        return
+    from app.services.chat_sources import ingest_post
+    async with db_pool.acquire() as connection:
+        await ingest_post(connection,'telegram',message.chat.id,str(message.message_id),message.text or '',{},
+            posted_at=int(message.date.timestamp()),title=message.chat.title or '')
 
 
 @router.my_chat_member()
