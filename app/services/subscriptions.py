@@ -1,4 +1,4 @@
-"""Validated subscriptions with revisioned payloads and real plan durations."""
+"""Проверенные подписки с ревизиями и настоящей длительностью планов."""
 from __future__ import annotations
 from datetime import time
 from typing import Any
@@ -9,7 +9,7 @@ from app.services.locks import chat_lock
 from app.services.destinations import ensure_resolved, configure_chat
 
 async def cancel_subscription_jobs(connection: Any, subscription_id: int) -> None:
-    """Cancel only this schedule, leaving other modes and their checkpoints intact."""
+    """Отменить только задания этой подписки (другие режимы и их контрольные точки не трогаются)."""
     await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='subscription_changed',updated_at=now() WHERE subscription_id=$1 AND status IN ('pending','retry')", subscription_id)
 
 
@@ -19,7 +19,7 @@ VALID_MODES = {'sequential','verse_of_day','topic_of_day','reading_plan','mornin
 async def create_or_update_subscription(connection: Any, *, chat_id: int, created_by: int | None,
     translation_id: int, mode: str, send_time: time, timezone_name: str,
     plan_code: str | None = None) -> Any:
-    """A settings update cancels old snapshots; unchanged plans retain completed days."""
+    """Создать или обновить подписку чата: проверить режим, пояс, план и издание, при необходимости привести настройки чата, отменить старые снимки и увеличить ревизию. План сбрасывается только при смене плана или издания; завершённая подписка без сброса не меняется. Возвращает строку подписки."""
     if mode not in VALID_MODES:
         raise UserError('invalid')
     validate_timezone(timezone_name)
@@ -69,7 +69,7 @@ async def create_or_update_subscription(connection: Any, *, chat_id: int, create
 
 
 async def set_enabled(connection: Any, chat_id: int, enabled: bool, mode: str | None = None) -> int:
-    """Resume computes a future occurrence, preserving progress and completed plans."""
+    """Включить или приостановить подписки (все или один режим). При возобновлении вычисляется будущее время, прогресс сохраняется, завершённые планы пропускаются; незавершённые доставки требуют решения оператора."""
     if mode is not None and mode not in VALID_MODES:
         raise UserError('invalid')
     async with chat_lock(connection,chat_id), connection.transaction():
@@ -88,7 +88,7 @@ async def set_enabled(connection: Any, chat_id: int, enabled: bool, mode: str | 
 
 
 async def delete_subscriptions(connection: Any, chat_id: int, mode: str | None = None) -> int:
-    """Reject unknown modes instead of deleting every subscription on a typo."""
+    """Удалить подписки (все или один режим) и отменить их задания; опечатка в режиме не удаляет всё. Отписка возможна всегда, в том числе после неопределённой отправки. Возвращает число удалённых."""
     if mode is not None and mode not in VALID_MODES:
         raise UserError('invalid')
     async with chat_lock(connection,chat_id), connection.transaction():
@@ -103,7 +103,7 @@ async def delete_subscriptions(connection: Any, chat_id: int, mode: str | None =
 
 
 async def list_subscriptions(connection: Any, chat_id: int) -> list[Any]:
-    """List schedules for exactly one destination."""
+    """Подписки одного чата с названиями изданий."""
     return await connection.fetch('''SELECT s.*,t.title AS translation_title,t.source_translation_id,t.source_name AS translation_source_name
         FROM subscriptions s JOIN translations t ON t.id=s.translation_id
         WHERE s.telegram_chat_id=$1 ORDER BY s.mode''',chat_id)

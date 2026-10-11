@@ -1,7 +1,6 @@
-"""Transport-independent, checkpointed delivery state machine.
+"""Конечный автомат доставки с контрольными точками, не зависящий от транспорта.
 
-A timeout is *not* evidence of failed delivery. Ambiguous outcomes require a human
-choice rather than automatically sending the same message again.
+Тайм-аут не доказывает, что сообщение не доставлено: неоднозначный результат требует решения человека, а не автоматической повторной отправки.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -11,7 +10,7 @@ from app.services.errors import SendError
 
 @dataclass(frozen=True, slots=True)
 class Envelope:
-    """An immutable payload with the next unconfirmed message position."""
+    """Неизменяемое задание: ID, чат, части сообщения, позиция следующей неподтверждённой части и тема форума."""
     id: int
     chat_id: int
     chunks: tuple[str | dict, ...]
@@ -20,24 +19,19 @@ class Envelope:
 
 
 class Checkpoints(Protocol):
-    """Persistence operations must fail loudly; errors must never mean success."""
+    """Контракт хранения контрольных точек: `begin` (пометить начало отправки), `acknowledge` (записать подтверждение), `fail` (записать сбой). Ошибки хранилища должны быть громкими и никогда не означать успех."""
     async def begin(self, envelope: Envelope) -> bool: ...
     async def acknowledge(self, envelope: Envelope, message_id: int) -> None: ...
     async def fail(self, envelope: Envelope, kind: str, retry_after: float) -> None: ...
 
 
 class Sender(Protocol):
-    """Known API rejections are SendError; network ambiguity is 'uncertain'."""
+    """Контракт отправителя: известные отказы API — SendError, сетевая неопределённость — `uncertain`."""
     async def send(self, chat_id: int, text: str | dict, thread_id: int | None) -> int: ...
 
 
 async def dispatch_chunk(envelope: Envelope, checkpoints: Checkpoints, sender: Sender) -> str:
-    """Send exactly one chunk and commit the acknowledgement before advancing.
-
-    Storage failures, including after a successful API response, propagate. The
-    persistent 'sending' checkpoint is reviewed after exclusive-worker restart.
-    CancelledError also propagates, preserving that same safety property.
-    """
+    """Отправить ровно одну часть и зафиксировать подтверждение до перехода к следующей. Возвращает `stale`, `sent`, `partial` или вид ошибки. Сбой хранилища (в том числе после успешного ответа API) поднимается наружу: контрольная точка `sending` будет разобрана после перезапуска."""
     if not envelope.chunks or not 0 <= envelope.next_chunk < len(envelope.chunks):
         raise ValueError('Invalid delivery checkpoint')
     if not await checkpoints.begin(envelope):

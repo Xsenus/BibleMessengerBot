@@ -1,4 +1,4 @@
-"""Select transport from the persistent destination, never from the incoming actor."""
+"""Выбор транспорта по постоянному назначению чата, а не по отправителю входящего сообщения."""
 from __future__ import annotations
 
 import asyncio
@@ -12,9 +12,10 @@ from app.services.errors import SendError
 
 
 class PlatformTransports:
-    """Lazy MAX discovery keeps Telegram delivery independent of MAX availability."""
+    """Набор транспортов (Telegram и MAX): MAX подключается лениво, чтобы доставка в Telegram не зависела от доступности MAX."""
 
     def __init__(self, telegram_bot, settings, *, max_client=None):
+        """Запомнить бота Telegram и настройки, прочитать настройки MAX (при неверной конфигурации MAX отключается, Telegram продолжает работать)."""
         self.telegram_bot, self.settings = telegram_bot, settings
         try:
             config = MaxSettings.from_env()
@@ -27,13 +28,16 @@ class PlatformTransports:
         self._lock = asyncio.Lock()
 
     async def close(self):
+        """Закрыть клиент MAX."""
         if self.max_client:
             await self.max_client.close()
 
     def sender(self, connection):
+        """Создать отправителя, выбирающего транспорт по платформе чата."""
         return DestinationSender(self, connection)
 
     async def max_sender(self, connection):
+        """Получить отправителя MAX; при первом вызове проверяет, что токен принадлежит боту. Недоступность MAX — временный отказ (`retry`)."""
         if not self.max_client:
             raise SendError('retry', 60)
         async with self._lock:
@@ -49,10 +53,13 @@ class PlatformTransports:
 
 
 class DestinationSender:
+    """Отправитель, определяющий платформу чата по БД."""
     def __init__(self, transports, connection):
+        """Запомнить набор транспортов и соединение."""
         self.transports, self.connection = transports, connection
 
     async def send(self, chat_id, text, thread_id=None, *, reply_markup=None):
+        """Узнать платформу чата и отправить через Telegram или MAX; неизвестная платформа — отказ."""
         platform = await self.connection.fetchval('SELECT platform FROM telegram_chats WHERE telegram_chat_id=$1', chat_id)
         if platform == 'telegram':
             sender = TelegramSender(self.transports.telegram_bot, self.connection, self.transports.settings)
