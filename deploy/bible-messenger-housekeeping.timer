@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly BibleMessengerBot retention housekeeping
+
+[Timer]
+OnCalendar=Sun *-*-* 03:20:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

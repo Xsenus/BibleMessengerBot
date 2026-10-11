@@ -1,0 +1,11 @@
+[Unit]
+Description=BibleMessengerBot retention housekeeping
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/bible-messenger-bot
+ExecStart=/usr/bin/docker compose --profile maintenance run --rm --no-deps housekeeping
+Nice=15
+IOSchedulingClass=idle

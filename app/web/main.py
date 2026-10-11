@@ -1,6 +1,9 @@
 """Read-only, locally bound operational dashboard. Settings are changed in Telegram."""
 from __future__ import annotations
 import json
+import os
+import time
+from decimal import Decimal
 import secrets
 from contextlib import asynccontextmanager
 from html import escape
@@ -95,12 +98,24 @@ async def api_stats(response: Response) -> dict[str,Any]:
     return await operator_data()
 
 
+METRICS_TTL_SECONDS = 10.0
+_metrics_cache: list = [0.0,'']  # [expires_at (monotonic), rendered text]: bounds DB load from frequent scrapes
+
+
+def settings_budget() -> Decimal:
+    return Decimal(os.getenv('IMAGE_MONTHLY_BUDGET_USD','10'))
+
+
 @app.get('/metrics',response_class=PlainTextResponse,dependencies=[Depends(require_basic)])
 async def metrics() -> PlainTextResponse:
     """Prometheus text format (HTTP basic auth: user admin, password ADMIN_API_KEY); derived from durable tables."""
-    pool = await create_pool(settings)
-    async with pool.acquire() as connection:
-        body = (await collect_metrics(connection)).render()
+    now = time.monotonic()
+    if _metrics_cache[0] < now:
+        pool = await create_pool(settings)
+        async with pool.acquire() as connection:
+            _metrics_cache[1] = (await collect_metrics(connection,settings_budget())).render()
+        _metrics_cache[0] = now + METRICS_TTL_SECONDS
+    body = _metrics_cache[1]
     return PlainTextResponse(body,media_type='text/plain; version=0.0.4',headers={'Cache-Control':'no-store'})
 
 

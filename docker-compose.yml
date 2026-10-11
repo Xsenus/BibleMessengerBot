@@ -221,6 +221,15 @@ services:
     command: [python, -m, app.alerts]
     depends_on: *ready
 
+  housekeeping:
+    <<: *app
+    profiles: [maintenance]
+    mem_limit: 128m
+    cpus: 0.25
+    restart: 'no'
+    command: [python, -m, app.maintenance]
+    depends_on: *ready
+
 volumes:
   prayer_models:
   postgres_data:
