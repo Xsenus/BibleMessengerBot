@@ -111,6 +111,12 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             # Код-приглашение от владельца: пользователь (на любой платформе) становится администратором.
             return ('✅ Вы назначены администратором. Меню: /admin' if locale=='ru' else '✅ You are now an administrator. Menu: /admin'),None
         return tr(locale,'owner_ok' if ok else 'owner_fail'),None
+    # /announce — объявления и расписания (текст берётся из исходного сообщения, чтобы сохранить переводы строк)
+    if name=='announce':
+        from app.services import announcements
+        raw = (message.text or '').split(None,1)
+        text,markup = await announcements.command(connection,user.id,chat,raw[1] if len(raw)>1 else '')
+        return text,(markup if markup.inline_keyboard else None)
     # /admin — меню администратора (доступно администраторам и владельцу)
     if name=='admin':
         from app.bot import admin

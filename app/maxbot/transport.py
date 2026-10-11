@@ -60,6 +60,8 @@ class MaxSender:
         # Check asset approval on every reuse: a cached token cannot revive quarantine.
         if kind == 'image':
             asset = await self.connection.fetchrow("SELECT image_data,mime_type FROM verse_illustrations WHERE id=$1 AND status='ready'", identifier)
+        elif kind == 'asset':
+            asset = await self.connection.fetchrow("SELECT data AS image_data,mime_type FROM media_assets WHERE id=$1", identifier)
         else:
             asset = await self.connection.fetchrow("SELECT audio_data FROM reading_audio WHERE id=$1 AND state='ready'", identifier)
         if not asset:
@@ -67,12 +69,12 @@ class MaxSender:
         cached = await self.connection.fetchval('SELECT payload FROM max_media WHERE bot_id=$1 AND kind=$2 AND asset_id=$3', self.bot_id, kind, identifier)
         if cached:
             return json.loads(cached) if isinstance(cached, str) else cached
-        if kind == 'image':
+        if kind in {'image', 'asset'}:
             data, suffix, mime = image_upload(bytes(asset['image_data']), asset['mime_type'])
         else:
             data, suffix, mime = bytes(asset['audio_data']), 'mp3', 'audio/mpeg'
         try:
-            payload = await self.client.upload(kind, data, f'reading-{identifier}.{suffix}', mime)
+            payload = await self.client.upload('image' if kind == 'asset' else kind, data, f'reading-{identifier}.{suffix}', mime)
         except MaxAPIError as error:
             # Media preparation has not sent a visible message yet. A safe retry
             # does not repeat a delivered reading or another paid generation.
@@ -136,12 +138,14 @@ class MaxSender:
                     keyboard = keyboard_attachment(None, locale=locale, navigation=navigation)
                     if keyboard:
                         attachments.append(keyboard)
-                elif kind in {'rich', 'rich_edit', 'photo', 'max_text', 'max_welcome'}:
+                elif kind in {'rich', 'rich_edit', 'photo', 'asset_photo', 'max_text', 'max_welcome'}:
+                    if kind == 'asset_photo':
+                        attachments.append({'type': 'image', 'payload': await self.media('asset', chunk.get('asset_id'))})
                     if kind == 'max_welcome':
                         attachments.append({'type': 'image', 'payload': await self.welcome_media(chunk.get('asset_sha256'))})
                     if chunk.get('image_id'):
                         attachments.append({'type': 'image', 'payload': await self.media('image', chunk['image_id'])})
-                    content = chunk.get('caption', '') if kind == 'photo' else chunk.get('text')
+                    content = chunk.get('caption', '') if kind in {'photo', 'asset_photo'} else chunk.get('text')
                     if not isinstance(content, str):
                         raise SendError('rejected')
                     if chunk.get('card_id') and chunk.get('audio_id'):

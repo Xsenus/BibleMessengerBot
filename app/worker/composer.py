@@ -1,11 +1,11 @@
-"""Служба подготовки молитв: составляет тексты заранее и не мешает срочной отправке в Telegram."""
+"""Служба подготовки молитв и запуска объявлений по расписанию: работает заранее и не мешает срочной отправке сообщений."""
 import asyncio
 import contextlib
 import logging
 
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
-from app.services import prayers
+from app.services import announcements, prayers
 from app.services.locks import lock_key
 
 LOGGER=logging.getLogger(__name__)
@@ -34,6 +34,7 @@ async def worker():
             while True:
                 async with pool.acquire() as connection:
                     await prayers.prepare_due(connection)
+                    await announcements.run_due(connection)
                 await asyncio.sleep(10)
     finally:
         if beat:

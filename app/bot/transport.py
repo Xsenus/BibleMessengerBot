@@ -52,6 +52,8 @@ class TelegramSender:
             if isinstance(text, dict):
                 if text.get("kind") in {"rich", "rich_edit"}:
                     message = await self._rich(chat_id, text, thread_id, reply_markup)
+                elif text.get("kind") == "asset_photo":
+                    message = await self._asset_photo(chat_id, text, thread_id, reply_markup)
                 else:
                     message = await self._photo(chat_id, text, thread_id, reply_markup)
             else:
@@ -271,4 +273,38 @@ class TelegramSender:
             await record_view(self.connection, chat_id, identifier)
         except Exception as error:
             LOGGER.warning("Illustration view history deferred (%s)", type(error).__name__)
+        return sent
+
+    async def _asset_photo(self, chat_id: int, chunk: dict, thread_id: int | None, markup: Any) -> Any:
+        """Отправить общую картинку (объявление, копия поста) с подписью: сначала по сохранённому file_id, при его
+        устаревании — загрузкой файла; новый file_id запоминается в `media_assets`."""
+        identifier, caption = chunk.get("asset_id"), chunk.get("caption", "")
+        if (type(identifier) is not int or identifier <= 0 or not isinstance(caption, str)
+                or utf16_length(plain_text(caption)) > 1024):
+            raise SendError("rejected")
+        asset = await self.connection.fetchrow(
+            """SELECT mime_type,telegram_file_id,telegram_bot_id,
+            CASE WHEN telegram_bot_id=$2 AND telegram_file_id IS NOT NULL THEN NULL ELSE data END AS data
+            FROM media_assets WHERE id=$1""", identifier, self.bot.id)
+        if not asset:
+            raise SendError("rejected")
+        cached = asset["telegram_file_id"] if asset["telegram_bot_id"] == self.bot.id else None
+        suffix = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[asset["mime_type"]]
+        kwargs = dict(chat_id=chat_id, caption=caption or None, parse_mode="HTML", message_thread_id=thread_id,
+                      reply_markup=markup, request_timeout=20)
+        try:
+            sent = await self.bot.send_photo(
+                photo=cached or BufferedInputFile(bytes(asset["data"]), filename=f"asset-{identifier}.{suffix}"), **kwargs)
+        except TelegramBadRequest:
+            if not cached:
+                raise
+            data = await self.connection.fetchval("SELECT data FROM media_assets WHERE id=$1", identifier)
+            sent = await self.bot.send_photo(photo=BufferedInputFile(bytes(data), filename=f"asset-{identifier}.{suffix}"), **kwargs)
+        if sent.photo:
+            try:
+                await self.connection.execute(
+                    "UPDATE media_assets SET telegram_file_id=$2,telegram_bot_id=$3 WHERE id=$1",
+                    identifier, sent.photo[-1].file_id, self.bot.id)
+            except Exception as error:
+                LOGGER.warning("Asset file cache deferred (%s)", type(error).__name__)
         return sent

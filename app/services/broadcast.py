@@ -71,13 +71,9 @@ def offer_markup(chat: Any, draft_id: int) -> tuple[str, InlineKeyboardMarkup]:
 
 
 async def recipients(connection: Any) -> list[Any]:
-    """Активные назначения для рассылки: личные чаты незаблокированных пользователей, группы и каналы.
-
-    Назначения без выбранного издания пропускаются позже при отрисовке.
-    """
-    return await connection.fetch('''SELECT c.* FROM telegram_chats c
-        LEFT JOIN telegram_users u ON c.chat_type='private' AND u.telegram_user_id=c.telegram_chat_id
-        WHERE c.is_active AND NOT COALESCE(u.is_blocked,false) ORDER BY c.telegram_chat_id''')
+    """Получатели рассылки отрывка — все активные назначения (см. fanout.recipients)."""
+    from app.services import fanout
+    return await fanout.recipients(connection)
 
 
 async def load_draft(connection: Any, draft_id: int, actor_id: int) -> Any:

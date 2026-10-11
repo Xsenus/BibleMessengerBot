@@ -32,7 +32,7 @@ from app.bot.menus import (  # noqa: F401 - re-exported for tests and callers
 
 router = Router(name='localized-destinations')
 LOGGER = logging.getLogger(__name__)
-KNOWN_COMMANDS = frozenset({c.command for c in commands_for('en')}|{'start','help','admin','claim'})
+KNOWN_COMMANDS = frozenset({c.command for c in commands_for('en')}|{'start','help','admin','claim','announce'})
 
 
 @router.message(F.text.startswith('/'))

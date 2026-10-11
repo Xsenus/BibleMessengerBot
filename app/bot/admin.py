@@ -92,7 +92,13 @@ async def stats(connection: Any, actor_id: int, chat: Any, argument: str = '') -
     return '\n'.join(lines), InlineKeyboardMarkup(inline_keyboard=[back_row(chat)])
 
 
-SECTIONS = {'home': home, 'admins': admins, 'invite': invite, 'stats': stats}
+async def announcements_section(connection: Any, actor_id: int, chat: Any, argument: str = '') -> tuple[str, InlineKeyboardMarkup]:
+    """Раздел «Объявления» (см. services.announcements.section)."""
+    from app.services import announcements
+    return await announcements.section(connection, actor_id, chat, argument)
+
+
+SECTIONS = {'home': home, 'admins': admins, 'invite': invite, 'stats': stats, 'ann': announcements_section}
 
 
 async def callback(connection: Any, actor_id: int, chat: Any, value: str) -> tuple[str, InlineKeyboardMarkup]:
@@ -101,6 +107,8 @@ async def callback(connection: Any, actor_id: int, chat: Any, value: str) -> tup
         raise UserError('forbidden')
     if value.startswith('rm'):
         return await remove(connection, actor_id, chat, value[2:])
+    if value[:2] in {'ap', 'ar', 'an', 'ad'} and value[2:].isdigit():
+        return await announcements_section(connection, actor_id, chat, value)
     section = SECTIONS.get(value)
     if section is None:
         raise UserError('invalid')
