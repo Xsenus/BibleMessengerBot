@@ -104,8 +104,14 @@ async def sources_section(connection: Any, actor_id: int, chat: Any, argument: s
     return await chat_sources.section(connection, actor_id, chat, argument)
 
 
+async def video_section(connection: Any, actor_id: int, chat: Any, argument: str = '') -> tuple[str, InlineKeyboardMarkup]:
+    """Раздел «Видео» (см. services.video_watch.section)."""
+    from app.services import video_watch
+    return await video_watch.section(connection, actor_id, chat, argument)
+
+
 SECTIONS = {'home': home, 'admins': admins, 'invite': invite, 'stats': stats, 'ann': announcements_section,
-            'src': sources_section}
+            'src': sources_section, 'vid': video_section}
 
 
 async def callback(connection: Any, actor_id: int, chat: Any, value: str) -> tuple[str, InlineKeyboardMarkup]:
@@ -118,6 +124,8 @@ async def callback(connection: Any, actor_id: int, chat: Any, value: str) -> tup
         return await announcements_section(connection, actor_id, chat, value)
     if value[:2] in {'sx', 'sm'} and value[2:].isdigit():
         return await sources_section(connection, actor_id, chat, value)
+    if value[:2] in {'vt', 'vn'} and value[2:].isdigit():
+        return await video_section(connection, actor_id, chat, value)
     section = SECTIONS.get(value)
     if section is None:
         raise UserError('invalid')

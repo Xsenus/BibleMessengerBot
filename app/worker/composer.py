@@ -19,6 +19,15 @@ async def heartbeat(pool):
         await asyncio.sleep(20)
 
 
+async def run_video_watch(connection):
+    """Опросить видеоканалы, срок которых наступил; сбой слежения не должен останавливать подготовку молитв и объявления."""
+    try:
+        from app.services import video_watch
+        await video_watch.run_due(connection)
+    except Exception as error:
+        LOGGER.error('Video watch failed (%s)', type(error).__name__)
+
+
 async def worker():
     """Запустить службу: взять блокировки (единственный экземпляр), запустить сигнал жизни и каждые 10 секунд готовить приглашения на молитву, срок которых близок."""
     settings=Settings.from_env(require_bot_token=False)
@@ -35,6 +44,7 @@ async def worker():
                 async with pool.acquire() as connection:
                     await prayers.prepare_due(connection)
                     await announcements.run_due(connection)
+                    await run_video_watch(connection)
                 await asyncio.sleep(10)
     finally:
         if beat:

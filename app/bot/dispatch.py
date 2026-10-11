@@ -122,6 +122,10 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
     if name=='post':
         from app.services import chat_sources
         return await chat_sources.command(connection,user.id,args,locale=='ru'),None
+    # /video [add платформа канал [notify] | on|off|notify|silent|del ID] — слежение за видеоканалами
+    if name=='video':
+        from app.services import video_watch
+        return await video_watch.command(connection,user.id,chat,args)
     # /admin — меню администратора (доступно администраторам и владельцу)
     if name=='admin':
         from app.bot import admin
