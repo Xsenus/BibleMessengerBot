@@ -1,4 +1,4 @@
-"""Prompt strategies, bounded OpenAI requests and durable generation reservations."""
+"""Иллюстрации: шаблоны запросов, ограниченные запросы к OpenAI и устойчивые резервы бюджета."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from app.services.image_providers import GenerationError
 
 @dataclass(frozen=True)
 class ArtSettings:
+    """Настройки иллюстраций: режим (`manual`, `openai`, `auto`), ключи и модель, качество и размер, месячный бюджет, дневной лимит запросов на провайдера и порядок провайдеров."""
     provider: str = "manual"
     key: str = field(default="", repr=False)
     model: str = "gpt-image-2"
@@ -35,6 +36,7 @@ class ArtSettings:
 
     @classmethod
     def from_env(cls):
+        """Прочитать настройки из ILLUSTRATION_PROVIDER, OPENAI_*, IMAGE_* и ключей провайдеров; проверить допустимость значений (ValueError при ошибке)."""
         from app.services.image_providers import KEY_ENV, NAMES
         from app.services.openai_credentials import from_env as credential_pool
         result = cls(
@@ -64,6 +66,7 @@ class ArtSettings:
 def prompt(
     row, edition, *, variant="symbolic", slot="verse_of_day", day=None, theme="", context=""
 ):
+    """Собрать запрос на картинку: для главы — по всей главе, для стиха — по целевому стиху с соседним контекстом и вариантом стиля (`historical`, `symbolic`, `watercolor`), освещением по времени суток и темой. Цитаты — данные, а не инструкции; запрещены надписи, современные предметы, жестокость и изображение Бога."""
     if row.get('artwork_scope') == 'chapter':
         result = (
             'Create one high-quality biblical illustration for the COMPLETE CHAPTER below. '
@@ -124,6 +127,7 @@ def prompt(
 
 
 async def source_context(connection, row, edition):
+    """Короткий контекст из того же издания: стихи читаемого отрывка или два соседних стиха с каждой стороны (до 1800 символов)."""
     if row.get("reading_rows"):
         return "\n".join(f"{r['verse']}: {r['text']}" for r in row["reading_rows"])[:1800]
     neighbors = await connection.fetch(
@@ -141,6 +145,7 @@ async def source_context(connection, row, edition):
 
 
 def validate_image(data):
+    """Проверить, что данные — допустимая картинка (формат, размеры от 256 пикселей, до 9 млн пикселей, файл целый)."""
     illustrations.image_type(data)
     with Image.open(BytesIO(data)) as image:
         if image.width * image.height > 9_000_000 or image.width < 256 or image.height < 256:
@@ -150,6 +155,7 @@ def validate_image(data):
 
 
 async def generate(settings: ArtSettings, text: str, *, client=None):
+    """Одна платная генерация картинки в OpenAI Images (JPEG): сетевой сбой — неопределённый исход, остальные ошибки разбираются по коду ответа. Возвращает (данные, использование, идентификатор запроса)."""
     if not settings.key:
         raise GenerationError("missing_key")
     owned = client is None
@@ -188,6 +194,7 @@ async def generate(settings: ArtSettings, text: str, *, client=None):
 
 
 async def enqueue(connection, row, edition, *, subscription=None, **context):
+    """Поставить стих или главу в очередь иллюстраций под блокировкой стиха: если свежая картинка есть — вернуть её, иначе создать ожидающую запись, задание с запросом и (для подписки) цель доставки. Возвращает ID картинки."""
     async with illustrations.version_lock(connection, row, edition):
         fresh = await illustrations.recent(connection, row, edition)
         if fresh:
@@ -220,7 +227,7 @@ async def enqueue(connection, row, edition, *, subscription=None, **context):
 
 
 async def request_image(connection, row, edition, chat, caption, request_key, thread_id=None):
-    """Deduplicate on-demand requests without reserving or spending API budget here."""
+    """Запомнить запрос картинки по требованию (без траты бюджета): карточка получит картинку правкой, когда она будет готова. Возвращает True, если запрос поставлен в ожидание."""
     from app.services.locks import chat_lock
     import json
 
@@ -257,7 +264,7 @@ async def request_image(connection, row, edition, chat, caption, request_key, th
 
 
 async def dispatch_requests(connection, maximum=100):
-    """Edit only the original acknowledged card; never send a second message."""
+    """Для ожидающих карточек с готовой картинкой поставить правку исходного сообщения (только правка, второе сообщение не отправляется); устаревшие запросы отменяются."""
     from app.services.locks import chat_lock
     from app.worker.delivery import insert_payload
 
@@ -343,7 +350,7 @@ async def dispatch_requests(connection, maximum=100):
 
 
 async def upgrade_queued_prompts(connection):
-    """Only unattempted jobs may change prompt; paid attempt evidence stays frozen."""
+    """Обновить запрос старой версии у заданий без попыток; платные попытки и их запросы остаются неизменными."""
     jobs = await connection.fetch(
         """SELECT j.id,j.prompt_variant,i.translation_id,i.book_code,i.chapter,i.verse,i.text_sha256
         FROM image_generation_jobs j JOIN verse_illustrations i ON i.id=j.image_id
@@ -390,6 +397,7 @@ async def upgrade_queued_prompts(connection):
 
 
 async def plan_ahead(connection, *, now=None, horizon=1):
+    """Спланировать картинки на сегодня и завтра по включённым подпискам (стих дня, утро, вечер): выбрать стих, поставить задание и убрать устаревшие цели той же даты (оплаченные задания сохраняются)."""
     from zoneinfo import ZoneInfo
 
     current = now or datetime.now(UTC)
@@ -431,6 +439,7 @@ async def plan_ahead(connection, *, now=None, horizon=1):
 
 
 async def reserve(connection, job_id, settings: ArtSettings):
+    """Зарезервировать бюджет под задание OpenAI: месячная сумма и суточное число запросов; возвращает ID попытки или None."""
     async with connection.transaction():
         await connection.execute("SELECT pg_advisory_xact_lock($1)", lock_key("image-budget", 1))
         job = await connection.fetchrow(
@@ -464,7 +473,7 @@ async def reserve(connection, job_id, settings: ArtSettings):
 
 
 async def due_jobs(connection, maximum=6, *, max_attempts=3):
-    """One shared job remains eligible while any acknowledged active card waits."""
+    """Задания, которым пора генерироваться: нужны активным подпискам на будущие даты или ожидающим карточкам (по приоритету и сроку), включая продолжение принятых удалённых задач."""
     return await connection.fetch("""WITH eligible AS (
         SELECT j.id,min(t.scheduled_for) AS needed_at,0 AS priority
         FROM image_generation_jobs j
@@ -492,6 +501,7 @@ async def due_jobs(connection, maximum=6, *, max_attempts=3):
 
 
 async def process_job(connection, job_id, settings: ArtSettings, *, generator=generate):
+    """Обработать задание через OpenAI: проверить, что текст не изменился, зарезервировать бюджет, сгенерировать, проверить OCR-фильтром и сохранить картинку; ошибки определяют состояние (`retry`, `failed`, `uncertain`), а сбой сохранения не вызывает повторной платной отправки."""
     import json
 
     job = await connection.fetchrow(
