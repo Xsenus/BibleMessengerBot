@@ -8,6 +8,9 @@
   доставках, молчащих службах, бюджете картинок, блокировках провайдеров и устаревших копиях.
   См. [MONITORING.md](docs/MONITORING.md).
 - Миграция 023: анонимные суточные счётчики использования функций (без идентификаторов пользователей).
+- `app.maintenance` (служба `housekeeping`): пакетное удаление устаревших служебных строк; миграция 024 с частичными индексами.
+- `LOG_FORMAT=json` — структурированные журналы с редактированием секретов; `/metrics` кэшируется на 10 с.
+- Документация: [MONITORING](docs/MONITORING.md), [VPS_REQUIREMENTS](docs/VPS_REQUIREMENTS.md); обновлены CONFIGURATION, DATABASE, ARCHITECTURE, OPERATIONS, TROUBLESHOOTING, CONTRIBUTING.
 - `app/bot/handlers.py` разделён на `common`, `menus`, `dispatch` и роутеры; поведение не изменено.
 
 ## 1.20.0 — 2026-10-09

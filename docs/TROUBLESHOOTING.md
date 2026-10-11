@@ -9,6 +9,9 @@
 | `password authentication failed` | Проверьте согласованность `POSTGRES_PASSWORD` и URI `DATABASE_URL`; не удаляйте том. |
 | `Stop bot, worker and admin before ... maintenance` | Работает runtime-блокировка. Используйте `fill_database.sh` либо после backup остановите три службы этого проекта. |
 | `Applied migration was modified` | Восстановите оригинальный применённый SQL; дальнейшее изменение оформляйте новой миграцией. |
+| Нет оповещений в Telegram | Нужен владелец (`/start` с `OWNER_CLAIM_CODE`). Проверьте `docker compose --profile maintenance run --rm --no-deps alerts`: вывод JSON показывает активные оповещения. |
+| `/metrics` отвечает 401 | HTTP Basic: пользователь `admin`, пароль `ADMIN_API_KEY` (не менее 24 символов). |
+| Растёт `delivery_log` | Запустите `housekeeping` (`--dry-run` покажет объём); см. [MONITORING](MONITORING.md#хранение-данных-retention). |
 | `/ready` возвращает 503 | Проверьте аудит, наличие фактических изданий и `REQUIRED_LANGUAGES`. Profile `none` — специальный режим без требования корпуса, не способ выдать пустую БД за готовую. |
 | Импорт завершился кодом 2 | Это частичный результат. Читайте полный отчёт, ошибки источников и список `held`; успешные издания могли сохраниться. |
 | Источник недоступен / таймаут | Проверьте DNS, исходящий HTTPS, время сервера и место в кэше. Повторите тот же импорт; не отключайте TLS/лицензионные проверки. |

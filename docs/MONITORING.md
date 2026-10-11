@@ -51,3 +51,24 @@ sudo systemctl daemon-reload && sudo systemctl enable --now bible-messenger-aler
 SELECT platform, event, sum(count) FROM usage_events
 WHERE day > current_date - 7 GROUP BY 1, 2 ORDER BY 3 DESC;
 ```
+
+## Хранение данных (retention)
+
+`python -m app.maintenance` (службa `housekeeping`, профиль `maintenance`) удаляет небольшими пачками только устаревшие
+служебные строки; тексты Библии, настройки, подписки, платежи и история бюджета картинок не затрагиваются:
+
+| Таблица | Что удаляется | Срок по умолчанию | Переменная |
+|---|---|---|---|
+| `delivery_log` | `sent`/`skipped`, не связанные с `prayer_occurrences` | 365 дней | `RETENTION_DELIVERY_DAYS` |
+| `max_inbox` | обработанные (`done`) события вебхука | 14 дней | `RETENTION_MAX_INBOX_DAYS` |
+| `operator_events` | события оператора | 180 дней | `RETENTION_EVENTS_DAYS` |
+| `usage_events` | суточные счётчики использования | 400 дней | `RETENTION_USAGE_DAYS` |
+
+Минимальный срок — 7 дней. Незавершённые (`pending`, `retry`, `sending`, `uncertain`) и `failed` доставки не удаляются.
+Проверка без изменений: `docker compose --profile maintenance run --rm --no-deps housekeeping python -m app.maintenance --dry-run`.
+Таймер раз в неделю: `sudo cp deploy/bible-messenger-housekeeping.{service,timer} /etc/systemd/system/ && sudo systemctl enable --now bible-messenger-housekeeping.timer`.
+
+## Формат журналов
+
+По умолчанию — текст. `LOG_FORMAT=json` включает по одному JSON-объекту на строку (`ts`, `level`, `logger`, `message`, `exception`)
+для сборщиков журналов; редактирование секретов применяется в обоих форматах. `/metrics` кэшируется на 10 секунд, поэтому частые опросы не нагружают БД.

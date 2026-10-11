@@ -39,6 +39,7 @@ Telegram-бот для чтения Библии и публикаций по р
 - Три адаптера источников, кэш с SHA-256, повторяемый импорт, сведения об источнике и лицензии.
 - Локальная административная страница только для чтения, диагностика, резервное копирование и восстановление.
 - Разовая добровольная поддержка проекта через Telegram Stars в личном чате.
+- Эксплуатация: метрики Prometheus (`/metrics`), оповещения владельцу в Telegram, анонимная статистика использования, автоматическая очистка устаревших служебных строк, JSON-журналы. [Мониторинг](docs/MONITORING.md) · [Требования к VPS](docs/VPS_REQUIREMENTS.md).
 
 Тематические ссылки поддерживаются для нумерации BibleNLP; для других источников этот режим отключён. «Стих дня» — алгоритмический выбор, а не церковный календарь. Подробные [ограничения](docs/LIMITATIONS.md).
 
@@ -115,6 +116,8 @@ sudo bash backup.sh
 | Иллюстрации стихов, БД и очередь генерации | [ILLUSTRATIONS](docs/ILLUSTRATIONS.md) |
 | Оформление профиля, изображения и кнопки | [BRANDING](docs/BRANDING.md) |
 | Источники, фильтры, кэш, отчёты импорта | [MULTISOURCE_IMPORT_RU](docs/MULTISOURCE_IMPORT_RU.md) |
+| Мониторинг, оповещения, retention | [MONITORING](docs/MONITORING.md) |
+| Размер сервера (CPU/RAM/диск) | [VPS_REQUIREMENTS](docs/VPS_REQUIREMENTS.md) |
 | Обслуживание, backup/restore и сбои | [OPERATIONS](docs/OPERATIONS.md), [TROUBLESHOOTING](docs/TROUBLESHOOTING.md) |
 | Компоненты приложения и данные | [ARCHITECTURE](docs/ARCHITECTURE.md), [DATABASE](docs/DATABASE.md) |
 | Проверки и воспроизведение результата | [VALIDATION](docs/VALIDATION.md) |

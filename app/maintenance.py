@@ -78,4 +78,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
+    from app.logging import configure_logging
+    configure_logging()
     print(json.dumps(asyncio.run(run(args.dry_run)), ensure_ascii=False))

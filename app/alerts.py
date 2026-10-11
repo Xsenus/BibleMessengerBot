@@ -107,5 +107,6 @@ async def run() -> int:
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
+    from app.logging import configure_logging
+    configure_logging()
     raise SystemExit(asyncio.run(run()))
