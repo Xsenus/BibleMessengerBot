@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from aiogram.types import Message,ReplyKeyboardRemove
 from app.bot.commands import mode_name
 from app.bot.ui import main_keyboard,welcome_text,menu_hint,search_prompt
-from app.services import bible
+from app.services import bible, broadcast
 from app.services import passage,illustrations,readings
 from app.services.accounts import claim_owner
 from app.services.destinations import configure_chat,ensure_resolved,cancel_queued
@@ -253,16 +253,22 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             elif len(result[2])==1:
                 text = await illustrations.decorate(connection,text,result[2][0],edition,chat=chat,
                     request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id)
+            # Владельцу бота предлагается разослать найденный отрывок всем (кнопка появится под результатом).
+            await broadcast.offer(connection,user.id,broadcast.refs_from_reference(result[0],result[1]),edition['id'])
             return text,None
         if name=='read':
             return search_prompt(locale),None
         rows = await bible.search_verses(connection,edition['id'],' '.join(args),5)
         from app.services.message_languages import combine
+        await broadcast.offer(connection,user.id,broadcast.refs_from_rows(rows),edition['id'])
         return combine([await bible.render_verse(connection,r,edition,ui_language=locale) for r in rows]) or tr(locale,'no_result'),None
     else:
         raise UserError('invalid')
     if row:
         text = await bible.render_verse(connection,row,edition,ui_language=locale)
+        shown = row.get('reading_rows') or [row]
+        await broadcast.offer(connection,user.id,[dict(book=row['book_code'],chapter=row['chapter'],
+            first=shown[0]['verse'],last=shown[-1].get('verse_end') or shown[-1]['verse'])],edition['id'])
         return await illustrations.decorate(connection,text,row,edition,chat=chat,
             request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id),None
     return tr(locale,'no_result'),None

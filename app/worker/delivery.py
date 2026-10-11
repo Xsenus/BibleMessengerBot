@@ -274,7 +274,7 @@ async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> st
                     await connection.execute("UPDATE illustration_requests SET state='cancelled' WHERE id=$1",request['id'])
                     await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='source_changed',updated_at=now() WHERE id=$1",delivery_id)
                 return 'source_changed'
-        valid = editing or row['chat_revision']==row['current_chat_revision'] and (
+        valid = editing or row['mode']=='broadcast' or row['chat_revision']==row['current_chat_revision'] and (
             not row['subscription_id'] or row['subscription_revision']==row['current_subscription_revision'])
         if not valid:
             await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='stale_configuration',updated_at=now() WHERE id=$1",delivery_id)

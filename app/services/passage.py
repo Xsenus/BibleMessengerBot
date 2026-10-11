@@ -184,16 +184,10 @@ async def resolve_book(connection: Any, translation_id: int, name: str) -> str |
     return matches.pop() if len(matches) == 1 else None
 
 
-async def lookup(
-    connection: Any, translation: Any, query: str
-) -> tuple[Reference, str, list[Any]] | None:
-    """Найти текст по адресу в издании: книга, глава и стихи (или вся глава); отсутствие любого запрошенного стиха — ошибка `no_result`, другой стих не подставляется. Возвращает (адрес, код книги, строки)."""
-    reference = parse_reference(query)
-    if reference is None:
-        return None
-    book = await resolve_book(connection, translation["id"], reference.book)
-    if not book:
-        raise UserError("no_result")
+async def fetch_rows(connection: Any, translation: Any, book: str, chapter: int,
+                     first: int | None, last: int | None) -> list[Any]:
+    """Строки стихов отрывка в издании (вся глава, если `first` не задан). Пустой результат или отсутствие любого запрошенного стиха — ошибка `no_result`: другой стих не подставляется."""
+    reference = Reference(book, chapter, first, last)
     rows = await connection.fetch(
         """SELECT book_code,chapter,verse,verse_end,text,is_range_continuation
         FROM verses WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND text<>''
@@ -213,6 +207,20 @@ async def lookup(
         or not any(r["verse"] <= reference.last <= (r["verse_end"] or r["verse"]) for r in rows)
     ):
         raise UserError("no_result")
+    return rows
+
+
+async def lookup(
+    connection: Any, translation: Any, query: str
+) -> tuple[Reference, str, list[Any]] | None:
+    """Найти текст по адресу в издании: книга, глава и стихи (или вся глава); отсутствие любого запрошенного стиха — ошибка `no_result`, другой стих не подставляется. Возвращает (адрес, код книги, строки)."""
+    reference = parse_reference(query)
+    if reference is None:
+        return None
+    book = await resolve_book(connection, translation["id"], reference.book)
+    if not book:
+        raise UserError("no_result")
+    rows = await fetch_rows(connection, translation, book, reference.chapter, reference.first, reference.last)
     return reference, book, rows
 
 

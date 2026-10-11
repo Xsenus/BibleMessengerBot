@@ -24,7 +24,7 @@ from app.services.subscriptions import create_or_update_subscription,set_enabled
 from app.bot.common import authorize,button,destination,enum_value,register_context,reply  # noqa: F401
 from app.bot.branding import commands_for
 from app.bot.dispatch import run_command
-from app.services import usage
+from app.services import broadcast, usage
 from app.bot.menus import (  # noqa: F401 - re-exported for tests and callers
     change_language,change_voice,command_target_suffix,daily_confirmation,edition_menu,
     enable_devotions,help_text,language_menu,modes_menu,settings_keyboard,settings_text,status_text,ui_menu,voices_menu)
@@ -76,6 +76,12 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
                 hidden = await connection.fetchval('SELECT keyboard_hidden FROM telegram_chats WHERE telegram_chat_id=$1',message.chat.id)
                 markup = ReplyKeyboardRemove() if hidden else None
             await reply(bot,connection,settings,message.chat.id,text,markup,message.message_thread_id)
+            # Владельцу бота под найденным отрывком предлагается отправить его всем пользователям.
+            draft = broadcast.take_offer()
+            if draft is not None and enum_value(message.chat.type)=='private':
+                chat_row = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1',message.chat.id)
+                offer_text,offer_markup = broadcast.offer_markup(chat_row,draft)
+                await reply(bot,connection,settings,message.chat.id,offer_text,offer_markup,message.message_thread_id)
     if donation_command is not None:
         # Release the shared connection before the payment flow acquires its own.
         await handle_donation_command(message,bot,settings,db_pool,*donation_command)
@@ -213,6 +219,18 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
                 text,markup = f"{tr(locale,'time')}: <code>/time 09:00 {escape(chat['timezone'])}{suffix}</code>",None
             elif action=='settings':
                 text,markup = await settings_text(connection,chat),settings_keyboard(chat)
+            elif action=='bcast':
+                # Рассылка отрывка всем: только владелец бота, сначала подтверждение.
+                text,markup = await broadcast.confirmation(connection,int(value),callback.from_user.id,chat)
+            elif action=='bcastno':
+                await broadcast.cancel(connection,int(value),callback.from_user.id)
+                text,markup = tr(locale,'saved'),None
+            elif action=='bcastgo':
+                counts = await broadcast.send(connection,int(value),callback.from_user.id,settings.max_message_length)
+                text = (f"✅ Рассылка поставлена в очередь: {counts['queued']} из {counts['recipients']}, пропущено {counts['skipped']}."
+                        if locale=='ru' else
+                        f"✅ Broadcast queued: {counts['queued']} of {counts['recipients']}, skipped {counts['skipped']}.")
+                markup = None
             else:
                 raise UserError('invalid')
         except UserError as error:
