@@ -1,4 +1,4 @@
-"""Structural corpus evidence, not a claim of theological or textual proofreading."""
+"""Структурное доказательство целостности корпуса. Это проверка структуры, а не богословская или текстовая вычитка."""
 from __future__ import annotations
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -12,7 +12,7 @@ CORE = set(OT + NT)
 
 @dataclass(frozen=True)
 class CorpusAudit:
-    """Measured physical coverage and reasons why an edition is incomplete."""
+    """Результат измерения изданий: реальное покрытие (книги, главы, стихи), полнота Нового Завета и 66 книг, пропущенные книги и главы, предупреждения и разбивка по книгам."""
     coverage: str
     books: int
     chapters: int
@@ -32,13 +32,13 @@ class CorpusAudit:
     verification_scope: str = 'Structural comparison with the pinned source grid, not independent proofreading'
 
     def as_dict(self) -> dict[str, Any]:
-        """Return JSON-serializable audit evidence."""
+        """Вернуть данные аудита словарём, пригодным для записи в JSON."""
         return asdict(self)
 
 
 def audit_corpus(metadata: TranslationMeta, references: list[VerseReference],
                  records: list[tuple[str, int, int, str, bool, int]]) -> CorpusAudit:
-    """Measure actual books/chapters; never trust a catalog's 'full' flag alone."""
+    """Измерить фактическое содержимое издания по сравнению с эталонной сеткой стихов и описанием каталога: покрытие (`full`, `nt`, `ot`, `partial`), пропущенные главы и книги, расхождения с каталогом. Метка «полная Библия» из каталога сама по себе не принимается на веру."""
     expected: dict[str, set[int]] = defaultdict(set)
     actual: dict[str, set[int]] = defaultdict(set)
     visible_counts: dict[str, int] = defaultdict(int)

@@ -1,4 +1,4 @@
-"""Discover -> permission gate -> bounded download -> validate -> transaction -> durable receipt."""
+"""Конвейер импорта: поиск → проверка прав → ограниченное скачивание → проверка → транзакция → сохранённый отчёт."""
 from __future__ import annotations
 
 import asyncio
@@ -27,6 +27,7 @@ GOOD={'imported','updated','already_present','exact_duplicate','downloaded'}
 
 @contextmanager
 def process_lock(root: Path):
+    """Межпроцессная блокировка каталога кэша (файл `multisource.lock`): одновременно может работать только одно задание; файл блокировки намеренно не удаляется."""
     root.mkdir(parents=True,exist_ok=True)
     # Lock the same persistent file on both platforms. Deleting a lock file after
     # release permits a third process to open a new inode while a waiter owns the
@@ -52,6 +53,7 @@ def process_lock(root: Path):
 
 
 def selected(candidate: Candidate,options: ImportOptions) -> bool:
+    """Попадает ли кандидат под настройки: профиль, точные издания и языки."""
     if options.profile=='none':return False
     if options.editions and candidate.key not in options.editions:return False
     languages=options.languages or profile_languages(options.profile)
@@ -61,12 +63,14 @@ def selected(candidate: Candidate,options: ImportOptions) -> bool:
 
 
 def compact(candidate: Candidate) -> dict[str,Any]:
+    """Короткая запись о кандидате для отчёта."""
     m=candidate.metadata
     return {'key':candidate.key,'source':candidate.source,'id':m.translation_id,'language':m.language_code,
         'title':m.title,'source_url':candidate.url,'source_revision':candidate.revision,'numbering':candidate.numbering}
 
 
 def finalize_status(items: list[dict], source_errors: list[dict], *, discover_only: bool=False) -> str:
+    """Итоговый статус запуска: `planned`, `succeeded`, `partial` (есть проблемы) или `failed` (ничего не получено)."""
     if discover_only:
         return 'partial' if source_errors or any(x['outcome'] in {'failed','not_found'} for x in items) else 'planned' if any(x['outcome']=='planned' for x in items) else 'failed'
     good=any(row['outcome'] in GOOD for row in items)
@@ -77,7 +81,7 @@ def finalize_status(items: list[dict], source_errors: list[dict], *, discover_on
 async def acquire_corpus(root: Path,options: ImportOptions,*,store: Any=None,discover_only: bool=False,
                          downloader: Downloader|None=None,adapters: dict|None=None,refresh_catalog: bool=True,
                          progress_hook=None) -> dict[str,Any]:
-    """The database-free download mode runs exactly the same parsers as production imports."""
+    """Основной цикл: получить каталоги источников, отобрать кандидатов, проверить лицензии (с повторным использованием сведений BibleNLP для HelloAO), отсортировать по предпочтению и по очереди скачать, проверить и сохранить издания с квотой на язык. Состояние записывается в отчёт после каждого шага. Режим без БД использует те же разборщики, что и боевой импорт."""
     if not discover_only and not options.download_only and store is None:
         raise ValueError('An import needs a persistence store; use --download-only explicitly')
     started=time.monotonic()
@@ -88,6 +92,7 @@ async def acquire_corpus(root: Path,options: ImportOptions,*,store: Any=None,dis
         'items':[],'sources':{},'source_errors':[]}
     reports=root/'reports';reports.mkdir(parents=True,exist_ok=True)
     async def checkpoint():
+        """Сохранить текущее состояние отчёта на диск и сообщить о ходе выполнения."""
         report['counts']=dict(Counter(x['outcome'] for x in report['items']))
         write_json(reports/(run_id+'.json'),report);write_json(reports/'latest.json',report)
         if progress_hook is not None:await progress_hook(report)
@@ -211,6 +216,7 @@ async def acquire_corpus(root: Path,options: ImportOptions,*,store: Any=None,dis
 
 async def run_multisource(settings,options: ImportOptions,*,maintenance_owned: bool=False,
                           refresh_catalog: bool=True) -> dict[str,Any]:
+    """Запустить импорт в БД: взять блокировку обслуживания и блокировку импорта, создать запись о запуске, на каждом шаге обновлять её сводкой и сохранять издания через PostgresStore; при сбое запуск помечается как неудачный."""
     from app.db import maintenance,normalize_asyncpg_dsn
     from app.catalog.importer import seed_books
     from app.services.locks import lock_key

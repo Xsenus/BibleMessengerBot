@@ -1,7 +1,6 @@
-"""HTTPS-only, host-restricted streaming cache with safe interrupted-download resume.
+"""Потоковая загрузка только по HTTPS и только с разрешённых хостов, с кэшем и безопасным докачиванием.
 
-A local digest detects corruption, not the authenticity of an upstream publication.
-No remote file is imported until UTF-8/JSON/structural validation also succeeds.
+Локальный хеш обнаруживает порчу файла, но не подлинность публикации источника. Файл не импортируется, пока не пройдены проверки UTF-8, JSON и структуры.
 """
 from __future__ import annotations
 
@@ -30,20 +29,25 @@ ALLOWED_HOSTS = frozenset({"raw.githubusercontent.com", "api.github.com", "api.g
 
 
 class DownloadError(RuntimeError):
+    """Общая ошибка загрузки."""
     pass
 
 
 class HttpStatusError(DownloadError):
+    """Ответ сервера с неожиданным HTTP-статусом (хранит код)."""
     def __init__(self, status: int, url: str):
+        """Запомнить код статуса и адрес в тексте ошибки."""
         self.status = status
         super().__init__(f"HTTP {status}: {url}")
 
 
 class DiskLimitError(DownloadError):
+    """Достигнут предел места на диске или размера кэша — останавливает загрузку целиком."""
     pass
 
 
 def digest_file(path: Path) -> str:
+    """SHA-256 файла (читается блоками по 1 МБ)."""
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024*1024), b""):
@@ -52,7 +56,7 @@ def digest_file(path: Path) -> str:
 
 
 def write_json(path: Path, data: object) -> None:
-    """Atomic within the cache filesystem; a interrupted report never replaces a good one."""
+    """Атомарно записать JSON: сначала во временный файл с fsync, затем переименование — прерванная запись не заменяет хороший отчёт."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     with tmp.open("w", encoding="utf-8") as f:
@@ -64,6 +68,7 @@ def write_json(path: Path, data: object) -> None:
 
 
 def validate_url(url: str) -> str:
+    """Проверить адрес загрузки: только HTTPS, порт 443, хост из белого списка, без логина и фрагмента; для GitHub — только утверждённые репозитории BibleNLP и getBible."""
     p = urlsplit(url)
     if p.scheme != "https" or p.hostname not in ALLOWED_HOSTS or p.port not in {None, 443} or p.username or p.password or p.fragment:
         raise ValueError("Source URL is outside the HTTPS allowlist")
@@ -77,6 +82,7 @@ def validate_url(url: str) -> str:
 
 
 def retry_seconds(value: str | None, attempt: int) -> float:
+    """Время ожидания перед повтором: из заголовка Retry-After (секунды или дата, до 120 с) или экспоненциально (до 60 с)."""
     if value:
         try:
             delay = float(value)
@@ -91,7 +97,9 @@ def retry_seconds(value: str | None, attempt: int) -> float:
 
 
 class Downloader:
+    """Загрузчик с кэшем на диске: ограничение частоты запросов по хосту, лимиты размера и диска, докачка с проверкой Range/ETag, проверка редиректов и учёт статистики."""
     def __init__(self, root: Path, options: ImportOptions, client: httpx.AsyncClient | None = None):
+        """Создать каталог кэша, HTTP-клиент (без автоматических редиректов, сжатие отключено) и счётчики; подсчитать уже занятое место."""
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self.options = options
@@ -110,13 +118,16 @@ class Downloader:
         self._usage = sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
 
     async def __aenter__(self) -> Downloader:
+        """Вход в контекст — возвращает сам загрузчик."""
         return self
 
     async def __aexit__(self, *_: object) -> None:
+        """Выход из контекста: закрыть собственный HTTP-клиент."""
         if self.owns_client:
             await self.client.aclose()
 
     def paths(self, url: str) -> tuple[Path, Path, Path, Path]:
+        """Пути файлов кэша для адреса: итоговый файл, его описание, частичный файл и его описание (по SHA-256 адреса)."""
         key = hashlib.sha256(url.encode()).hexdigest()
         directory = self.root / key[:2]
         directory.mkdir(exist_ok=True)
@@ -124,6 +135,7 @@ class Downloader:
         return target, directory/(key+".json"), directory/(key+".part"), directory/(key+".part.json")
 
     async def _rate(self, url: str) -> None:
+        """Выдержать паузу между запросами к одному хосту согласно настроенной частоте."""
         host = urlsplit(url).hostname or ""
         async with self._rate_lock:
             delay = 1/self.options.requests_per_second - (time.monotonic()-self._last.get(host, 0))
@@ -133,7 +145,7 @@ class Downloader:
 
     @asynccontextmanager
     async def _stream(self, url: str, headers: dict[str, str]):
-        """Validate every redirect; catalog links cannot turn this into an SSRF client."""
+        """Открыть потоковый GET и вручную пройти по редиректам (до 6), проверяя каждый адрес по белому списку — каталог не превращает загрузчик в средство SSRF."""
         current = validate_url(url)
         for _ in range(6):
             await self._rate(current)
@@ -150,12 +162,14 @@ class Downloader:
         raise DownloadError("Too many redirects")
 
     def _disk(self, incoming: int) -> None:
+        """Проверить, что после записи `incoming` байт останется резерв свободного места и не превысится лимит кэша."""
         if shutil.disk_usage(self.root).free - incoming < self.options.min_free_bytes:
             raise DiskLimitError("Free disk reserve reached; raise capacity or change IMPORT_MIN_FREE_MB")
         if self._usage + incoming > self.options.max_cache_bytes:
             raise DiskLimitError("Download cache limit reached; change IMPORT_MAX_CACHE_MB")
 
     def cached(self, url: str, maximum: int) -> Path | None:
+        """Вернуть путь к проверенному кэшированному файлу (совпадают адрес, размер и SHA-256); иначе None."""
         target, info, _, _ = self.paths(url)
         if not (target.is_file() and info.is_file()):
             return None
@@ -170,11 +184,13 @@ class Downloader:
         return target
 
     async def fetch(self, url: str, *, refresh: bool = False, max_bytes: int | None = None) -> Path:
+        """Скачать файл (или взять из кэша) под блокировкой адреса, ограничив размер."""
         validate_url(url)
         async with self._url_locks.setdefault(url, asyncio.Lock()):
             return await self._fetch(url, refresh=refresh, maximum=min(max_bytes or self.options.max_file_bytes, self.options.max_file_bytes))
 
     async def _fetch(self, url: str, *, refresh: bool, maximum: int) -> Path:
+        """Скачать файл с повторами: докачивает прерванную загрузку по Range/If-Range, проверяет Content-Range, ETag и длину, пишет на диск с контролем места, считает SHA-256 и атомарно кладёт в кэш. Исчерпание попыток — DownloadError."""
         if not refresh:
             hit = self.cached(url, maximum)
             if hit:
@@ -278,15 +294,18 @@ class Downloader:
         raise DownloadError(f"Download exhausted {self.options.attempts} attempts ({type(error).__name__}): {url}")
 
     async def json(self, url: str, **kwargs):
+        """Скачать и разобрать JSON, отвергая повторяющиеся ключи объектов и нечисловые константы (NaN/Infinity); невалидный UTF-8 не заменяется. Возвращает (данные, путь)."""
         path = await self.fetch(url, **kwargs)
         # json.loads rejects invalid UTF-8; don't silently replace invalid characters.
         def unique_object(pairs):
+            """Собрать объект JSON, запрещая дублирование ключей."""
             result={}
             for key,value in pairs:
                 if key in result:raise ValueError('Duplicate JSON object key; refusing implicit overwrite')
                 result[key]=value
             return result
         def invalid_constant(value):
+            """Отклонить недопустимые числа JSON (NaN, Infinity)."""
             raise ValueError('Non-finite JSON number: '+value)
         return json.loads(path.read_text(encoding="utf-8-sig"),object_pairs_hook=unique_object,
                           parse_constant=invalid_constant), path

@@ -1,7 +1,6 @@
-"""Multi-source command line. Discovery/download/status do not import asyncpg or require a bot token.
+"""Командная строка мультиисточникового импорта. Поиск, скачивание и статус не требуют asyncpg и токена бота.
 
-Exit status: 0 succeeded/planned/skipped, 2 partial, 1 failed, 130 interrupted.
-Full JSON receipts are always persisted under SOURCE_CACHE_DIR/reports.
+Коды возврата: 0 — успех/план/пропуск, 2 — частичный результат, 1 — ошибка, 130 — прервано. Полные отчёты всегда сохраняются в SOURCE_CACHE_DIR/reports.
 """
 from __future__ import annotations
 
@@ -19,10 +18,12 @@ from app.catalog.multisource.types import ImportOptions
 
 
 def csv(value: str) -> tuple[str,...]:
+    """Разобрать список через запятую в кортеж без пустых элементов."""
     return tuple(x.strip() for x in value.split(',') if x.strip())
 
 
 def parser() -> argparse.ArgumentParser:
+    """Собрать разбор аргументов: команда (`discover`, `download`, `import`, `status`, `config`), источники, профиль, языки, издания, лимиты, обновление, замена существующих, каталог кэша и файл отчёта."""
     p=argparse.ArgumentParser(description='Download and validate licensed editions from independent resources; atomically import into BibleMessenger PostgreSQL')
     p.add_argument('command',choices=('discover','download','import','status','config'))
     p.add_argument('--sources',type=csv,help='biblenlp,getbible,helloao (subset and order)')
@@ -40,6 +41,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def report_summary(report: dict[str,Any]) -> dict[str,Any]:
+    """Оставить в отчёте только основные поля для краткого вывода."""
     fields=('application_version','run_id','status','started_at','finished_at','elapsed_seconds','options','scope',
         'counts','sources','source_errors','actual_languages','missing_requested_languages','complete_66_editions',
         'nt_complete_editions','database_written','network','report_file','fatal_error','validation_error','exception_type','cache_dir')
@@ -47,12 +49,14 @@ def report_summary(report: dict[str,Any]) -> dict[str,Any]:
 
 
 def options_from_args(args: argparse.Namespace) -> ImportOptions:
+    """Собрать параметры импорта из переменных окружения и переопределений командной строки."""
     changes={name:getattr(args,name) for name in ('sources','profile','languages','editions','max_editions') if getattr(args,name) is not None}
     changes.update(refresh=args.refresh,download_only=args.command=='download',allow_replace=args.replace_existing)
     return ImportOptions.from_env(**changes)
 
 
 async def run(args: argparse.Namespace) -> dict[str,Any]:
+    """Выполнить команду: `status` — показать последний отчёт; `config` — показать параметры; `discover`/`download` — работа с кэшем без БД под блокировкой процесса; `import` — подготовить схему и справочники под блокировкой обслуживания и запустить импорт в PostgreSQL."""
     import os
     root=args.cache_dir or Path(os.getenv('SOURCE_CACHE_DIR','/app/cache'))
     if args.command=='status':
@@ -82,10 +86,12 @@ async def run(args: argparse.Namespace) -> dict[str,Any]:
 
 
 def exit_code(report: dict[str,Any]) -> int:
+    """Код возврата процесса по статусу отчёта."""
     return 0 if report.get('status') in {'succeeded','planned','skipped'} else 2 if report.get('status')=='partial' else 1
 
 
 def main() -> None:
+    """Точка входа: выполнить команду, при сбое вывести краткий обезличенный отчёт (без паролей и трассировок), записать отчёт в файл и завершить процесс с кодом статуса."""
     from app.logging import configure_logging
     import sys
     configure_logging(stream=sys.stderr)

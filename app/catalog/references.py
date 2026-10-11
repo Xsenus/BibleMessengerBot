@@ -1,4 +1,4 @@
-"""Strict pairing of a pinned BibleNLP reference grid and a verse-per-line file."""
+"""Строгое сопоставление закреплённой сетки стихов BibleNLP и файла «один стих — одна строка»."""
 from __future__ import annotations
 import re
 from collections.abc import Iterable
@@ -8,7 +8,7 @@ REFERENCE_RE = re.compile(r'^([1-4A-Z][A-Z0-9]{2})\s+(\d+):(\d+)$')
 
 
 def parse_reference(value: str, line_number: int) -> VerseReference:
-    """Parse one positive chapter/verse coordinate with its original source line."""
+    """Разобрать одну координату `КНИГА глава:стих` с номером исходной строки; неверная или нулевая — ValueError."""
     match = REFERENCE_RE.fullmatch(value.strip())
     if not match or line_number < 1:
         raise ValueError(f'Invalid verse reference on line {line_number}: {value!r}')
@@ -19,7 +19,7 @@ def parse_reference(value: str, line_number: int) -> VerseReference:
 
 
 def parse_reference_lines(lines: Iterable[str]) -> list[VerseReference]:
-    """Reject duplicates, interleaved books, and out-of-order reference coordinates."""
+    """Разобрать сетку целиком, отвергая дубликаты, перемешанные книги и нарушение порядка."""
     result: list[VerseReference] = []
     seen: set[tuple[str, int, int]] = set()
     closed_books: set[str] = set()
@@ -45,7 +45,7 @@ def parse_reference_lines(lines: Iterable[str]) -> list[VerseReference]:
 
 
 def pair_verses(references: list[VerseReference], text_lines: list[str]) -> list[tuple[str, int, int, str, bool, int]]:
-    """Preserve missing rows as absence and validate every <range> continuation."""
+    """Соединить сетку и строки текста: пустые строки сохраняются как отсутствие стиха, `<range>` проверяется как продолжение предыдущего стиха; недопустимые символы запрещены. Возвращает записи (книга, глава, стих, текст, признак продолжения, строка)."""
     if len(references) != len(text_lines):
         raise ValueError(f'Reference/text line count mismatch: {len(references)} != {len(text_lines)}')
     records = []
@@ -68,7 +68,7 @@ def pair_verses(references: list[VerseReference], text_lines: list[str]) -> list
 
 
 def with_ordinals(records: list[tuple[str, int, int, str, bool, int]]) -> list[tuple]:
-    """Append display verse_end and dense visible ordinal for O(1)-indexed selection."""
+    """Добавить к записям конец диапазона для отображения и сквозной номер видимого стиха (для быстрого выбора по индексу)."""
     result: list[list] = []
     anchor: int | None = None
     ordinal = 0

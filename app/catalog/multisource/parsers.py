@@ -1,4 +1,4 @@
-"""Strict format adapters. Edition-native coordinates are never relabelled as BibleNLP's grid."""
+"""Строгие разборщики форматов. Собственные координаты издания никогда не выдаются за сетку BibleNLP."""
 from __future__ import annotations
 
 import hashlib
@@ -32,6 +32,7 @@ CHAPTER_FLOOR = dict(zip(OT+NT, [50,40,27,36,34,24,21,4,31,24,22,25,29,36,10,13,
 
 
 def positive(value: Any, label: str, *, maximum: int = 10000) -> int:
+    """Проверить, что значение — положительное целое (число или строка из цифр) не больше `maximum`; иначе ValueError с названием поля."""
     if isinstance(value, bool) or not (isinstance(value, int) or isinstance(value, str) and value.isdigit()):
         raise ValueError(f"Invalid {label}")
     number = int(value)
@@ -41,12 +42,14 @@ def positive(value: Any, label: str, *, maximum: int = 10000) -> int:
 
 
 def book_code(value: Any) -> str:
+    """Проверить код книги (три символа USFM, например `GEN` или `1KI`); неизвестный код отвергает всё издание, а не часть."""
     if not isinstance(value, str) or not re.fullmatch(r"[1-4A-Z][A-Z0-9]{2}", value):
         raise ValueError("Unsupported book code; edition was not partially imported")
     return value
 
 
 def text_value(value: Any) -> str:
+    """Проверить текст стиха: строка без символа замены и управляющих знаков, не длиннее 100000 символов; пробелы внутри и переносы сохраняются, края обрезаются."""
     if not isinstance(value, str):
         raise ValueError("Verse text is not a string")
     if '\ufffd' in value or any(ord(c)<32 and c not in '\n\r\t' for c in value):
@@ -58,13 +61,14 @@ def text_value(value: Any) -> str:
 
 
 def entries(value: Any, label: str) -> list[dict[str, Any]]:
+    """Проверить, что значение — непустой список объектов; иначе ValueError «отсутствует или повреждено»."""
     if not isinstance(value, list) or not value or not all(isinstance(x, dict) for x in value):
         raise ValueError(f"Missing or malformed {label}")
     return value
 
 
 def append_verse(records: list[Record], code: str, chapter: int, number: Any, text: Any) -> None:
-    """Explicit ranges become one visible anchor and zero-text continuation rows."""
+    """Добавить стих в записи; диапазон `3-5` превращается в одну видимую запись и пустые записи-продолжения. Пропущенный в источнике стих не подменяется другим изданием."""
     if isinstance(number, str) and re.fullmatch(r"\d+-\d+", number):
         first, last = map(int, number.split("-"))
         positive(first,"verse"); positive(last,"verse")
@@ -81,6 +85,7 @@ def append_verse(records: list[Record], code: str, chapter: int, number: Any, te
 
 
 def verify_records(records: list[Record]) -> list[Record]:
+    """Проверить и отсортировать записи: не пусто, не больше 200000, без дубликатов и перекрытий, продолжения диапазона только после своего стиха, у видимых стихов есть текст."""
     if not records:
         raise ValueError("No readable verses")
     if len(records)>200000:
@@ -103,6 +108,7 @@ def verify_records(records: list[Record]) -> list[Record]:
 
 
 def fingerprint(records: list[Record], numbering: str) -> str:
+    """SHA-256 содержимого издания (нумерация + записи) — единый отпечаток для сравнения файла и БД."""
     h = hashlib.sha256()
     h.update(("BibleMessenger-content-v1\n"+numbering+"\n").encode())
     for row in records:
@@ -111,6 +117,7 @@ def fingerprint(records: list[Record], numbering: str) -> str:
 
 
 def _count(actual: int, advertised: Any, label: str, *, alternate: int | None = None) -> None:
+    """Сверить фактическое число с заявленным (допустимо альтернативное значение); при расхождении — ValueError."""
     if advertised is None:
         return
     expected = positive(advertised,label,maximum=200000)
@@ -119,6 +126,7 @@ def _count(actual: int, advertised: Any, label: str, *, alternate: int | None = 
 
 
 def _chapter_sequence(actual: list[int], declared: Any = None, first: int = 1) -> None:
+    """Проверить, что главы идут подряд без пропусков и повторов и совпадают с заявленным числом."""
     if len(actual)!=len(set(actual)):
         raise ValueError("Duplicate chapter")
     if not actual or sorted(actual) != list(range(first,first+len(actual))):
@@ -129,6 +137,7 @@ def _chapter_sequence(actual: list[int], declared: Any = None, first: int = 1) -
 
 def native_audit(metadata: TranslationMeta, records: list[Record], numbering: str,
                  declared_chapters: dict[str, list[int]], warnings: list[str]) -> CorpusAudit:
+    """Аудит издания с собственной нумерацией: по сравнению с эталоном подсчитывает покрытие, проверяет, что объявленные главы содержат текст, и применяет независимые грубые пороги (главы и плотность стихов). Это структурная проверка, а не сверка слово в слово."""
     references = [VerseReference(r[0],r[1],r[2],i+1) for i,r in enumerate(records)]
     base = audit_corpus(metadata,references,records)
     actual = defaultdict(set)
@@ -157,7 +166,7 @@ def native_audit(metadata: TranslationMeta, records: list[Record], numbering: st
 
 
 def _measured_metadata(meta: TranslationMeta, records: list[Record]) -> TranslationMeta:
-    """Set structural fields missing from catalog from parsed coordinates; originals stay in raw evidence."""
+    """Заполнить в описании издания число книг, глав и стихов по реально разобранным записям (исходные значения остаются в сыром каталоге)."""
     books=defaultdict(set); verses=Counter()
     for code,_chapter,_,_,_,_ in records:
         section='ot' if code in OT else 'nt' if code in NT else 'dc'
@@ -173,6 +182,7 @@ def _measured_metadata(meta: TranslationMeta, records: list[Record]) -> Translat
 
 def prepared_native(candidate: Candidate, path: Path, records: list[Record], names: dict[str,str],
                     chapters: dict[str,list[int]], warnings: list[str], diagnostics: dict[str,Any]) -> Prepared:
+    """Собрать Prepared для издания с родной нумерацией: проверить записи, измерить метаданные, выполнить аудит и посчитать отпечаток."""
     records=verify_records(records)
     meta=_measured_metadata(candidate.metadata,records)
     candidate=replace(candidate,metadata=meta)
@@ -183,6 +193,7 @@ def prepared_native(candidate: Candidate, path: Path, records: list[Record], nam
 
 
 def parse_helloao(candidate: Candidate, path: Path, payload: dict, books_payload: dict) -> Prepared:
+    """Разобрать издание HelloAO: сверить идентификатор и язык, инвентарь книг, главы и счётчики; заголовки и подзаголовки не считаются стихами, неизвестные типы содержимого отклоняют издание (без тихой потери данных)."""
     identifier=candidate.metadata.translation_id
     for p in (payload,books_payload):
         t=p.get('translation',{})
@@ -242,6 +253,7 @@ def parse_helloao(candidate: Candidate, path: Path, payload: dict, books_payload
 
 def getbible_book(number: Any) -> str:
     # Unmapped books still reject the entire edition, never silently drop text.
+    """Сопоставить номер книги getBible коду USFM (1–66 канон, 67–86 второканонические по проверенной таблице); неизвестный номер отвергает издание."""
     n=positive(number,'getBible book number')
     if n>66:
         if n not in GETBIBLE_EXTRA_BOOKS:
@@ -251,6 +263,7 @@ def getbible_book(number: Any) -> str:
 
 
 def parse_getbible(candidate: Candidate,path: Path,payload: dict,books_payload: dict) -> Prepared:
+    """Разобрать издание getBible: проверить идентичность, язык, публикуемый SHA-1 файла (если есть), стабильность лицензии и нумерации с момента обзора каталога, инвентарь книг, главы и стихи."""
     if payload.get('abbreviation')!=candidate.metadata.translation_id:
         raise ValueError("getBible edition identity mismatch")
     if candidate.raw.get('sha') and payload.get('sha') and candidate.raw['sha']!=payload['sha']:

@@ -1,4 +1,4 @@
-"""Fail-closed edition licensing; incidental prose never grants redistribution rights."""
+"""Лицензионная политика: по умолчанию всё не подтверждённое запрещено; случайные слова в описании прав не дают."""
 from __future__ import annotations
 import re
 from dataclasses import dataclass
@@ -8,20 +8,21 @@ from app.catalog.models import TranslationMeta
 
 @dataclass(frozen=True, slots=True)
 class LicenseDecision:
-    """An explicit decision together with the machine-readable reason."""
+    """Решение по лицензии: разрешено ли издание, нормализованное название лицензии и причина."""
     allowed: bool
     normalized: str
     reason: str
 
 
 def normalize_license(value: str) -> str:
-    """Normalize license identifiers, not arbitrary permission guesses."""
+    """Привести название лицензии к единому виду (нижний регистр, `cc` вместо `creative commons`, пробелы) — без попыток «угадать» разрешения."""
     text = value.strip().lower().replace('creative commons', 'cc')
     text = text.replace('public-domain', 'public domain').replace('public_domain', 'public domain')
     return re.sub(r'\s+', ' ', text)
 
 
 def _identifier(value: str) -> str | None:
+    """Распознать идентификатор лицензии (public-domain, cc0, by, by-sa и т. п.) из текста; иначе None."""
     text = normalize_license(value)
     if text in {'public domain', 'public domain dedication', 'cc0', 'cc0 1.0', 'cc0-1.0', 'unlicense'}:
         return 'public-domain' if 'public' in text or text == 'unlicense' else 'cc0'
@@ -32,6 +33,7 @@ def _identifier(value: str) -> str | None:
 
 
 def _url_identifier(value: str) -> str | None:
+    """Распознать лицензию по адресу creativecommons.org; иначе None."""
     parsed = urlparse(value.strip())
     if parsed.scheme not in {'http', 'https'} or parsed.hostname not in {'creativecommons.org', 'www.creativecommons.org'}:
         return None
@@ -44,11 +46,7 @@ def _url_identifier(value: str) -> str | None:
 
 def decide_license(metadata: TranslationMeta, *, allow_restricted: bool = False,
                    allow_unknown: bool = False) -> LicenseDecision:
-    """Accept only explicit PD/CC0/CC BY/CC BY-SA, unless deliberately overridden.
-
-    Overrides never bypass upstream non-downloadable/non-redistributable flags.
-    The default installer disables both overrides.
-    """
+    """Принять решение: разрешены только явные Public Domain, CC0, CC BY и CC BY-SA. Лицензии с запретом коммерческого использования или производных, противоречивые и неизвестные отклоняются (если оператор явно не разрешил). Признаки «не распространяется» и «нельзя скачать» от источника обойти нельзя."""
     if not metadata.redistributable:
         return LicenseDecision(False, 'non-redistributable', 'upstream marks it non-redistributable')
     if not metadata.downloadable:
