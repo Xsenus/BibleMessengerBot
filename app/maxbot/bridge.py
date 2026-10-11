@@ -1,8 +1,4 @@
-"""MAX permissions and models behind the shared command handler contract.
-
-Aiogram DTOs are only internal command/callback shapes. No Telegram API is used
-for MAX actors; all publishing goes to the durable shared outbox and MAX sender.
-"""
+"""Мост MAX: права и модели MAX за тем же интерфейсом, что использует общий обработчик команд. DTO aiogram — лишь внутренняя форма команд; API Telegram для MAX не вызывается, а вся публикация идёт через общую очередь и отправитель MAX."""
 from __future__ import annotations
 
 import hashlib
@@ -29,27 +25,32 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class ReplyContext:
+    """Контекст ответов на одно событие: ключ события и счётчик ответов (для стабильных ключей идемпотентности)."""
     key: str
     position: int = 0
 
 
 class MaxBotBridge:
+    """Объект, который притворяется ботом aiogram для общих обработчиков: отвечает на `get_me`, `get_chat`, `get_chat_member`, подтверждает нажатия и ставит ответы в очередь."""
     platform = 'max'
 
     def __init__(self, client: MaxClient, pool: Any, info: dict):
+        """Запомнить клиент MAX, пул БД и сведения о боте (его user_id)."""
         self.client, self.pool = client, pool
         self.id = info['user_id']
         self.info = info
         self.reply_context: ContextVar[ReplyContext | None] = ContextVar('max_reply_context', default=None)
 
     def sender(self, connection):
+        """Создать отправителя MAX для указанного соединения."""
         return MaxSender(self.client, self.id, connection)
 
     async def get_me(self):
+        """Данные самого бота (id и имя) в виде, понятном общим обработчикам."""
         return SimpleNamespace(id=self.id, username=self.info.get('username'))
 
     async def get_chat(self, identifier):
-        """Resolve only MAX-owned internal destinations; never expose a Telegram row."""
+        """Найти чат MAX по внутреннему идентификатору (строки Telegram не раскрываются); для групп и каналов проверяет, что чат у MAX активен."""
         if type(identifier) is not int:
             raise UserError('no_result')
         async with self.pool.acquire() as connection:
@@ -73,6 +74,7 @@ class MaxBotBridge:
                     title=live.get('title'), is_forum=False)
 
     async def get_chat_member(self, chat_id: int, user_id: int):
+        """Получить роль участника в чате MAX и права публикации бота: создатель, администратор или участник."""
         async with self.pool.acquire() as connection:
             real_chat = await external(connection, 'chat', chat_id)
             real_actor = self.id if user_id == self.id else await external(connection, 'user', user_id)
@@ -99,7 +101,7 @@ class MaxBotBridge:
         return SimpleNamespace(status=status, can_post_messages=can_write)
 
     async def __call__(self, method, **_):
-        """Callback answer is idempotent and never sends another reading."""
+        """Выполнить вызов «ответ на нажатие кнопки» (единственный поддерживаемый метод): идемпотентно, не отправляет повторное чтение."""
         if not isinstance(method, AnswerCallbackQuery):
             raise UserError('invalid')
         try:
@@ -109,6 +111,7 @@ class MaxBotBridge:
         return True
 
     def _key(self):
+        """Выдать следующий ключ идемпотентности ответа для текущего события; вне контекста события — ошибка."""
         context = self.reply_context.get()
         if context is None:
             raise RuntimeError('MAX response requires a durable event context')
@@ -118,7 +121,7 @@ class MaxBotBridge:
 
     async def queue_response(self, connection, settings, chat_id, text, markup=None,
                              *, frozen_chunks=None):
-        """Persist complete UI responses before the webhook event is marked done."""
+        """Сохранить готовый ответ интерфейса в очередь доставки до того, как событие вебхука будет помечено обработанным: текст режется на части MAX, добавляются карточки языков и клавиатура."""
         key = self._key()
         chat = await connection.fetchrow("SELECT * FROM telegram_chats WHERE telegram_chat_id=$1 AND platform='max'", chat_id)
         if not chat:
@@ -143,6 +146,7 @@ class MaxBotBridge:
                                     'max_ui', {'kind': 'max_ui'}, frozen_chunks=frozen_chunks)
 
     async def queue_welcome(self, connection, settings, chat_id, text, markup):
+        """Поставить в очередь приветствие с картинкой и клавиатурой (хеш изображения защищает от подмены)."""
         from app.bot.ui import WELCOME_PATH
         digest = hashlib.sha256(WELCOME_PATH.read_bytes()).hexdigest()
         await self.queue_response(connection, settings, chat_id, text, markup, frozen_chunks=[
@@ -152,5 +156,6 @@ class MaxBotBridge:
 
 
 def user_model(user: dict, internal_id: int, locale: str) -> User:
+    """Собрать модель пользователя aiogram из данных MAX и внутреннего ID."""
     return User(id=internal_id, is_bot=bool(user.get('is_bot')), first_name=user.get('first_name') or 'Читатель',
                 last_name=user.get('last_name'), username=user.get('username'), language_code=locale)

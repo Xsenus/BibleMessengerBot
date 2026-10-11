@@ -1,4 +1,4 @@
-"""MAX cards, original-message edits and MP3 using shared approved media assets."""
+"""Отправка в MAX: карточки, правка исходных сообщений и MP3 с теми же проверками допустимых материалов, что и в Telegram."""
 from __future__ import annotations
 
 import hashlib
@@ -17,7 +17,7 @@ from app.services.formatting import escape
 
 
 async def audio_caption(connection, card, locale):
-    """Name the exact language/page's source rather than send an anonymous MP3."""
+    """Подпись к аудио: «🔊 Озвучка» и названия до трёх глав/стихов, которые озвучены (а не безымянный MP3)."""
     from app.services import bible
     edition = await bible.find_translation(connection, card['selected_translation_id'])
     if not edition:
@@ -35,7 +35,7 @@ async def audio_caption(connection, card, locale):
 
 
 def image_upload(data: bytes, mime: str) -> tuple[bytes, str, str]:
-    """MAX lacks WebP uploads; transcode approved bytes without altering the DB asset."""
+    """Подготовить картинку для MAX: WebP не поддерживается, поэтому он перекодируется в JPEG (в БД оригинал не меняется); допустимы PNG и JPEG. Возвращает (байты, расширение, MIME)."""
     if mime == 'image/webp':
         with Image.open(io.BytesIO(data)) as source:
             buffer = io.BytesIO()
@@ -47,12 +47,14 @@ def image_upload(data: bytes, mime: str) -> tuple[bytes, str, str]:
 
 
 class MaxSender:
-    """Use positive local message checkpoints and bot-scoped MAX upload tokens."""
+    """Отправитель сообщений MAX: локальные контрольные точки сообщений и загрузка медиа с токенами, привязанными к боту."""
 
     def __init__(self, client: MaxClient, bot_id: int, connection: Any):
+        """Запомнить клиент MAX, ID бота и соединение с БД."""
         self.client, self.bot_id, self.connection = client, bot_id, connection
 
     async def media(self, kind: str, identifier: int) -> dict:
+        """Получить вложение для картинки или аудио: каждый раз проверяется, что материал одобрен (карантин не обходится кэшем); при отсутствии кэша файл загружается в MAX и вложение сохраняется в `max_media`."""
         if type(identifier) is not int or identifier <= 0:
             raise SendError('rejected')
         # Check asset approval on every reuse: a cached token cannot revive quarantine.
@@ -81,6 +83,7 @@ class MaxSender:
         return payload
 
     async def welcome_media(self, expected_digest: str) -> dict:
+        """Вложение с картинкой приветствия: проверяет хеш файла, загружает один раз и кэширует."""
         from app.bot.ui import WELCOME_PATH
         data = WELCOME_PATH.read_bytes()
         digest = hashlib.sha256(data).hexdigest()
@@ -100,7 +103,7 @@ class MaxSender:
 
     async def send(self, chat_id: int, text: str | dict, thread_id: int | None = None,
                    *, reply_markup: Any = None) -> int:
-        """A lost send ACK is uncertain; retrying a fixed original edit is safe."""
+        """Отправить или отредактировать часть сообщения в MAX: тексты, картинки, карточки языков, клавиатура и аудио-ответ на исходное чтение. Потерянное подтверждение отправки — неопределённый исход, а повтор правки безопасен. Возвращает локальный ID сообщения."""
         editing = isinstance(text, dict) and text.get('kind') == 'rich_edit'
         try:
             if thread_id is not None:

@@ -1,4 +1,4 @@
-"""MAX rate reservations are independent of Telegram's shared rate budget."""
+"""Ограничитель скорости MAX: отдельные резервы, не зависящие от общего бюджета Telegram."""
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +6,7 @@ from typing import Any
 
 
 async def wait_send_slot(connection: Any, chat_id: int) -> None:
-    """Conservative 10 global/second and 1 per chat/second, shared across processes."""
+    """Дождаться разрешения на отправку: не более 10 сообщений в секунду всего и 1 в секунду в чат, общие для всех процессов (состояние хранится в БД)."""
     key = f'chat:{chat_id}'
     while True:
         async with connection.transaction():

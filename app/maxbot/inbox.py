@@ -1,4 +1,4 @@
-"""Bounded event consumers with FIFO per external chat and no blind crash replay."""
+"""Потребители входящих событий MAX: в одном чате строго по очереди, без слепого повтора после сбоя."""
 from __future__ import annotations
 
 import asyncio
@@ -13,6 +13,7 @@ CONCURRENCY = 4
 
 
 async def due_events(connection, busy=()):
+    """Выбрать события к обработке: по одному старшему событию на чат, пропуская чаты, где уже идёт обработка, не больше свободных слотов."""
     return await connection.fetch('''SELECT id,chat_key FROM (
         SELECT DISTINCT ON (chat_key) id,chat_key FROM max_inbox i
         WHERE status='pending' AND NOT(chat_key=ANY($1::text[]))
@@ -21,11 +22,12 @@ async def due_events(connection, busy=()):
 
 
 async def recover(connection):
-    """Only the singleton owning consumer may recover interrupted event processing."""
+    """После старта единственного потребителя пометить прерванные (`processing`) события как неопределённые — повторно команды не выполняются."""
     await connection.execute("UPDATE max_inbox SET status='uncertain',error_code='consumer_interrupted',updated_at=now() WHERE status='processing'")
 
 
 async def process(pool, dispatcher, identifier):
+    """Обработать одно событие: перевести в `processing`, выполнить диспетчер и записать итог: `done`, `failed` (ошибка пользователя) или `uncertain` (неожиданный сбой — эффекты могли уже зафиксироваться, поэтому автоповтора нет)."""
     async with pool.acquire() as connection:
         row = await connection.fetchrow("""UPDATE max_inbox SET status='processing',attempts=attempts+1,updated_at=now()
             WHERE id=$1 AND status='pending' RETURNING payload,event_key""",identifier)
@@ -49,6 +51,7 @@ async def process(pool, dispatcher, identifier):
 
 
 async def consumer_loop(pool, dispatcher, stop):
+    """Основной цикл потребителя: до 4 чатов параллельно, при остановке ждёт завершения текущих событий до 35 секунд."""
     active = {}
     try:
         while not stop.is_set():

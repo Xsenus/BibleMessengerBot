@@ -1,8 +1,9 @@
 # ruff: noqa: RUF001
-"""MAX-specific help; do not advertise Telegram-only Stars or forum controls."""
+"""Справка для MAX: не рекламирует функции, существующие только в Telegram (Stars, темы форума)."""
 
 
 def help_text(locale='ru'):
+    """Справка на языке пользователя; раздел о поддержке картой/СБП убирается, если платежи не подключены."""
     from app.payments.yookassa import merchant_available
     value = _help_text(locale)
     if merchant_available():
@@ -12,6 +13,7 @@ def help_text(locale='ru'):
 
 
 def _help_text(locale='ru'):
+    """Полный текст справки MAX на русском или английском."""
     if locale=='ru':
         return ('📖 <b>Библия каждый день</b>\n\n'
                 '<b>Читать сейчас</b>\n/next — следующая глава\n/today — стих дня\n/random — случайное чтение\n'

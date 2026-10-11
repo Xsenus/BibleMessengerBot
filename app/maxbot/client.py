@@ -1,4 +1,4 @@
-"""Bounded MAX REST client with explicit known rejection versus lost acknowledgement."""
+"""Клиент REST API MAX с ограничениями: явно отличает известный отказ от потерянного подтверждения."""
 from __future__ import annotations
 
 import re
@@ -12,15 +12,17 @@ from app.services.errors import SendError
 
 
 class MaxAPIError(Exception):
-    """Store only status/code; provider response text can contain credentials or user text."""
+    """Ошибка API MAX: хранится только статус и безопасный код (текст ответа провайдера может содержать секреты или текст пользователя)."""
 
     def __init__(self, status: int, code: str = '', retry_after: float = 0) -> None:
+        """Запомнить статус, проверенный код и время ожидания перед повтором."""
         self.status = status
         self.code = code if re.fullmatch(r'[A-Za-z0-9_.-]{1,80}', code) else 'invalid_response'
         self.retry_after = retry_after
         super().__init__(f'MAX API status {status}: {self.code}')
 
     def send_error(self, *, editing: bool = False) -> SendError:
+        """Преобразовать ошибку в SendError для очереди: 429 и «вложение не готово» — повтор; 401 — повтор через минуту (не блокировка чата); 403 — запрет; 5xx/сеть — неясный исход (для правок — повтор); прочее — отказ."""
         if self.status == 429 or self.code == 'attachment.not.ready':
             return SendError('retry', max(1, self.retry_after))
         if self.status == 401:
@@ -33,6 +35,7 @@ class MaxAPIError(Exception):
 
 
 def _json(response: httpx.Response) -> dict[str, Any]:
+    """Разобрать тело ответа как JSON-объект; иначе MaxAPIError('invalid_response')."""
     try:
         data = response.json()
     except ValueError:
@@ -43,6 +46,7 @@ def _json(response: httpx.Response) -> dict[str, Any]:
 
 
 def _check(response: httpx.Response) -> None:
+    """Проверить успешность ответа; при ошибке выбросить MaxAPIError с кодом и временем Retry-After."""
     if response.is_success:
         return
     try:
@@ -57,7 +61,7 @@ def _check(response: httpx.Response) -> None:
 
 
 def validate_body(body: dict) -> None:
-    """Enforce MAX text and attachment constraints before a network mutation."""
+    """Проверить тело сообщения до сетевого запроса: текст до 4000 символов, у аудио и файлов — ровно одно вложение (плюс клавиатура), пустое сообщение запрещено."""
     text = body.get('text')
     if text is not None and (not isinstance(text, str) or len(text) > 4000):
         raise ValueError('MAX message text exceeds 4000 characters')
@@ -71,9 +75,10 @@ def validate_body(body: dict) -> None:
 
 
 class MaxClient:
-    """Do not retry mutation requests automatically or log token-bearing upload URLs."""
+    """Асинхронный клиент MAX. Изменяющие запросы автоматически не повторяются, адреса загрузки с токенами не логируются."""
 
     def __init__(self, config: MaxSettings, *, transport: httpx.AsyncBaseTransport | None = None):
+        """Создать два HTTP-клиента: основной с авторизацией и отдельный для загрузки файлов (чтобы токен API не ушёл на сторонние хосты); редиректы запрещены."""
         self.config = config
         self.http = httpx.AsyncClient(
             base_url=config.api_url, headers={'Authorization': config.token},
@@ -85,10 +90,12 @@ class MaxClient:
                                              follow_redirects=False, transport=transport)
 
     async def close(self) -> None:
+        """Закрыть оба HTTP-клиента."""
         await self.http.aclose()
         await self.upload_http.aclose()
 
     async def request(self, method: str, path: str, *, params=None, body=None) -> dict:
+        """Выполнить запрос к API по относительному пути; сетевые сбои превращаются в MaxAPIError('network')."""
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('MAX API path must be relative')
         try:
@@ -99,10 +106,12 @@ class MaxClient:
         return _json(response)
 
     async def get_me(self) -> dict:
+        """Получить сведения о боте (GET /me)."""
         return await self.request('GET', '/me')
 
     async def send(self, *, chat_id: int | None = None, user_id: int | None = None,
                    body: dict) -> str:
+        """Отправить сообщение ровно в один адрес (чат или пользователь) и вернуть идентификатор сообщения MAX."""
         if (chat_id is None) == (user_id is None):
             raise ValueError('Select exactly one MAX destination')
         validate_body(body)
@@ -114,18 +123,21 @@ class MaxClient:
         return message
 
     async def edit(self, message_id: str, body: dict) -> None:
+        """Отредактировать сообщение по идентификатору; без подтверждения успеха — ошибка."""
         validate_body(body)
         result = await self.request('PUT', '/messages', params={'message_id': message_id}, body=body)
         if result.get('success') is not True:
             raise MaxAPIError(400, 'edit_rejected')
 
     async def answer(self, callback_id: str, notification: str | None = None) -> None:
+        """Ответить на нажатие кнопки (необязательное всплывающее уведомление)."""
         result = await self.request('POST', '/answers', params={'callback_id': callback_id},
                                     body={'notification': notification})
         if result.get('success') is not True:
             raise MaxAPIError(400, 'callback_rejected')
 
     async def commands(self, commands: list[dict]) -> None:
+        """Установить меню команд бота (до 32 команд, имена a–z и _, описание до 128 символов) и проверить, что MAX применил его."""
         if len(commands) > 32 or any(not re.fullmatch(r'[a-z_]{1,64}', c['name'])
                 or not 1 <= len(c.get('description', '')) <= 128 for c in commands):
             raise ValueError('Invalid MAX command menu')
@@ -134,6 +146,7 @@ class MaxClient:
             raise MaxAPIError(400, 'commands_rejected')
 
     async def subscribe(self, update_types: list[str]) -> None:
+        """Подписать бота на типы событий с адресом вебхука и секретом из настроек."""
         if not self.config.webhook_url or not self.config.webhook_secret:
             raise ValueError('MAX webhook URL and secret are required')
         result = await self.request('POST', '/subscriptions', body={
@@ -144,6 +157,7 @@ class MaxClient:
             raise MaxAPIError(400, 'subscription_rejected')
 
     async def upload(self, kind: str, data: bytes, filename: str, mime_type: str) -> dict:
+        """Загрузить картинку (до 50 МБ) или аудио (до 256 МБ): получить адрес загрузки (только HTTPS и домены MAX), загрузить файл и вернуть вложение. Сбой загрузки безопасен для повтора: видимого сообщения не создаётся."""
         if kind not in {'image', 'audio'} or not data:
             raise ValueError('Unsupported MAX media')
         if len(data) > (50 if kind == 'image' else 256) * 1024 * 1024:

@@ -1,4 +1,4 @@
-"""Convert shared navigation to MAX's native inline keyboard attachment."""
+"""Преобразование общей навигации Telegram в нативную inline-клавиатуру MAX."""
 from __future__ import annotations
 
 from app.bot.ui import button_label, keyboard_command
@@ -6,7 +6,7 @@ from app.payments.yookassa import merchant_available
 
 
 def payment_controls(attachment, *, enabled=None, locale='ru'):
-    """Apply current availability even to a keyboard frozen before configuration changed."""
+    """Применить текущее состояние платежей к клавиатуре, даже сохранённой ранее: убрать кнопки оплаты, если платежи отключены, или добавить «Поддержать» в главное меню, если включены."""
     if not attachment:
         return None
     enabled = merchant_available() if enabled is None else enabled
@@ -21,6 +21,7 @@ def payment_controls(attachment, *, enabled=None, locale='ru'):
 
 
 def keyboard_attachment(markup, *, audio: tuple[int, int] | None = None, locale='ru', navigation=False) -> dict | None:
+    """Собрать вложение-клавиатуру MAX из inline-клавиатуры или нижней клавиатуры Telegram; при `navigation` добавляются кнопки «Дальше», «Случайный», «Поиск», «Меню», при `audio` — «Слушать»."""
     rows = []
     if markup is not None:
         if hasattr(markup, 'inline_keyboard'):

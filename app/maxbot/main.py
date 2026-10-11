@@ -1,4 +1,4 @@
-"""Singleton MAX consumer and idempotent command menu; HTTP receiver is separate."""
+"""Служба MAX: единственный потребитель событий и идемпотентное меню команд; приём вебхуков — отдельная служба."""
 from __future__ import annotations
 
 import asyncio
@@ -21,18 +21,21 @@ from app.services.locks import lock_key
 
 
 async def heartbeat(connection):
+    """Каждые 15 секунд записывать сигнал жизни службы `maxbot`."""
     while True:
         await connection.execute("INSERT INTO service_heartbeats(service) VALUES('maxbot') ON CONFLICT(service) DO UPDATE SET last_seen=now()")
         await asyncio.sleep(15)
 
 
 def command_menu():
+    """Список команд для меню MAX (из общего набора на русском); команды оплаты показываются только когда платежи подключены."""
     enabled=merchant_available()
     return [{'name':c.command,'description':'Поддержать картой или СБП' if c.command=='donate' else c.description}
             for c in commands_for('ru') if enabled or c.command not in {'donate','paysupport'}]
 
 
 async def main():
+    """Запустить службу: проверить настройки и токен, взять блокировку единственного потребителя, обновить меню команд, убедиться что вебхук наш (чужой не перезаписывается), подписаться на события и запустить цикл обработки, сигнал жизни, сверку платежей и обновление меню оплаты."""
     settings = Settings.from_env(require_bot_token=False)
     config = MaxSettings.from_env(require_token=True)
     if not config.webhook_url or not config.webhook_secret:

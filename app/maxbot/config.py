@@ -1,4 +1,4 @@
-"""Optional MAX configuration; secrets never appear in dataclass representations."""
+"""Необязательные настройки MAX; секреты не попадают в представление объекта."""
 from __future__ import annotations
 
 import os
@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 @dataclass(frozen=True, slots=True)
 class MaxSettings:
+    """Настройки MAX: токен бота, секрет и адрес вебхука, файл доверенного сертификата и адрес API."""
     token: str = field(default='', repr=False)
     webhook_secret: str = field(default='', repr=False)
     webhook_url: str = ''
@@ -19,6 +20,7 @@ class MaxSettings:
 
     @classmethod
     def from_env(cls, *, require_token: bool = False) -> MaxSettings:
+        """Прочитать настройки из переменных MAX_* и проверить формат токена, секрета (24–256 URL-безопасных символов) и адреса вебхука (HTTPS без порта)."""
         config = cls(
             token=os.getenv('MAX_BOT_TOKEN', '').strip(),
             webhook_secret=os.getenv('MAX_WEBHOOK_SECRET', '').strip(),
@@ -39,7 +41,7 @@ class MaxSettings:
         return config
 
     def tls_context(self) -> ssl.SSLContext:
-        """Extend system trust with an explicitly supplied CA, never disable verification."""
+        """Контекст TLS: системные сертификаты плюс явно заданный корневой сертификат; проверка никогда не отключается."""
         context = ssl.create_default_context()
         if self.ca_file:
             context.load_verify_locations(cafile=str(self.ca_file))

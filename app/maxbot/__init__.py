@@ -1,1 +1,1 @@
-"""MAX adapter for the shared Bible services and checkpointed delivery pipeline."""
+"""Адаптер мессенджера MAX поверх общих библейских сервисов и конвейера доставки с контрольными точками."""

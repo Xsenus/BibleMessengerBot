@@ -1,4 +1,4 @@
-"""Bounded, authenticated webhook ingestion with durable deduplication."""
+"""Приём вебхуков MAX: проверка подлинности и размера, разбор и надёжная защита от повторов."""
 from __future__ import annotations
 
 import hashlib
@@ -16,11 +16,13 @@ UPDATE_TYPES = ('message_created', 'message_callback', 'bot_started', 'bot_stopp
 
 
 def authorized(expected: str, supplied: str | None) -> bool:
+    """Сравнить секрет вебхука с ожидаемым за постоянное время; пустой или короткий (меньше 24 символов) секрет никого не авторизует."""
     return bool(expected and supplied and len(expected) >= 24
                 and secrets.compare_digest(expected.encode('utf-8'), supplied.encode('utf-8')))
 
 
 def validate_message(message, *, allow_empty_body=False):
+    """Проверить структуру сообщения MAX (получатель, отправитель, тело, ID и текст до 4000 символов) и вернуть идентификатор сообщения; при несоответствии — ValueError."""
     if not isinstance(message,dict):
         raise ValueError('Invalid MAX message')
     recipient = message.get('recipient')
@@ -46,6 +48,7 @@ def validate_message(message, *, allow_empty_body=False):
 
 
 def parse_event(raw: bytes) -> tuple[str, dict]:
+    """Разобрать и проверить событие вебхука (размер до 64 КБ, тип, время, структура по типу). Возвращает ключ дедупликации (SHA-256 от типа и идентификатора события) и сами данные."""
     if not raw or len(raw) > MAX_EVENT_BYTES:
         raise ValueError('MAX event exceeds size limit')
     try:
@@ -93,7 +96,7 @@ def parse_event(raw: bytes) -> tuple[str, dict]:
 
 
 async def ingest(connection: Any, raw: bytes) -> bool:
-    """True only for a newly committed event; a repeated webhook creates no new job."""
+    """Сохранить событие во входящую очередь `max_inbox`; повторная доставка того же события нового задания не создаёт. Возвращает True только для нового события."""
     key, event = parse_event(raw)
     message = event.get('message') or {}
     recipient = message.get('recipient') or {}
