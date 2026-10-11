@@ -1,4 +1,4 @@
-"""Local operator-only native receipts, support tickets and full refund command."""
+"""Локальные операции оператора для платежей картой/СБП: история, обращения, возвраты, проверка и сверка."""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +15,7 @@ from app.payments.yookassa import MerchantSettings, YooKassa
 
 
 async def run(args):
+    """Выполнить операцию с платежами ЮKassa: история заказов, обращения, полный возврат, привязка платежа после проверки или сверка незавершённых платежей."""
     pool = await create_pool(Settings.from_env(require_bot_token=False))
     api = None
     try:
@@ -46,6 +47,7 @@ async def run(args):
 
 
 def main():
+    """Точка входа: разобрать аргументы подкоманды; для возврата и проверки требуется явное подтверждение."""
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
     sub.add_parser('history')

@@ -1,9 +1,4 @@
-"""Operator alerts: evaluate durable state and notify the owner in Telegram.
-
-Run periodically (see deploy/bible-messenger-alerts.timer or `docker compose run --rm alerts`).
-An alert is sent when it first appears and again after ALERT_REPEAT_HOURS while it persists;
-state is kept in app_settings so restarts do not cause storms.
-"""
+"""Оповещения оператора: проверяет сохранённое состояние и пишет владельцу в Telegram, когда что-то требует внимания (раз в несколько часов, с сообщением о восстановлении)."""
 from __future__ import annotations
 
 import asyncio
@@ -26,7 +21,7 @@ STATE_KEY = 'alerts_state'
 
 def evaluate(samples: dict[str, float], *, budget_warn: float = 0.8, stale_delivery: float = 1800,
              heartbeat_stale: float = 180, backup_stale: float = 36 * 3600) -> dict[str, str]:
-    """Pure function: metric samples -> {alert_id: human message}. `samples` keys are 'name' or 'name|label'."""
+    """Чистая функция: по словарю значений метрик (ключ `имя` или `имя|метка`) вернуть словарь активных оповещений {идентификатор: сообщение}. Проверяются молчащие службы, зависшие и неопределённые доставки, бюджет картинок, блокировки провайдеров и возраст резервных копий."""
     alerts: dict[str, str] = {}
     for key, value in samples.items():
         name, _, label = key.partition('|')
@@ -48,6 +43,7 @@ def evaluate(samples: dict[str, float], *, budget_warn: float = 0.8, stale_deliv
 
 
 def samples_from(exposition: Any) -> dict[str, float]:
+    """Преобразовать собранные метрики в плоский словарь {`имя|метка`: значение}, удобный для `evaluate`."""
     result: dict[str, float] = {}
     for line in exposition.lines:
         if line.startswith('#'):
@@ -60,7 +56,7 @@ def samples_from(exposition: Any) -> dict[str, float]:
 
 
 def due(previous: dict[str, str], current: dict[str, str], now: datetime, repeat: timedelta) -> tuple[list[str], dict[str, str]]:
-    """Return messages to send now and the new persisted state {alert_id: last_notified_iso}."""
+    """Решить, какие оповещения отправить сейчас: новые или не повторявшиеся дольше `repeat`, а также сообщения о восстановлении. Возвращает (список сообщений, новое сохраняемое состояние)."""
     messages, state = [], {}
     for alert_id, text in current.items():
         last = previous.get(alert_id)
@@ -75,6 +71,7 @@ def due(previous: dict[str, str], current: dict[str, str], now: datetime, repeat
 
 
 async def notify(settings: Settings, chat_id: int, text: str) -> None:
+    """Отправить текст оповещения в указанный чат через Bot API Telegram; при ошибке HTTP выбрасывает исключение."""
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.post(f'https://api.telegram.org/bot{settings.bot_token}/sendMessage',
                                      json={'chat_id': chat_id, 'text': '⚠️ BibleMessengerBot\n' + text})
@@ -82,6 +79,7 @@ async def notify(settings: Settings, chat_id: int, text: str) -> None:
 
 
 async def run() -> int:
+    """Один проход проверки: собрать метрики, вычислить оповещения, отправить новые владельцу, сохранить состояние в `app_settings` и вывести краткий JSON-итог."""
     settings = Settings.from_env(require_bot_token=True)
     repeat = timedelta(hours=float(os.getenv('ALERT_REPEAT_HOURS', '6')))
     await wait_for_database(settings)

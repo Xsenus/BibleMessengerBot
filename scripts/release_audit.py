@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Record reproducible OFFLINE checks, with unexecuted integration work kept explicit.
-
-Running this script writes runtime-evidence/offline/ and preserves published release reports. It does not sign the package, run
-Docker, silently install dependencies, or turn skipped tests into passed tests.
-"""
+"""Офлайн-аудит релиза: запись воспроизводимых проверок и явный список невыполненных интеграционных проверок."""
 from __future__ import annotations
 import importlib.util
 import json
@@ -26,13 +22,13 @@ TOKEN = re.compile(r'\b\d{6,14}:[A-Za-z0-9_-]{30,}\b')
 
 
 def project_files() -> list[Path]:
-    """Select distributed source files, not runtime state or bytecode."""
+    """Список файлов проекта для проверки (без рабочих каталогов, кэшей и байт-кода)."""
     return sorted(p for p in ROOT.rglob('*') if p.is_file()
                   and not set(p.relative_to(ROOT).parts).intersection(EXCLUDED))
 
 
 def command(name: str, args: list[str]) -> dict[str,Any]:
-    """Execute once, capture the full log and record a genuine exit code."""
+    """Выполнить команду проверки один раз, сохранить полный журнал и записать реальный код возврата."""
     try:
         result = subprocess.run(args,cwd=ROOT,text=True,stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT,timeout=180,check=False)
@@ -46,7 +42,7 @@ def command(name: str, args: list[str]) -> dict[str,Any]:
 
 
 def main() -> int:
-    """Run offline validation and explicitly report missing integration prerequisites."""
+    """Запустить офлайн-проверки (компиляция, тесты, синтаксис скриптов, разбор JSON/YAML, поиск токенов) и сохранить отчёт; код возврата 0, если ошибок нет."""
     EVIDENCE.mkdir(parents=True,exist_ok=True)
     checks = [command('COMPILE',[sys.executable,'-m','compileall','-q','app','tests','scripts']),
               command('TESTS',[sys.executable,'-m','pytest','-o','addopts=','-q','-rs',

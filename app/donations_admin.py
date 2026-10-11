@@ -1,4 +1,4 @@
-"""Server-only Stars support/refunds. Access is controlled by host credentials."""
+"""Серверные операции оператора для добровольной поддержки через Telegram Stars: платежи, возвраты, ответы на обращения. Доступ определяется доступом к серверу."""
 from __future__ import annotations
 
 import argparse
@@ -19,6 +19,7 @@ from app.services.locks import lock_key
 
 
 async def refund_order(connection: Any, bot: Any, order_id: int, *, confirmed: bool) -> dict:
+    """Вернуть Stars по заказу: возможен только с явным подтверждением, для заказа с подтверждённой оплатой. Повторный вызов после потери ответа использует тот же идентификатор платежа и безопасен; результат записывается в журнал платежей."""
     if not confirmed:
         raise ValueError('Inspect payments first; refund requires --confirm')
     key = lock_key('donation-admin-refund', order_id)
@@ -48,6 +49,7 @@ async def refund_order(connection: Any, bot: Any, order_id: int, *, confirmed: b
 
 
 async def reply_support(connection: Any, bot: Any, ticket_id: int, message: str) -> dict:
+    """Ответить пользователю на обращение по оплате (1–3500 символов) личным сообщением бота и закрыть обращение. Это явная отправка оператором, автоматических повторов нет."""
     message = message.strip()
     if not 1 <= len(message) <= 3500 or '\x00' in message:
         raise ValueError('Reply must contain 1 to 3500 characters')
@@ -70,6 +72,7 @@ async def reply_support(connection: Any, bot: Any, ticket_id: int, message: str)
 
 
 def parser() -> argparse.ArgumentParser:
+    """Собрать разбор команд: платежи, открытые обращения, баланс Stars, сверка с Telegram, возврат, закрытие и ответ на обращение."""
     root = argparse.ArgumentParser(description='Private donation ledger and support operations')
     sub = root.add_subparsers(dest='command', required=True)
     sub.add_parser('payments', help='Last 100 confirmed payments')
@@ -89,6 +92,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 async def run(args: argparse.Namespace) -> Any:
+    """Выполнить выбранную операцию (платежи, обращения, баланс, сверка, возврат, ответ) и вернуть результат для печати. Бот Telegram создаётся только там, где нужен вызов API."""
     settings = Settings.from_env(require_bot_token=False)
     pool = await asyncpg.create_pool(normalize_asyncpg_dsn(settings.database_url),
                                     min_size=1, max_size=2, command_timeout=20)
@@ -131,6 +135,7 @@ async def run(args: argparse.Namespace) -> Any:
 
 
 def main() -> None:
+    """Точка входа: разобрать аргументы, выполнить операцию и напечатать результат JSON."""
     try:
         result = asyncio.run(run(parser().parse_args()))
     except Exception as error:

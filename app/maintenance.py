@@ -1,9 +1,4 @@
-"""Bounded-growth housekeeping: prune old operational rows in small batches.
-
-Nothing here touches Bible text, user settings, subscriptions, payments, image budget
-history or anything that is still outstanding. Defaults can be changed through
-RETENTION_* environment variables; `--dry-run` only counts.
-"""
+"""Плановая очистка: ограниченное по размеру удаление устаревших служебных строк небольшими пачками. Тексты Библии, настройки, подписки, платежи и бюджет картинок не затрагиваются."""
 from __future__ import annotations
 
 import argparse
@@ -20,6 +15,7 @@ BATCH = 1000
 
 @dataclass(frozen=True)
 class Rule:
+    """Правило очистки одной таблицы: имя, переменная окружения со сроком, срок по умолчанию в днях, таблица и условие отбора (в условии $1 — граница по времени)."""
     name: str
     env: str
     days: int
@@ -38,6 +34,7 @@ RULES = (
 
 
 def days_for(rule: Rule) -> int:
+    """Срок хранения для правила в днях: из переменной окружения, не меньше 7; при неверном значении — срок по умолчанию."""
     try:
         return max(7, int(os.getenv(rule.env, rule.days)))
     except ValueError:
@@ -45,7 +42,7 @@ def days_for(rule: Rule) -> int:
 
 
 async def prune(connection, rule: Rule, *, dry_run: bool = False) -> int:
-    """Delete (or count) eligible rows; each batch is its own short transaction."""
+    """Удалить (или только посчитать при `dry_run`) подходящие под правило строки. Удаление идёт пачками по BATCH штук с короткими паузами, чтобы не мешать работе бота. Возвращает число строк."""
     cutoff = await connection.fetchval("SELECT now()-make_interval(days=>$1)", days_for(rule))
     if dry_run:
         return await connection.fetchval(f'SELECT count(*) FROM {rule.table} WHERE {rule.where}', cutoff)
@@ -61,6 +58,7 @@ async def prune(connection, rule: Rule, *, dry_run: bool = False) -> int:
 
 
 async def run(dry_run: bool = False) -> dict[str, int]:
+    """Применить все правила очистки к базе и вернуть словарь {правило: число строк}; после удаления обновляет статистику `delivery_log`."""
     settings = Settings.from_env(require_bot_token=False)
     await wait_for_database(settings)
     pool = await create_pool(settings)

@@ -1,4 +1,4 @@
-"""Container-local process heartbeat probe; does not contact Telegram."""
+"""Проверка работоспособности служб внутри контейнера по свежему сигналу жизни (heartbeat) в БД; Telegram при этом не вызывается."""
 from __future__ import annotations
 import asyncio
 import os
@@ -10,12 +10,7 @@ from app.db import normalize_asyncpg_dsn
 
 
 def container_started_at(proc_root: Path = Path('/proc')) -> datetime | None:
-    """Read Linux PID 1 start time; reject heartbeats from an earlier container run.
-
-    Kernel boot time is rounded to whole seconds. Add one second so rounding can
-    delay readiness briefly but can never admit a heartbeat from before startup.
-    This probe is for Docker/Linux and fails closed when process metadata is absent.
-    """
+    """Определить время запуска контейнера по данным процесса PID 1 в /proc (с запасом в секунду). Сигналы жизни, записанные до старта контейнера, не считаются. Если данных нет — None, проверка считается проваленной."""
     try:
         fields = (proc_root / '1' / 'stat').read_text().rpartition(')')[2].split()
         start_ticks = int(fields[19])  # proc(5) field 22, after PID and comm
@@ -30,7 +25,7 @@ def container_started_at(proc_root: Path = Path('/proc')) -> datetime | None:
 
 
 async def probe(service: str) -> bool:
-    """Require a recent heartbeat produced after this container started."""
+    """Вернуть True, если у службы есть свежий (не старше 180 секунд) сигнал жизни, записанный уже после старта этого контейнера. Неизвестная служба — False."""
     if service not in {'bot','worker','illustrator','speaker','composer','maxbot'}:
         return False
     started_at = container_started_at()

@@ -1,4 +1,4 @@
-"""Upload a custom pg_dump, mirror artwork, or retrieve and decrypt a saved dump."""
+"""Операции с облачными резервными копиями: выгрузка дампа БД, зеркало картинок, скачивание с расшифровкой и очистка локальных копий."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from app.services import cloud_backup
 
 
 async def run(args):
+    """Выполнить команду резервного копирования: очистка старых локальных файлов, скачивание и расшифровка дампа с проверкой контрольной суммы, загрузка дампа, зеркало картинок или показ последних записей о копиях."""
     if args.command == "prune-local":
         return {"removed_files": cloud_backup.prune_local(args.directory)}
     settings = cloud_backup.CloudSettings.from_env()
@@ -60,6 +61,7 @@ async def run(args):
 
 
 def main():
+    """Точка входа: разобрать аргументы подкоманды и напечатать результат JSON."""
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("images")

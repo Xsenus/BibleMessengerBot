@@ -1,4 +1,4 @@
-"""Environment-backed application settings."""
+"""Настройки приложения, читаемые из переменных окружения."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 def _bool(name: str, default: bool) -> bool:
+    """Прочитать логическую переменную окружения (1/true/yes/on — истина); если не задана, вернуть значение по умолчанию."""
     value = os.getenv(name)
     if value is None:
         return default
@@ -18,6 +19,7 @@ def _bool(name: str, default: bool) -> bool:
 
 
 def _int(name: str, default: int, minimum: int = 1) -> int:
+    """Прочитать целую переменную окружения и проверить, что она не меньше `minimum`; иначе ValueError."""
     value = int(os.getenv(name, str(default)))
     if value < minimum:
         raise ValueError(f"{name} must be >= {minimum}")
@@ -25,6 +27,7 @@ def _int(name: str, default: int, minimum: int = 1) -> int:
 
 
 def _float(name: str, default: float, minimum: float = 0.0) -> float:
+    """Прочитать дробную переменную окружения и проверить нижнюю границу `minimum`; иначе ValueError."""
     value = float(os.getenv(name, str(default)))
     if value < minimum:
         raise ValueError(f"{name} must be >= {minimum}")
@@ -33,6 +36,7 @@ def _float(name: str, default: float, minimum: float = 0.0) -> float:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
+    """Неизменяемый набор настроек процесса. Секретные поля (токен, ключ, URL базы) скрыты из repr, чтобы не попасть в журнал."""
     bot_token: str = field(repr=False)
     owner_claim_code: str = field(repr=False)
     database_url: str = field(repr=False)
@@ -58,6 +62,7 @@ class Settings:
 
     @classmethod
     def from_env(cls, *, require_bot_token: bool = True) -> Settings:
+        """Собрать настройки из переменных окружения с проверкой значений (профиль Библии, время и часовой пояс по умолчанию, лимиты скорости). Токен бота обязателен, если `require_bot_token` истинно."""
         bot_token = os.getenv("BOT_TOKEN", "").strip()
         if require_bot_token and not bot_token:
             raise RuntimeError("BOT_TOKEN is required")

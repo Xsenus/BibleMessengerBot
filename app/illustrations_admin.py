@@ -1,4 +1,4 @@
-"""Export queued prompts and import generated images without calling paid APIs."""
+"""Операторская очередь иллюстраций: выгрузка запросов, добавление готовых картинок вручную, статистика и состояние провайдеров — без обращений к платным API."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from app.services import artwork, bible, illustrations
 
 
 def parser():
+    """Собрать разбор команд: `stats`, `providers`, `export`, `add` с параметрами издания, главы, стиха и файла картинки."""
     root = argparse.ArgumentParser(description="Bible verse illustration queue")
     sub = root.add_subparsers(dest="command", required=True)
     sub.add_parser("stats")
@@ -35,6 +36,7 @@ def parser():
 
 
 async def run(args):
+    """Выполнить команду очереди иллюстраций: показать статистику бюджета и провайдеров, выгрузить ожидающие запросы или добавить готовое изображение к стиху или главе."""
     c = await asyncpg.connect(
         normalize_asyncpg_dsn(Settings.from_env(require_bot_token=False).database_url)
     )

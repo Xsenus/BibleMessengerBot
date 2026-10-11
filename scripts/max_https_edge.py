@@ -1,4 +1,4 @@
-"""Own one HTTPS/VPN redirect, with watchdog rollback; never edit Xray or other rules."""
+"""Управление шлюзом HTTPS для MAX: одно перенаправление порта 443, контроль готовности и автоматический откат; чужие правила и контейнеры не затрагиваются."""
 from __future__ import annotations
 
 import argparse
@@ -20,6 +20,7 @@ IMAGE = 'nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2
 
 
 def command(*args: str, allow_failure=False, timeout=30):
+    """Выполнить внешнюю команду с тайм-аутом; ненулевой код — ошибка (если не разрешён сбой)."""
     result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if result.returncode and not allow_failure:
         raise RuntimeError(f'{args[0]} operation failed (exit {result.returncode})')
@@ -27,6 +28,7 @@ def command(*args: str, allow_failure=False, timeout=30):
 
 
 def owned_container():
+    """Вернуть состояние контейнера шлюза, если он существует и помечен нашей меткой; чужой контейнер с тем же именем не используется."""
     result = command('docker','container','inspect',CONTAINER,allow_failure=True)
     if result.returncode:
         return None
@@ -37,6 +39,7 @@ def owned_container():
 
 
 def ready(ip: str):
+    """Проверить, что шлюз отвечает: контейнер запущен, порт шлюза отдаёт /health приложения MAX и порт 443 принимает соединения."""
     try:
         state = owned_container()
         if not state or not state['State']['Running']:
@@ -60,6 +63,7 @@ def ready(ip: str):
 
 def rules(ip: str, interface: str):
     # No OUTPUT rule: backend connections to the original local Xray bypass redirect.
+    """Описать пару правил iptables (разрешение и перенаправление 443 → 29443) с комментарием владельца."""
     return (
         ('filter','INPUT',('-i',interface,'-d',ip,'-p','tcp','--dport','29443',
             '-m','conntrack','--ctorigdst',ip,'--ctorigdstport','443',
@@ -70,22 +74,26 @@ def rules(ip: str, interface: str):
 
 
 def present(table, chain, rule):
+    """Проверить, существует ли указанное правило iptables."""
     return command('iptables','-w','10','-t',table,'-C',chain,*rule,allow_failure=True).returncode == 0
 
 
 def route_on(ip, interface):
+    """Включить маршрутизацию: добавить недостающие правила iptables в начало цепочек."""
     for table,chain,rule in rules(ip,interface):
         if not present(table,chain,rule):
             command('iptables','-w','10','-t',table,'-I',chain,'1',*rule)
 
 
 def route_off(ip, interface):
+    """Выключить маршрутизацию: удалить наши правила iptables в обратном порядке."""
     for table,chain,rule in reversed(rules(ip,interface)):
         while present(table,chain,rule):
             command('iptables','-w','10','-t',table,'-D',chain,*rule)
 
 
 def start(ip, interface):
+    """Запустить (или перезапустить) шлюз с проверенной конфигурацией nginx, дождаться готовности и только затем включить маршрут; при неготовности публичный маршрут остаётся прежним."""
     expected = (ROOT/'deploy/max-edge.nginx.conf.template').read_text().replace('@PUBLIC_IP@',ip)
     config = STATE/'edge.conf'
     existing = owned_container()
@@ -125,6 +133,7 @@ def start(ip, interface):
 
 
 def main():
+    """Точка входа: действия `start`, `stop`, `guard` (самоконтроль с откатом), `status`."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action',choices=('start','stop','guard','status'))
     args = parser.parse_args()

@@ -1,4 +1,4 @@
-"""Install and verify pinned voices; do not download weights during a reading."""
+"""Установка и проверка закреплённых нейроголосов; веса не скачиваются во время работы бота."""
 import asyncio
 import json
 import sys
@@ -7,6 +7,7 @@ from app.services import neural_speech,russian_speech
 
 
 async def main():
+    """При аргументе `prepare` скачать и проверить голоса, затем напечатать отчёт о полноте моделей по языкам; код возврата 1, если чего-то не хватает."""
     if len(sys.argv) == 2 and sys.argv[1] == 'prepare':
         await neural_speech.prepare()
         await russian_speech.prepare()

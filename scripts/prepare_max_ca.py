@@ -1,4 +1,4 @@
-"""Download the pinned public MAX CA over verified HTTPS; no global trust change."""
+"""Скачивание публичного корневого сертификата для MAX по проверенному HTTPS с проверкой отпечатка; глобальные хранилища доверия не меняются."""
 from __future__ import annotations
 
 import argparse
@@ -14,6 +14,7 @@ FINGERPRINT='d26d2d0231b7c39f92cc738512ba54103519e4405d68b5bd703e9788ca8ecf31'
 
 
 def prepare(output: Path):
+    """Скачать сертификат, убедиться, что это единственный сертификат с ожидаемым SHA-256, и сохранить файл; отказывается заменять другой уже настроенный сертификат."""
     with urlopen(Request(SOURCE,headers={'User-Agent':'BibleMessengerBot/MAX-CA'}),
                  context=ssl.create_default_context(),timeout=30) as response:
         if response.geturl()!=SOURCE:
