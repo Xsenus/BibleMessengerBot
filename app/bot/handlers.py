@@ -25,6 +25,7 @@ from app.bot.common import authorize,button,destination,enum_value,register_cont
 from app.bot.branding import commands_for
 from app.bot.dispatch import run_command
 from app.services import broadcast, usage
+from app.services.features import support_enabled
 from app.bot.menus import (  # noqa: F401 - re-exported for tests and callers
     change_language,change_voice,command_target_suffix,daily_confirmation,edition_menu,
     enable_devotions,help_text,language_menu,modes_menu,settings_keyboard,settings_text,status_text,ui_menu,voices_menu)
@@ -53,9 +54,11 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
             locale = await connection.fetchval('SELECT ui_language FROM telegram_chats WHERE telegram_chat_id=$1',message.chat.id)
             if parsed.name in KNOWN_COMMANDS:
                 await usage.record(connection,'cmd:'+parsed.name,getattr(bot,'platform','telegram'))
-            if parsed.name in {'donate','donations','paysupport','terms'}:
+            if parsed.name in {'donate','donations','paysupport','terms'} and not support_enabled():
+                text,markup = ('Этот раздел временно недоступен.' if locale=='ru' else 'This section is temporarily unavailable.'),None
+            elif parsed.name in {'donate','donations','paysupport','terms'}:
                 donation_command = (parsed.name,' '.join(parsed.arguments))
-            elif parsed.name=='start' and parsed.arguments==('donate',):
+            elif parsed.name=='start' and parsed.arguments==('donate',) and support_enabled():
                 donation_command = ('donate','')
             else:
                 text,markup = await run_command(connection,bot,settings,message,parsed)

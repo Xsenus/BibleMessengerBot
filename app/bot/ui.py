@@ -12,6 +12,7 @@ from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.types import FSInputFile, KeyboardButton, ReplyKeyboardMarkup
 
 from app.services.formatting import escape, plain_text, utf16_length
+from app.services.features import support_enabled
 from app.services.i18n import available_ui, tr
 from app.services.rate_limit import wait_send_slot
 
@@ -19,15 +20,40 @@ LOGGER = logging.getLogger(__name__)
 WELCOME_PATH = Path(__file__).resolve().parents[2] / 'assets' / 'brand' / 'welcome.png'
 
 
-BUTTONS = (
+_BASE_BUTTONS = (
     ('next', '📖'), ('today', '🌅'), ('random', '🎲'),
     ('search', '🔎'), ('settings', '⚙️'), ('help', '❔'),
-    ('daily', '🔔'), ('donate', '⭐'),
+    ('daily', '🔔'),
 )
+BUTTONS_WITH_SUPPORT = (*_BASE_BUTTONS, ('donate', '⭐'))
+
+
+def active_buttons():
+    """Кнопки главной клавиатуры: «Поддержать» показывается только при включённом разделе поддержки."""
+    return BUTTONS_WITH_SUPPORT if support_enabled() else _BASE_BUTTONS
+
+
+BUTTONS = BUTTONS_WITH_SUPPORT  # все возможные кнопки (для распознавания подписей)
 LABELS = {
     'ru': {'next': 'Читать дальше', 'today': 'Стих дня', 'help': 'Помощь'},
     'en': {'next': 'Continue reading', 'today': 'Verse of the day', 'help': 'Help'},
 }
+
+
+SUPPORT_RU = (
+    '<b>Добровольная поддержка</b>\n'
+    '/donate — поддержать сервер и развитие Telegram Stars\n'
+    '/donations — история поддержки · /terms — условия\n'
+    '/paysupport текст — вопрос по платежу или запрос возврата\n'
+    'Библия бесплатна; поддержка разовая и добровольная.\n\n'
+)
+SUPPORT_EN = (
+    '<b>Voluntary support</b>\n'
+    '/donate — support hosting and development with Telegram Stars\n'
+    '/donations — support history · /terms — terms\n'
+    '/paysupport your message — payment issue or refund request\n'
+    'The Bible is free; support is optional and one-time.\n\n'
+)
 
 
 def button_label(locale: str, command: str, emoji: str) -> str:
@@ -44,7 +70,7 @@ def button_label(locale: str, command: str, emoji: str) -> str:
 def main_keyboard(locale: str, *, collapsible=True) -> ReplyKeyboardMarkup:
     """Нижняя клавиатура главных действий по две кнопки в ряд; клиент может её свернуть, а при `collapsible` есть кнопка «Скрыть кнопки»."""
     buttons = [KeyboardButton(text=button_label(locale, command, emoji))
-               for command, emoji in BUTTONS]
+               for command, emoji in active_buttons()]
     placeholder = {'ru': 'Выберите действие или введите /search …',
                    'en': 'Choose an action or enter /search …'}.get(locale, tr(locale, 'choose'))
     return ReplyKeyboardMarkup(
@@ -204,11 +230,7 @@ def onboarding_help(locale: str) -> str | None:
             '<code>/thread 123 @group</code> — тема форума\n'
             '<code>/reset confirm</code> — сбросить прогресс и приостановить подписки\n'
             '/topics — темы для изданий с совместимой нумерацией\n\n'
-            '<b>Добровольная поддержка</b>\n'
-            '/donate — поддержать сервер и развитие Telegram Stars\n'
-            '/donations — история поддержки · /terms — условия\n'
-            '/paysupport текст — вопрос по платежу или запрос возврата\n'
-            'Библия бесплатна; поддержка разовая и добровольная.\n\n'
+            + (SUPPORT_RU if support_enabled() else '') +
             'Скрыть кнопки: /hide_keyboard. Вернуть: /menu. Голос чтения: /voice'
         )
     if locale == 'en':
@@ -236,11 +258,7 @@ def onboarding_help(locale: str) -> str | None:
             '<code>/thread 123 @group</code> — choose a forum topic\n'
             '<code>/reset confirm</code> — reset progress and pause subscriptions\n'
             '/topics — themes for editions with compatible numbering\n\n'
-            '<b>Voluntary support</b>\n'
-            '/donate — support hosting and development with Telegram Stars\n'
-            '/donations — support history · /terms — terms\n'
-            '/paysupport your message — payment issue or refund request\n'
-            'The Bible is free; support is optional and one-time.\n\n'
+            + (SUPPORT_EN if support_enabled() else '') +
             'Hide buttons: /hide_keyboard. Restore buttons: /menu. Russian voices: /voice'
         )
     return None

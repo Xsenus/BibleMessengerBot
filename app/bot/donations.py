@@ -20,6 +20,7 @@ from aiogram.types import (
 )
 
 from app.services import donations
+from app.services.features import support_enabled
 from app.payments.yookassa import merchant_available
 
 LOGGER = logging.getLogger(__name__)
@@ -230,7 +231,7 @@ async def handle_command(message: Message, bot: Any, settings: Any, pool: Any,
 async def _donation_callback(query: CallbackQuery, bot: Any, db_pool: Any) -> None:
     """Нажатия кнопок поддержки (`donate:сумма` и `donate:confirm:сумма`): проверяет, что кнопка нажата в личном чате на сообщении бота; сначала показывает условия, после согласия создаёт заказ и счёт в Stars и убирает кнопку."""
     locale = language(query.from_user)
-    valid_private = is_private(query.message, query.from_user)
+    valid_private = is_private(query.message, query.from_user) and support_enabled()
     match = re.fullmatch(r'donate:(confirm:)?([1-9][0-9]{0,3})', query.data or '')
     amount = amount_value(match[2]) if match else None
     valid = valid_private and amount is not None

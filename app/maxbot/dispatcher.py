@@ -14,6 +14,7 @@ from app.bot.commands import MANAGEMENT, parse_command
 from app.maxbot.bridge import ReplyContext, user_model
 from app.maxbot.identities import lookup, register, remember_message
 from app.services import bible, passage
+from app.services.features import support_enabled
 from app.services.errors import UserError
 from app.services.i18n import initial_ui, tr
 from app.services.locks import chat_lock
@@ -75,6 +76,9 @@ class MaxDispatcher:
                 raise UserError('forbidden')
             message = message.model_copy(update={'text':' '.join([*tokens[:-1],str(target)])})
             parsed = parse_command(message.text or '')
+        if parsed.name in {'donate','donations','paysupport','terms','refund'} and not support_enabled():
+            await self._response(message.chat,'Этот раздел временно недоступен.')
+            return
         if parsed.name in {'donate','donations','paysupport','terms','refund'} or (parsed.name=='start' and parsed.arguments==('donate',)):
             from app.maxbot.payments import support
             await support(self, message, parsed)

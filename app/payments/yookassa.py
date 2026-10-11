@@ -86,6 +86,9 @@ class MerchantSettings:
 
 def merchant_available():
     """Безопасная проверка «платежи доступны»: при неверной конфигурации возвращает False, чтобы не ломать чтение и навигацию."""
+    from app.services.features import support_enabled
+    if not support_enabled():
+        return False
     try:
         return MerchantSettings.from_env().enabled
     except ValueError:

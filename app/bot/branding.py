@@ -11,6 +11,7 @@ from typing import Any
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.types import BotCommand, FSInputFile, InputProfilePhotoStatic, MenuButtonCommands
 
+from app.services.features import support_enabled
 from app.services.i18n import available_ui, tr
 
 LOGGER = logging.getLogger(__name__)
@@ -68,9 +69,10 @@ def commands_for(locale: str) -> list[BotCommand]:
         for i,(command,key) in enumerate(COMMAND_KEYS)]
     commands.extend([
         BotCommand(command='timezone', description='Выбрать свой город и часовой пояс' if language == 'ru' else 'Choose your city and time zone'),
-        BotCommand(command='donate', description=(('Поддержать: Stars, карта или СБП' if language=='ru' else 'Support: Stars, card or SBP')
+        *([BotCommand(command='donate', description=(('Поддержать: Stars, карта или СБП' if language=='ru' else 'Support: Stars, card or SBP')
                    if merchant_available() else ('Добровольно поддержать бота ⭐' if language == 'ru' else 'Support the bot with Stars ⭐'))),
-        BotCommand(command='paysupport', description='Вопрос по платежу или возврат' if language == 'ru' else 'Payment issue or refund request'),
+        BotCommand(command='paysupport', description='Вопрос по платежу или возврат' if language == 'ru' else 'Payment issue or refund request')]
+          if support_enabled() else []),
         BotCommand(command='daily', description='Включить ежедневный стих' if language == 'ru' else 'Enable daily verse delivery'),
         BotCommand(command='read', description='Найти главу или стих по адресу' if language == 'ru' else 'Read a chapter or verse by reference'),
         BotCommand(command='devotions', description='Стихи утром и вечером' if language == 'ru' else 'Morning and evening verses'),
