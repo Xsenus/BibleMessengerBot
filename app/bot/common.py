@@ -1,4 +1,4 @@
-"""Shared authorization, context and reply helpers for Telegram handlers."""
+"""Общие помощники обработчиков Telegram: проверка прав, регистрация контекста, выбор целевого чата и отправка ответов."""
 from __future__ import annotations
 import logging
 from typing import Any
@@ -19,12 +19,12 @@ LOGGER = logging.getLogger(__name__)
 
 
 def enum_value(value: Any) -> str:
-    """Work with both aiogram string enums and validated plain strings."""
+    """Получить строковое значение и у перечислений aiogram, и у обычных строк."""
     return str(getattr(value,'value',value))
 
 
 async def authorize(bot: Any, chat: Any, actor_id: int) -> None:
-    """Verify the real user and the bot's current posting rights; fail closed."""
+    """Проверить права на чат: в личном чате пользователь должен писать из своего чата; в группе и канале он обязан быть администратором, бот — тоже, а в канале у бота должно быть право публикации. Любая неопределённость — отказ (`forbidden`)."""
     if enum_value(chat.type)=='private':
         if chat.id != actor_id:
             raise UserError('forbidden')
@@ -46,7 +46,7 @@ async def authorize(bot: Any, chat: Any, actor_id: int) -> None:
 
 async def register_context(connection: Any, user: Any, chat: Any, settings: Any,
                            *, allow_blocked: bool = False) -> None:
-    """Persist a private user's initial UI once; group defaults are deterministic."""
+    """Сохранить пользователя и чат (при первом контакте выбирается язык интерфейса по языку Telegram; для групп — язык по умолчанию). Заблокированному пользователю доступ закрыт, кроме команд поддержки (`allow_blocked`)."""
     await upsert_user(connection,user_id=user.id,username=user.username,first_name=user.first_name,
         last_name=user.last_name,language_code=user.language_code,default_timezone=settings.default_timezone)
     if not allow_blocked and await connection.fetchval('SELECT is_blocked FROM telegram_users WHERE telegram_user_id=$1',user.id):
@@ -58,7 +58,7 @@ async def register_context(connection: Any, user: Any, chat: Any, settings: Any,
 
 async def destination(connection: Any, bot: Any, current_chat: Any, actor_id: int,
                       target: str | int | None, settings: Any) -> Any:
-    """Resolve remote destinations only from a private management dialog."""
+    """Определить чат, которым управляет команда: текущий или удалённый (канал/группа по @имени или ID — только из личного диалога). Проверяет права, регистрирует чат и возвращает его настройки."""
     if target is not None and enum_value(current_chat.type)!='private' and str(target)!=str(current_chat.id):
         raise UserError('private_only')
     try:
@@ -75,7 +75,7 @@ async def destination(connection: Any, bot: Any, current_chat: Any, actor_id: in
 
 async def reply(bot: Any, connection: Any, settings: Any, chat_id: int, text: str,
                 markup: Any = None, thread: int | None = None) -> None:
-    """Split HTML safely and never automatically replay an ambiguous UI response."""
+    """Отправить ответ: в MAX — через очередь, в Telegram — безопасно разбив HTML на части и подготовив кнопки языков. Неопределённый результат отправки автоматически не повторяется."""
     if getattr(bot,'platform',None)=='max':
         await bot.queue_response(connection,settings,chat_id,text,markup)
         return
@@ -97,7 +97,7 @@ async def reply(bot: Any, connection: Any, settings: Any, chat_id: int, text: st
 
 
 def button(text: str, action: str, chat_id: int, value: str = '') -> InlineKeyboardButton:
-    """All callbacks carry the destination, which is authorized again when clicked."""
+    """Создать inline-кнопку; в её данные всегда входит целевой чат, права на который проверяются заново при нажатии."""
     return InlineKeyboardButton(text=text,callback_data=encode_callback(action,chat_id,value))
 
 

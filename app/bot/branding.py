@@ -1,4 +1,4 @@
-"""Idempotent public Telegram profile and menu, independent of polling health."""
+"""Публичный профиль бота в Telegram (имя, описание, команды, меню, аватар): обновляется идемпотентно и не зависит от работы приёма сообщений."""
 from __future__ import annotations
 
 import asyncio
@@ -60,6 +60,7 @@ COMMAND_DESCRIPTIONS = {
 
 
 def commands_for(locale: str) -> list[BotCommand]:
+    """Список команд меню бота для языка: основные команды из COMMAND_KEYS, плюс часовой пояс, поддержка, ежедневный стих, чтение по адресу, утро/вечер, голос и скрытие клавиатуры. Подпись команды поддержки зависит от того, подключены ли платежи картой."""
     from app.payments.yookassa import merchant_available
     language = locale or 'ru'
     descriptions = COMMAND_DESCRIPTIONS.get(language)
@@ -81,15 +82,11 @@ def commands_for(locale: str) -> list[BotCommand]:
 
 
 async def apply_branding(bot: Any, connection: Any, *, avatar_path: Path | None = None) -> bool:
-    """Apply changed fields only; record fingerprints only after Telegram accepts.
-
-    A missing avatar or recoverable API failure never stops message processing.
-    The background supervisor retries it. Profile-description pictures are a
-    separate BotFather feature, not a field configured by these API methods.
-    """
+    """Обновить профиль бота: менять только изменившиеся поля и запоминать отпечаток лишь после подтверждения Telegram. Отсутствие аватара или временный сбой API не мешают работе бота — повтор выполняет фоновый цикл. Возвращает True, если всё применено."""
     complete = True
 
     async def update(component: str, value: Any, method: Any, **kwargs: Any) -> None:
+        """Обновить один компонент профиля (имя, описание, команды, меню, фото), если его отпечаток отличается от сохранённого; при отказе Telegram отметить обновление неполным."""
         nonlocal complete
         fingerprint = hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
         key = f'branding:{bot.id}:{component}'
@@ -131,7 +128,7 @@ async def apply_branding(bot: Any, connection: Any, *, avatar_path: Path | None 
 
 
 async def branding_loop(bot: Any, pool: Any) -> None:
-    """Retry optional branding without blocking or terminating the poller."""
+    """Фоновый цикл обновления профиля: повтор через 5 минут при сбое и через час после успеха, с учётом ограничений Telegram; текст ошибок API не логируется."""
     while True:
         delay = 300
         try:

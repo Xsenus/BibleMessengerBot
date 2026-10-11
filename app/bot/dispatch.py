@@ -1,4 +1,4 @@
-"""Command execution: parses a command and performs the requested action."""
+"""Выполнение команд: разбирает уже распознанную команду и выполняет действие в нужном чате (настройки, подписки, чтение, поиск)."""
 from __future__ import annotations
 import logging
 from datetime import datetime
@@ -31,12 +31,16 @@ LOGGER = logging.getLogger(__name__)
 
 async def run_command(connection: Any, bot: Any, settings: Any, message: Message,
                       parsed: Any) -> tuple[str | None,Any]:
-    """Domain routing; every publishing/settings action resolves and authorizes a destination."""
+    """Выполнить одну команду пользователя и вернуть (текст ответа, клавиатура).
+
+    Сначала определяется и авторизуется целевой чат (`destination`), затем команда маршрутизируется по имени: голос, клавиатура и меню, ежедневный стих и утро/вечер, язык и издание, пауза/возобновление/отписка, часовой пояс и время, подписки, сброс прогресса, решение по неопределённой доставке, темы. Остальные команды требуют выбранное издание: `/license`, `/next` (ставит главу в очередь, ответ придёт воркером), `/today`, `/random`, `/topic`, `/search` и `/read` (поиск по адресу или словам, с картинками при наличии). Ошибки пользователя поднимаются как UserError с ключом сообщения.
+    """
     user = message.from_user
     args = list(parsed.arguments)
     name = parsed.name
     chat = await destination(connection,bot,message.chat,user.id,parsed.target,settings)
     locale = chat['ui_language']
+    # /voice — выбор русского голоса чтения
     if name=='voice':
         if not args:
             return voices_menu(chat)
@@ -46,17 +50,20 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         value=aliases.get(args[0].casefold(),args[0].casefold())
         chat=await change_voice(connection,chat,value)
         return voices_menu(chat)
+    # /hide_keyboard — скрыть нижнюю клавиатуру (только личный чат Telegram)
     if name=='hide_keyboard':
         if enum_value(message.chat.type)!='private' or getattr(bot,'platform',None)=='max':
             raise UserError('invalid')
         await connection.execute('UPDATE telegram_chats SET keyboard_hidden=true WHERE telegram_chat_id=$1',message.chat.id)
         return ('Кнопки скрыты. Вернуть их: /menu. Команды доступны через кнопку «Меню».' if locale=='ru' else
                 'Buttons hidden. Restore them with /menu. Commands remain available in Menu.'),ReplyKeyboardRemove()
+    # /start в личном чате — приветствие и главная клавиатура
     if name=='start' and enum_value(message.chat.type)=='private':
         if getattr(bot,'platform',None)!='max' and connection is not None:
             await connection.execute('UPDATE telegram_chats SET keyboard_hidden=false WHERE telegram_chat_id=$1',message.chat.id)
         edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
         return welcome_text(locale,bible.display_title(edition) if edition else None),main_keyboard(locale,collapsible=getattr(bot,'platform',None)!='max')
+    # /settings, /register — показать настройки
     if name in {'start','settings','register'}:
         return await settings_text(connection,chat),settings_keyboard(chat)
     if name=='help':
@@ -72,6 +79,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         return search_prompt(locale),None
     if name=='read' and not args:
         return search_prompt(locale),None
+    # /devotions [off] — утренние и вечерние стихи и молитва
     if name=='devotions':
         if args==['off']:
             for mode in ['morning_verse','evening_verse']:
@@ -79,6 +87,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             return ('Утренние и вечерние стихи отключены.' if locale=='ru' else 'Morning and evening verses disabled.'),settings_keyboard(chat)
         if args:raise UserError('invalid')
         return await enable_devotions(connection,chat,user.id),settings_keyboard(chat)
+    # /daily [HH:MM [пояс]|off] — ежедневный стих
     if name=='daily':
         if args==['off']:
             await set_enabled(connection,chat['telegram_chat_id'],False,'verse_of_day')
@@ -93,11 +102,13 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             send_time=parse_hhmm(args[0] if args else settings.default_send_time),
             timezone_name=args[1] if len(args)>1 else chat['timezone'])
         return daily_confirmation(sub,locale),settings_keyboard(chat)
+    # /claim КОД — стать владельцем бота (один раз, только в личном чате)
     if name=='claim':
         if enum_value(message.chat.type)!='private':
             raise UserError('private_only')
         ok = len(args)==1 and await claim_owner(connection,telegram_user_id=user.id,supplied_code=args[0],expected_code=settings.owner_claim_code)
         return tr(locale,'owner_ok' if ok else 'owner_fail'),None
+    # /language [код] — язык Библии (издание подбирается автоматически)
     if name=='language':
         if not args:
             return await language_menu(connection,chat)
@@ -106,6 +117,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         chat = await change_language(connection,chat,user.id,args[0])
         notice = '' if ui_for_language(args[0]) else tr(chat['ui_language'],'ui_fallback',ui=native_ui_name(chat['ui_language']))+'\n'
         return notice+await settings_text(connection,chat),settings_keyboard(chat)
+    # /ui [код] — язык интерфейса
     if name=='ui':
         if not args:
             return ui_menu(chat)
@@ -114,8 +126,10 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             raise UserError('unknown_language')
         chat = await configure_chat(connection,chat_id=chat['telegram_chat_id'],actor_id=user.id,ui_language=locale_new)
         return await settings_text(connection,chat),settings_keyboard(chat)
+    # /translations [язык] — список изданий
     if name=='translations':
         return await edition_menu(connection,chat,0,args[0] if args else None)
+    # /translation ID — выбрать издание
     if name=='translation':
         if len(args)!=1:
             raise UserError('invalid')
@@ -126,6 +140,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         return await settings_text(connection,chat),settings_keyboard(chat)
     if name=='status':
         return await status_text(connection,chat),settings_keyboard(chat)
+    # /pause, /resume, /unsubscribe [режим] — управление подписками
     if name in {'pause','resume','unsubscribe'}:
         if len(args)>1:
             raise UserError('invalid')
@@ -135,6 +150,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         else:
             await set_enabled(connection,chat['telegram_chat_id'],name=='resume',mode)
         return tr(locale,'saved'),settings_keyboard(chat)
+    # /thread N|off — тема форума для публикаций в группе
     if name=='thread':
         if len(args)!=1 or not (args[0]=='off' or args[0].isdigit() and int(args[0])>0):
             raise UserError('invalid')
@@ -144,6 +160,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         chat = await configure_chat(connection,chat_id=chat['telegram_chat_id'],actor_id=user.id,set_thread=True,
             message_thread_id=None if args[0]=='off' else int(args[0]))
         return tr(locale,'saved'),settings_keyboard(chat)
+    # /timezone [пояс] — город или часовой пояс чата
     if name=='timezone':
         from app.bot.timezones import menu
         if not args:
@@ -152,6 +169,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             raise UserError('invalid')
         chat=await configure_chat(connection,chat_id=chat['telegram_chat_id'],actor_id=user.id,timezone_name=args[0])
         return await settings_text(connection,chat),settings_keyboard(chat)
+    # /time HH:MM [пояс] — время рассылок (для утра/вечера задаёт время молитвы)
     if name=='time':
         if not args:
             target = await command_target_suffix(connection,chat)
@@ -167,6 +185,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
                 await connection.execute('UPDATE subscriptions SET send_time=$2,next_run_at=$3,revision=revision+1 WHERE id=$1',row['id'],row['send_time'] if row['mode'] in {'morning_verse','evening_verse'} else clock,
                     next_reading(row['mode'],row['send_time'] if row['mode'] in {'morning_verse','evening_verse'} else clock,tz,list(row['days_of_week'])) if row['is_enabled'] else None)
         return tr(locale,'saved'),settings_keyboard(chat)
+    # /subscribe режим [HH:MM [пояс [план]]] — создать или изменить подписку
     if name in {'subscribe','channel'}:
         if not args:
             return modes_menu(chat)
@@ -180,6 +199,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             translation_id=edition['id'],mode=mode,send_time=parse_hhmm(args[1] if len(args)>1 else settings.default_send_time),
             timezone_name=args[2] if len(args)>2 else chat['timezone'],plan_code=args[3] if len(args)>3 else None)
         return tr(locale,'saved'),settings_keyboard(chat)
+    # /reset confirm — сбросить прогресс и отключить подписки
     if name=='reset':
         if args!=['confirm']:
             raise UserError('invalid')
@@ -191,11 +211,13 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
                 plan_day=0,completed=false,is_enabled=false,next_run_at=NULL,revision=revision+1 WHERE telegram_chat_id=$1''',chat['telegram_chat_id'])
             await connection.execute("INSERT INTO operator_events(actor_id,chat_id,action) VALUES($1,$2,'reset_progress')",user.id,chat['telegram_chat_id'])
         return tr(locale,'saved')+'\n/resume',settings_keyboard(chat)
+    # /resolve ID действие — решение оператора по неопределённой доставке
     if name=='resolve':
         if len(args)!=2 or not args[0].isdigit():
             raise UserError('invalid')
         await resolve_uncertain(connection,int(args[0]),chat['telegram_chat_id'],user.id,args[1])
         return tr(locale,'saved'),settings_keyboard(chat)
+    # /topics — список тем
     if name=='topics':
         topics = await connection.fetch('SELECT code,title_ru,title_en FROM topics WHERE is_active ORDER BY code')
         # Codes are stable identifiers; avoid presenting untranslated prose as a localized interface.
@@ -205,10 +227,12 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         raise UserError('not_ready')
     if name=='license':
         return bible.license_details(edition,locale),None
+    # /next — следующая глава (отправляет воркер)
     if name=='next':
         await enqueue_next(connection,chat,edition,f'{message.chat.id}:{message.message_id}',settings.max_message_length)
         # The delivery worker sends the reading; no separate queue receipt is needed.
         return None,None
+    # Команды выбора стиха: /today, /random, /topic, /search, /read
     local_date = datetime.now(ZoneInfo(chat['timezone'])).date()
     row = None
     if name=='today':

@@ -1,4 +1,4 @@
-"""aiogram long polling, localized command descriptions and a singleton guard."""
+"""Запуск бота: long polling aiogram, локализованные команды и защита от второго экземпляра."""
 from __future__ import annotations
 
 import asyncio
@@ -22,13 +22,13 @@ LOGGER = logging.getLogger(__name__)
 
 
 async def heartbeat(connection) -> None:
-    """Check the lock-owning session so a lost singleton guard stops polling."""
+    """Каждые 15 секунд записывать сигнал жизни `bot` через соединение-владельца блокировки: если блокировка потеряна, опрос останавливается."""
     while True:
         await connection.execute("INSERT INTO service_heartbeats(service) VALUES('bot') ON CONFLICT(service) DO UPDATE SET last_seen=now()")
         await asyncio.sleep(15)
 
 async def main() -> None:
-    """A single polling process per database; no public webhook/domain is required."""
+    """Запустить бота: проверить БД и блокировки (единственный процесс опроса на базу, без вебхука), подключить роутеры (поддержка, платежи, основные обработчики) и запустить параллельно опрос Telegram, сигнал жизни, обновление профиля и сверку платежей."""
     settings = Settings.from_env()
     await wait_for_database(settings)
     pool = await create_pool(settings)

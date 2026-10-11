@@ -1,4 +1,4 @@
-"""Opt-in, one-time Telegram Stars support with explicit terms and durable receipts."""
+"""Добровольная разовая поддержка через Telegram Stars: явное согласие с условиями и сохраняемые квитанции."""
 # ruff: noqa: RUF001
 from __future__ import annotations
 
@@ -30,20 +30,24 @@ API_TIMEOUT = 3
 
 
 def language(user: Any) -> str:
+    """Язык пользователя по коду Telegram: `ru` для русского, иначе `en`."""
     return 'ru' if str(getattr(user, 'language_code', '') or '').lower().split('-')[0] == 'ru' else 'en'
 
 
 def text(locale: str, ru: str, en: str) -> str:
+    """Выбрать из двух вариантов текст на языке пользователя (русский или английский)."""
     return ru if locale == 'ru' else en
 
 
 def is_private(message: Any, user: Any) -> bool:
+    """Проверить, что сообщение пришло от живого пользователя в его личном чате с ботом (платежи только там)."""
     return (message is not None and user is not None and not getattr(user, 'is_bot', False)
         and str(getattr(message.chat.type, 'value', message.chat.type)) == 'private'
         and message.chat.id == user.id)
 
 
 async def locale_for(pool: Any, user: Any) -> str:
+    """Язык интерфейса личного чата пользователя из БД; при ошибке или тайм-ауте — по языку Telegram."""
     try:
         async with asyncio.timeout(DB_TIMEOUT), pool.acquire() as connection:
             locale = await connection.fetchval('SELECT ui_language FROM telegram_chats WHERE telegram_chat_id=$1', user.id)
@@ -53,6 +57,7 @@ async def locale_for(pool: Any, user: Any) -> str:
 
 
 def terms_text(locale: str, amount: int | None = None) -> str:
+    """Полный текст условий поддержки (добровольно, разово, без повторных списаний, возврат не автоматический); при `amount` добавляется строка с суммой."""
     heading = text(locale, '⭐ Поддержать «Библию каждый день»', '⭐ Support Bible Every Day')
     terms = text(locale,
         'Это добровольная разовая поддержка оплаты сервера и развития бота. '
@@ -76,6 +81,7 @@ def terms_text(locale: str, amount: int | None = None) -> str:
 
 
 def amount_value(value: str) -> int | None:
+    """Проверить введённую сумму Stars (целое число в допустимых пределах); иначе None."""
     if not re.fullmatch(r'[1-9][0-9]{0,3}', value):
         return None
     amount = int(value)
@@ -83,11 +89,13 @@ def amount_value(value: str) -> int | None:
 
 
 async def send_text(bot: Any, chat_id: int, content: str, markup: Any = None) -> None:
+    """Отправить пользователю обычный текст без разметки (с необязательной клавиатурой)."""
     await bot.send_message(chat_id=chat_id, text=content, parse_mode=None,
         reply_markup=markup, request_timeout=10)
 
 
 async def show_terms(bot: Any, chat_id: int, locale: str, amount: int) -> None:
+    """Показать условия для выбранной суммы с кнопкой «Согласен, поддержать»."""
     label = text(locale, f'Согласен, поддержать ⭐ {amount}', f'Agree and support ⭐ {amount}')
     await send_text(bot, chat_id, terms_text(locale, amount), InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text=label, callback_data=f'donate:confirm:{amount}')]]))
@@ -95,7 +103,7 @@ async def show_terms(bot: Any, chat_id: int, locale: str, amount: int) -> None:
 
 async def _handle_command(message: Message, bot: Any, settings: Any, pool: Any,
                          command: str, args: str = '') -> bool:
-    """Forward from the existing command handler after its standard authorization."""
+    """Обработать платёжные команды `/donate`, `/donations`, `/paysupport`, `/terms` после стандартной проверки прав: только в личном чате; варианты `card`/`sbp` передаются в рублёвый журнал; `/donate` без суммы показывает быстрые суммы, `/donations` — историю, `/paysupport` — сохраняет обращение (1–4000 символов)."""
     if command not in COMMANDS:
         return False
     user = message.from_user
@@ -195,6 +203,7 @@ async def _handle_command(message: Message, bot: Any, settings: Any, pool: Any,
 
 
 async def unavailable(bot: Any, chat_id: int, locale: str) -> None:
+    """Сообщить, что действие временно недоступно, и подсказать проверить `/donations` или написать `/paysupport`."""
     try:
         await send_text(bot, chat_id, text(locale,
             'Сейчас не удалось выполнить действие. Попробуйте позже. '
@@ -207,6 +216,7 @@ async def unavailable(bot: Any, chat_id: int, locale: str) -> None:
 
 async def handle_command(message: Message, bot: Any, settings: Any, pool: Any,
                          command: str, args: str = '') -> bool:
+    """Безопасная обёртка над обработкой платёжных команд: любой сбой превращается в понятное сообщение, а не в ошибку обработчика."""
     if command not in COMMANDS:
         return False
     try:
@@ -218,6 +228,7 @@ async def handle_command(message: Message, bot: Any, settings: Any, pool: Any,
 
 
 async def _donation_callback(query: CallbackQuery, bot: Any, db_pool: Any) -> None:
+    """Нажатия кнопок поддержки (`donate:сумма` и `donate:confirm:сумма`): проверяет, что кнопка нажата в личном чате на сообщении бота; сначала показывает условия, после согласия создаёт заказ и счёт в Stars и убирает кнопку."""
     locale = language(query.from_user)
     valid_private = is_private(query.message, query.from_user)
     match = re.fullmatch(r'donate:(confirm:)?([1-9][0-9]{0,3})', query.data or '')
@@ -268,6 +279,7 @@ async def _donation_callback(query: CallbackQuery, bot: Any, db_pool: Any) -> No
 
 @router.callback_query(F.data.startswith('donate:'))
 async def donation_callback(query: CallbackQuery, bot: Any, db_pool: Any) -> None:
+    """Роутер нажатий кнопок поддержки; сбои логируются без подробностей, пользователю показывается сообщение «недоступно»."""
     try:
         await _donation_callback(query, bot, db_pool)
     except Exception as exc:
@@ -278,6 +290,7 @@ async def donation_callback(query: CallbackQuery, bot: Any, db_pool: Any) -> Non
 
 @router.pre_checkout_query()
 async def pre_checkout(query: PreCheckoutQuery, bot: Any, db_pool: Any) -> None:
+    """Предварительная проверка платежа Telegram: за 10 секунд подтвердить, что счёт наш, сумма и валюта верны и пользователь не заблокирован; иначе отказ с пояснением."""
     valid = False
     try:
         async with asyncio.timeout(DB_TIMEOUT), db_pool.acquire() as connection:
@@ -300,6 +313,7 @@ async def pre_checkout(query: PreCheckoutQuery, bot: Any, db_pool: Any) -> None:
 
 @router.message(F.successful_payment)
 async def successful_payment(message: Message, bot: Any, db_pool: Any) -> None:
+    """Успешный платёж: сохранить квитанцию (повторная доставка не создаёт дубль) и поблагодарить пользователя."""
     if not is_private(message, message.from_user):
         return
     payment = message.successful_payment
@@ -320,6 +334,7 @@ async def successful_payment(message: Message, bot: Any, db_pool: Any) -> None:
 async def refunded_payment(message: Message, db_pool: Any) -> None:
     # Refund service messages need not have the donor in from_user. Trust the
     # authenticated Telegram update and verify the immutable receipt in SQL.
+    """Служебное сообщение о возврате Stars: проверить неизменную квитанцию в БД и записать возврат."""
     payment = message.refunded_payment
     async with db_pool.acquire() as connection:
         await donations.record_refund(connection, payload=payment.invoice_payload,

@@ -1,4 +1,4 @@
-"""Menus, keyboards and status/settings text for Telegram handlers."""
+"""Меню, клавиатуры и тексты настроек/статуса/справки для обработчиков Telegram и MAX."""
 from __future__ import annotations
 import logging
 from typing import Any
@@ -23,7 +23,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def settings_keyboard(chat: Any) -> InlineKeyboardMarkup:
-    """A language-independent action vocabulary with destination-localized labels."""
+    """Клавиатура настроек чата: город/часовой пояс, язык Библии и интерфейса, издание, режим, пауза/возобновление, статус, время, ежедневный стих, утро и вечер, голос. Подписи на языке чата."""
     locale,identifier = chat['ui_language'],chat['telegram_chat_id']
     rows = [[button(tr(locale,'language'),'langs',identifier),button(tr(locale,'ui_language'),'uilangs',identifier)],
         [button(tr(locale,'edition'),'editions',identifier,'0'),button(tr(locale,'mode'),'modes',identifier)],
@@ -37,6 +37,7 @@ def settings_keyboard(chat: Any) -> InlineKeyboardMarkup:
 
 
 def voices_menu(chat):
+    """Меню выбора русского голоса чтения (Давид или Мария) с отметкой текущего."""
     locale=chat['ui_language']
     chosen=chat.get('audio_voice','david')
     names={'david':'Давид' if locale=='ru' else 'David','mary':'Мария' if locale=='ru' else 'Mary'}
@@ -46,6 +47,7 @@ def voices_menu(chat):
 
 
 async def change_voice(connection,chat,value):
+    """Сохранить выбор голоса для чата (`david` или `mary`). Расписание, прогресс и картинки не меняются."""
     if value not in {'david','mary'}:
         raise UserError('invalid')
     # Voice preferences do not change reading progress, schedule revisions or artwork.
@@ -53,6 +55,7 @@ async def change_voice(connection,chat,value):
 
 
 def daily_confirmation(subscription: Any, locale: str) -> str:
+    """Текст подтверждения включённого ежедневного стиха: время, часовой пояс и подсказки команд."""
     clock = subscription['send_time'].strftime('%H:%M')
     zone = escape(subscription['timezone'])
     if locale=='ru':
@@ -61,6 +64,7 @@ def daily_confirmation(subscription: Any, locale: str) -> str:
 
 
 async def enable_devotions(connection: Any,chat: Any,actor_id:int) -> str:
+    """Включить утреннюю и вечернюю подписки (молитва в 09:38 и 21:13, чтение в начале того же часа) для чата и вернуть подтверждение. Нужно выбранное издание."""
     edition=await bible.chat_translation(connection,chat['telegram_chat_id'])
     if not edition:raise UserError('not_ready')
     async with chat_lock(connection,chat['telegram_chat_id']),connection.transaction():
@@ -73,7 +77,7 @@ async def enable_devotions(connection: Any,chat: Any,actor_id:int) -> str:
 
 
 async def settings_text(connection: Any, chat: Any) -> str:
-    """Display exactly this destination's saved edition, locale and timezone."""
+    """Текст настроек чата: назначение, язык интерфейса и Библии, издание, часовой пояс, покрытие и число книг и стихов."""
     locale = chat['ui_language']
     edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
     display_id = chat['telegram_chat_id']
@@ -94,7 +98,7 @@ async def settings_text(connection: Any, chat: Any) -> str:
 
 
 async def command_target_suffix(connection: Any, chat: Any) -> str:
-    """Expose copyable destination syntax, never a MAX internal database key."""
+    """Суффикс цели для подсказок команд: для групп Telegram — ID чата, для групп MAX — внешний ID (внутренний ключ БД не показывается), для личного чата пусто."""
     if chat.get('platform','telegram') == 'max':
         if chat['chat_type']=='private':
             return ''
@@ -104,7 +108,7 @@ async def command_target_suffix(connection: Any, chat: Any) -> str:
 
 
 async def status_text(connection: Any, chat: Any) -> str:
-    """Show progress, queue IDs and ambiguous chunks without exposing private payloads."""
+    """Статус чата: настройки, подписки с прогрессом, последние задания очереди (при `uncertain`/`failed` — готовые команды `/resolve`) и состояние подготовки чтений. Содержимое сообщений не раскрывается."""
     locale = chat['ui_language']
     lines = [await settings_text(connection,chat),'']
     subs = await list_subscriptions(connection,chat['telegram_chat_id'])
@@ -137,7 +141,7 @@ async def status_text(connection: Any, chat: Any) -> str:
 
 
 def help_text(locale: str) -> str:
-    """Localized descriptions plus stable copyable command syntax."""
+    """Текст справки: дружелюбное введение, а если его нет — список команд с примерами синтаксиса."""
     friendly = onboarding_help(locale)
     if friendly:
         return friendly
@@ -162,7 +166,7 @@ def help_text(locale: str) -> str:
 
 
 async def change_language(connection: Any, chat: Any, actor_id: int, language: str) -> Any:
-    """Choose an imported edition in the requested language, without cross-language fallback."""
+    """Выбрать импортированное издание в запрошенном языке (без подмены другим языком) и настроить чат на него и соответствующий язык интерфейса."""
     edition = await bible.find_translation(connection,None,preferred_language=language)
     if not edition:
         raise UserError('unknown_language')
@@ -173,7 +177,7 @@ async def change_language(connection: Any, chat: Any, actor_id: int, language: s
 
 
 async def language_menu(connection: Any, chat: Any, page: int=0) -> tuple[str,Any]:
-    """Page through ALL actually imported languages, including the all-open corpus."""
+    """Меню выбора языка Библии: все реально импортированные языки по 36 на страницу, кнопки по три в ряд и стрелки страниц."""
     editions = await bible.list_translations(connection)
     codes = sorted({e.language_code for e in editions})
     page=max(0,min(page,max((len(codes)-1)//36,0)))
@@ -189,14 +193,14 @@ async def language_menu(connection: Any, chat: Any, page: int=0) -> tuple[str,An
 
 
 def ui_menu(chat: Any) -> tuple[str,Any]:
-    """All advertised UI choices have complete bundled message-key sets."""
+    """Меню выбора языка интерфейса (только те, для которых есть полный набор сообщений)."""
     pairs = list(available_ui().items())
     rows = [[button(name,'ui',chat['telegram_chat_id'],code) for code,name in pairs[i:i+2]] for i in range(0,len(pairs),2)]
     return tr(chat['ui_language'],'ui_language'),InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def edition_menu(connection: Any, chat: Any, page: int, language: str | None = None) -> tuple[str,Any]:
-    """Show physical coverage for each edition; selections use immutable numeric DB ids."""
+    """Меню выбора издания: по 8 на страницу с названием, языком, покрытием и числом книг; можно ограничить языком. Выбор идёт по числовому ID издания."""
     editions = await bible.list_translations(connection)
     language = normalize_language_code(language)
     if language:
@@ -222,7 +226,7 @@ async def edition_menu(connection: Any, chat: Any, page: int, language: str | No
 
 
 def modes_menu(chat: Any) -> tuple[str,Any]:
-    """One-click daily modes plus an explicit plan selection submenu."""
+    """Меню режимов рассылки: последовательное чтение, стих дня, тема дня и переход к планам чтения."""
     locale,identifier = chat['ui_language'],chat['telegram_chat_id']
     rows = [[button(tr(locale,key),'mode',identifier,key)] for key in ['sequential','verse_of_day','topic_of_day']]
     rows.append([button(tr(locale,'reading_plan'),'plans',identifier)])

@@ -1,4 +1,4 @@
-"""Compact private-chat navigation, with the same commands as Telegram's menu."""
+"""Компактная навигация личного чата (нижняя клавиатура) и вводные тексты: приветствие, подсказка меню, справка."""
 # ruff: noqa: RUF001  # Russian interface text intentionally uses Cyrillic characters.
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ LABELS = {
 
 
 def button_label(locale: str, command: str, emoji: str) -> str:
+    """Подпись кнопки нижней клавиатуры: эмодзи + название команды на языке пользователя."""
     if command == 'hide_keyboard':
         return f"{emoji} " + ('Скрыть кнопки' if locale == 'ru' else 'Hide buttons')
     if command == 'donate':
@@ -41,7 +42,7 @@ def button_label(locale: str, command: str, emoji: str) -> str:
 
 
 def main_keyboard(locale: str, *, collapsible=True) -> ReplyKeyboardMarkup:
-    """Allow clients to collapse navigation; offer explicit removal too."""
+    """Нижняя клавиатура главных действий по две кнопки в ряд; клиент может её свернуть, а при `collapsible` есть кнопка «Скрыть кнопки»."""
     buttons = [KeyboardButton(text=button_label(locale, command, emoji))
                for command, emoji in BUTTONS]
     placeholder = {'ru': 'Выберите действие или введите /search …',
@@ -56,16 +57,18 @@ def main_keyboard(locale: str, *, collapsible=True) -> ReplyKeyboardMarkup:
 
 @lru_cache(maxsize=1)
 def _button_commands() -> dict[str, str]:
+    """Словарь «подпись кнопки → команда» для всех языков интерфейса (кэшируется)."""
     return {button_label(locale, command, emoji): '/' + command
             for locale in available_ui() for command, emoji in (*BUTTONS, ('hide_keyboard', '⌨️'))}
 
 
 def keyboard_command(text: str) -> str | None:
-    """Accept only exact known labels, never parse destinations from free text."""
+    """Вернуть команду для нажатой кнопки, если текст в точности совпал с известной подписью; произвольный текст в команды не превращается."""
     return _button_commands().get(text)
 
 
 def welcome_text(locale: str, edition_title: str | None = None) -> str:
+    """Текст приветствия на языке пользователя; в конце — название выбранного издания или сообщение, что издание ещё не готово."""
     if locale == 'ru':
         text = (
             '📖 <b>Библия — рядом каждый день</b>\n\n'
@@ -98,14 +101,14 @@ def welcome_text(locale: str, edition_title: str | None = None) -> str:
 
 @lru_cache(maxsize=4)
 def _image_digest(path: Path, size: int, modified_ns: int) -> str:
-    """Hash immutable deployed art once; a replaced file gets a fresh cache key."""
+    """Хеш файла картинки приветствия (кэшируется по пути, размеру и времени изменения): заменённая картинка получает новый ключ кэша."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 async def send_welcome(bot: Any, connection: Any, settings: Any, chat_id: int,
                        text: str, markup: ReplyKeyboardMarkup,
                        *, image_path: Path | None = None) -> bool:
-    """Send one welcome photo, reusing Telegram's file_id; False means text fallback."""
+    """Отправить приветствие одним фото (повторно используется file_id Telegram). Возвращает False, если нужно отправить обычный текст: подпись длиннее лимита, нет файла или фото не отправилось."""
     if getattr(bot,'platform',None)=='max':
         await bot.queue_welcome(connection,settings,chat_id,text,markup)
         return True
@@ -142,6 +145,7 @@ async def send_welcome(bot: Any, connection: Any, settings: Any, chat_id: int,
 
 
 def menu_hint(locale: str) -> str:
+    """Короткая подсказка «с чего начать» после нажатия неизвестной кнопки или текста."""
     if locale == 'ru':
         return ('📖 <b>С чего начнём?</b>\n\nВыберите действие на клавиатуре внизу. '
                 'Чтобы найти слова в Библии, отправьте <code>/search любовь</code>.\n\n'
@@ -156,6 +160,7 @@ def menu_hint(locale: str) -> str:
 
 
 def search_prompt(locale: str) -> str:
+    """Подсказка по поиску и чтению по адресу (примеры «Иоанна 3:16», `/search любовь`)."""
     if locale == 'ru':
         return ('🔎 <b>Найти слова в Библии</b>\n\n'
             'Отправьте адрес главы или стиха:\n'
@@ -173,6 +178,7 @@ def search_prompt(locale: str) -> str:
 
 
 def onboarding_help(locale: str) -> str | None:
+    """Подробная справка по командам для русского и английского; для других языков None (используется общий список)."""
     if locale == 'ru':
         return (
             '❔ <b>Ваше чтение Библии</b>\n\n'

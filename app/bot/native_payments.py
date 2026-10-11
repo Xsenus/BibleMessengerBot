@@ -1,4 +1,4 @@
-"""Telegram entry points to the shared RUB ledger; Stars remain independent."""
+"""Точки входа Telegram в общий рублёвый журнал платежей; Telegram Stars работают независимо."""
 from __future__ import annotations
 
 import logging
@@ -15,19 +15,23 @@ router = Router(name='native-rub-support')
 
 
 class TelegramSupport:
+    """Адаптер для общего кода платежей MAX: делает Telegram-бота похожим на платформу с методами ответа."""
     def __init__(self, bot, pool, event_key):
+        """Запомнить бота и пул БД, создать минимальный «мост» с платформой telegram и ключом события."""
         self.bot, self.pool = bot, pool
         self.bridge = SimpleNamespace(platform='telegram', reply_context=SimpleNamespace(
             get=lambda: SimpleNamespace(key=event_key)))
 
     async def _response(self, chat, text, markup=None):
         # Keep existing Stars support commands and make RUB terms/tickets explicit.
+        """Отправить ответ пользователю, подставив в подсказки команды `/paysupport card` и `/terms card`, чтобы отличить рублёвые условия от Stars."""
         text = text.replace('/paysupport','/paysupport card').replace('/terms','/terms card')
         await self.bot.send_message(chat_id=chat.id, text=text, parse_mode='HTML',
                                     reply_markup=markup, request_timeout=10)
 
 
 async def command(message, bot, pool, name='donate', arguments=()):
+    """Показать меню поддержки картой/СБП (только в личном чате)."""
     from app.bot.donations import is_private
     if not is_private(message,message.from_user):
         raise UserError('private_only')
@@ -37,6 +41,7 @@ async def command(message, bot, pool, name='donate', arguments=()):
 
 @router.callback_query((F.data == 'rubmenu') | F.data.startswith('rubpay:') | F.data.startswith('rubretry:'))
 async def callback(query, bot, db_pool):
+    """Обработать нажатия кнопок рублёвой поддержки (`rubmenu`, `rubpay:сумма:способ`, `rubretry:id`): только на сообщениях самого бота в личном чате и только для реально предложенных кнопок."""
     from app.bot.donations import is_private, language, unavailable
     if not is_private(query.message,query.from_user):
         await bot.answer_callback_query(callback_query_id=query.id, request_timeout=3)

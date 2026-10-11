@@ -1,4 +1,4 @@
-"""Explicit destination-local city selection; Telegram does not expose a timezone."""
+"""Явный выбор города или часового пояса для чата: Telegram не сообщает боту местоположение."""
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -21,6 +21,7 @@ CITIES = [
 
 
 def menu(chat):
+    """Собрать текст и клавиатуру выбора города (12 городов России кнопками по две в ряд; другие пояса задаются командой `/timezone Europe/Berlin`)."""
     ru = chat["ui_language"] == "ru"
     text = (
         "🌍 <b>Выберите свой город или часовой пояс</b>\n\nМолитва приходит в 09:38 и 21:13 по вашему местному времени, чтение — в 09:00 и 21:00. Telegram не сообщает боту ваше местоположение.\n\nДля другого города: <code>/timezone Europe/Berlin</code>"

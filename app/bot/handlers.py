@@ -1,7 +1,6 @@
-"""Localized Telegram administration with authorization on every command/callback.
+"""Обработчики Telegram (aiogram): команды, нажатия кнопок, смена языка сообщения, изменения членства бота. Права проверяются при каждой команде и нажатии.
 
-Groups and channels never inherit the latest administrator's language. Remote
-management uses a private dialog with the bot, and permissions are rechecked.
+Группы и каналы не наследуют язык последнего администратора; удалённое управление идёт из личного диалога с ботом с повторной проверкой прав.
 """
 from __future__ import annotations
 import logging
@@ -37,7 +36,7 @@ KNOWN_COMMANDS = frozenset({c.command for c in commands_for('en')}|{'start','hel
 
 @router.message(F.text.startswith('/'))
 async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) -> None:
-    """Anonymous administrators must use private chat under their real identity."""
+    """Обработать любое сообщение-команду (`/…`): отсеять ботов и анонимных администраторов, проверить упоминание бота, зарегистрировать пользователя и чат, посчитать использование, выполнить команду через `run_command` (платёжные команды передаются отдельному обработчику после освобождения соединения) и отправить ответ. Ошибки пользователя превращаются в понятные сообщения, сбои — в журнал без подробностей."""
     if not message.from_user or message.from_user.is_bot or message.sender_chat:
         return
     donation_command = None
@@ -84,7 +83,7 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
 
 @router.message(F.chat.type=='private',F.text,~F.text.startswith('/'))
 async def private_text_handler(message: Message,bot: Any,db_pool: Any,settings: Any) -> None:
-    """Route exact navigation labels through the usual authorization and error handling."""
+    """Обычный текст в личном чате: нажатие подписи кнопки превращается в команду; текст, похожий на адрес (`Ин 3:16`), — в `/read`, остальное — в подсказку меню."""
     if enum_value(message.chat.type)!='private':
         return
     content = message.text or ''
@@ -100,7 +99,7 @@ async def private_text_handler(message: Message,bot: Any,db_pool: Any,settings: 
 
 @router.callback_query(F.data.startswith('lc:'))
 async def message_language_handler(callback: CallbackQuery,bot: Any,db_pool: Any,settings: Any) -> None:
-    """Change one acknowledged Bible message without altering chat preferences."""
+    """Кнопки языков под библейским сообщением (`lc:…`): проверить права, под блокировкой чата выбрать язык/страницу только для этого сообщения (настройки чата не меняются) и сразу обработать поставленное задание правки."""
     import re
     from app.services.message_languages import select
     from app.worker.delivery import process_delivery
@@ -137,7 +136,7 @@ async def message_language_handler(callback: CallbackQuery,bot: Any,db_pool: Any
 
 @router.callback_query(F.data.startswith('v1:'))
 async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,settings: Any) -> None:
-    """Callbacks are stateless and reauthorize the actor for the encoded destination."""
+    """Нажатия inline-кнопок настроек (`v1:…`): без состояния, права на целевой чат проверяются заново. Обрабатывает выбор языка, издания, режима, плана, времени, города, голоса, паузы/возобновления, статуса и меню; результат показывается новым сообщением."""
     if not callback.message or not isinstance(callback.message,Message):
         await callback.answer()
         return
@@ -230,7 +229,7 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
 
 @router.my_chat_member()
 async def membership_handler(event: ChatMemberUpdated,db_pool: Any) -> None:
-    """Stop delivery when removed or posting rights are revoked, without deleting progress."""
+    """Изменение статуса бота в чате: при удалении или потере права публикации чат отключается и рассылки останавливаются, прогресс сохраняется."""
     status = enum_value(event.new_chat_member.status)
     active = status in {'administrator','creator'}
     if enum_value(event.chat.type)=='private':
@@ -245,7 +244,7 @@ async def membership_handler(event: ChatMemberUpdated,db_pool: Any) -> None:
 
 @router.message(F.migrate_to_chat_id)
 async def migration_notice(message: Message,db_pool: Any) -> None:
-    """Fail closed on Telegram group-ID migration; preserve history for explicit relinking."""
+    """Группа стала супергруппой (новый ID): старый чат отключается, подписки приостанавливаются, в журнал записывается событие — перенос настроек выполняется только явным действием."""
     async with db_pool.acquire() as connection,chat_lock(connection,message.chat.id),connection.transaction():
         await connection.execute('UPDATE telegram_chats SET is_active=false WHERE telegram_chat_id=$1',message.chat.id)
         await connection.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE telegram_chat_id=$1',message.chat.id)

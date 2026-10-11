@@ -1,4 +1,4 @@
-"""aiogram adapter. Ambiguous API outcomes are never silently retried."""
+"""Адаптер aiogram для отправки. Неопределённые исходы API никогда не повторяются автоматически."""
 
 from __future__ import annotations
 
@@ -30,15 +30,16 @@ LOGGER = logging.getLogger(__name__)
 
 
 class TelegramSender:
-    """Send through the shared limiter without logging bot tokens or payload text."""
+    """Отправитель сообщений Telegram через общий ограничитель скорости; токен бота и текст сообщений в журнал не попадают."""
 
     def __init__(self, bot: Any, connection: Any, settings: Any) -> None:
+        """Запомнить бота, соединение с БД (для ограничителя и кэша файлов) и настройки."""
         self.bot, self.connection, self.settings = bot, connection, settings
 
     async def send(
         self, chat_id: int, text: Any, thread_id: int | None = None, *, reply_markup: Any = None
     ) -> int:
-        """Map definitive Telegram rejections separately from uncertain transport failures."""
+        """Отправить одну часть (текст, фото или «богатое» сообщение) и вернуть ID сообщения. Для MAX делегирует отправителю MAX. Ошибки разделяются: ограничение скорости (`retry` со временем ожидания), запрет (`forbidden`), отказ (`rejected`) и неясный сетевой сбой (`uncertain`); правка сообщения при сбое безопасно повторяется."""
         if getattr(self.bot,'platform',None)=='max':
             return await self.bot.sender(self.connection).send(chat_id,text,thread_id,reply_markup=reply_markup)
         await wait_send_slot(
@@ -77,6 +78,7 @@ class TelegramSender:
             raise SendError("uncertain") from None
 
     async def _rich(self, chat_id, chunk, thread_id, markup):
+        """Отправить или отредактировать «богатое» сообщение с картинкой и озвучкой. Проверяет данные и размер, использует сохранённые file_id Telegram (при устаревшем идентификаторе повторяет с загрузкой файла), привязывает сообщение к языковой карточке и сохраняет новые file_id в БД."""
         if chunk.get('card_id') is not None:
             from app.services.message_languages import outgoing
             chunk,markup = await outgoing(self.connection,chat_id,chunk)
@@ -101,6 +103,7 @@ class TelegramSender:
             audio = await self.connection.fetchrow("SELECT * FROM reading_audio WHERE id=$1 AND state='ready'",chunk['audio_id'])
         audio_cached = audio and audio['telegram_bot_id']==self.bot.id and audio['telegram_file_id']
         async def remember_audio():
+            """Запомнить, что озвучка карточки показана пользователю (для учёта доставленных треков)."""
             if chunk.get('card_id') is not None:
                 from app.services.speech import acknowledged
                 await acknowledged(self.connection,chunk['card_id'],audio['id'] if audio else None)
@@ -115,6 +118,7 @@ class TelegramSender:
             cached = image["telegram_file_id"] if image["telegram_bot_id"] == self.bot.id else None
 
         async def perform(use_cache):
+            """Один вызов API: собрать HTML с картинкой/аудио и либо отредактировать существующее сообщение, либо отправить новое; `use_cache` разрешает использовать file_id вместо загрузки файла."""
             media = []
             if image is not None:
                 suffix = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[
@@ -206,6 +210,7 @@ class TelegramSender:
         return sent
 
     async def _photo(self, chat_id: int, chunk: dict, thread_id: int | None, markup: Any) -> Any:
+        """Отправить картинку с подписью (до 1024 символов): берёт file_id из кэша или загружает байты, при отказе по кэшу повторяет с файлом, затем сохраняет file_id и историю показов."""
         identifier, caption = chunk.get("image_id"), chunk.get("caption")
         if (
             chunk.get("kind") != "photo"
