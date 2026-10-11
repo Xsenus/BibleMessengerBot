@@ -1,4 +1,4 @@
-"""Source-backed, paginated language choices belonging to one acknowledged message."""
+"""Языки и страницы одного доставленного сообщения: каждая карточка чтения хранит ссылки на отрывок, и под ней можно переключать издания и листать страницы."""
 
 from __future__ import annotations
 
@@ -17,9 +17,10 @@ PAGE_SIZE = 6
 
 
 class ScriptureText(str):
-    """Plain HTML plus structured references; never infer an address from prose."""
+    """Строка HTML с привязкой к источнику: идентификатор издания, структурные ссылки на стихи, язык и диапазоны текста; адрес никогда не угадывается по тексту."""
 
     def __new__(cls, text, edition, refs, *, locale='ru', spans=None, title_key=None):
+        """Создать строку-отрывок и запомнить издание, ссылки, язык, диапазоны и ключ заголовка."""
         value = super().__new__(cls, text)
         value.edition_id = edition['id']
         value.refs = compact(refs)
@@ -30,6 +31,7 @@ class ScriptureText(str):
 
 
 def ref(row, *, whole=False):
+    """Ссылка на отрывок {книга, глава, первый, последний стих}; для главы целиком стихи не указываются."""
     rows = row.get('reading_rows') or [row]
     return dict(book=row['book_code'], chapter=row['chapter'],
                 first=None if whole else rows[0]['verse'],
@@ -37,6 +39,7 @@ def ref(row, *, whole=False):
 
 
 def compact(refs):
+    """Проверить ссылки и объединить смежные или пересекающиеся стихи одной главы."""
     result = []
     for item in refs:
         item = dict(item)
@@ -61,6 +64,7 @@ def compact(refs):
 
 
 def rows_text(header, rows, footer, edition, locale, *, separator='\n', whole=False):
+    """Собрать текст из заголовка, строк стихов («[номер] текст»), нижнего колонтитула, с диапазонами символов каждого стиха."""
     pieces, spans = [header], []
     offset = len(plain_text(header))
     for index, row in enumerate(rows):
@@ -75,6 +79,7 @@ def rows_text(header, rows, footer, edition, locale, *, separator='\n', whole=Fa
 
 
 def combine(pieces, *, separator='\n\n', footer='', title_key=None):
+    """Склеить несколько отрывков в один с общими ссылками и диапазонами; нужны структурные ссылки у каждого."""
     if not pieces:
         return ''
     first = pieces[0]
@@ -94,6 +99,7 @@ def combine(pieces, *, separator='\n\n', footer='', title_key=None):
 
 
 def with_title(source, key, locale):
+    """Добавить жирный заголовок (по ключу перевода) перед отрывком, сдвинув диапазоны."""
     prefix = f"<b>{tr(locale, key)}</b>\n\n"
     shift = len(plain_text(prefix))
     return ScriptureText(prefix + str(source), {'id': source.edition_id}, source.refs,
@@ -102,6 +108,7 @@ def with_title(source, key, locale):
 
 
 def inherit(target, source, *, row=None, edition=None, locale='ru'):
+    """Перенести структуру ссылок с исходного отрывка на производный текст (или собрать её из строки и издания)."""
     if not hasattr(source, 'refs'):
         if row is None or edition is None:
             return target
@@ -112,6 +119,7 @@ def inherit(target, source, *, row=None, edition=None, locale='ru'):
 
 
 def refs_for_piece(source, piece, start=0):
+    """Найти, каким стихам соответствует часть сообщения (по видимому тексту); если часть не найдена в источнике — ошибка."""
     full, visible = plain_text(str(source)), plain_text(piece)
     if visible == full:
         return source.refs, len(full)
@@ -128,6 +136,7 @@ def refs_for_piece(source, piece, start=0):
 
 
 async def prepare(connection, text, chunks, chat, *, source_key=None):
+    """Сохранить карточки чтения для частей сообщения: у каждой — ссылки, оригинал и текущий текст, язык, картинка и озвучка. Возвращает части с `card_id`."""
     if not hasattr(text, 'refs'):
         return chunks
     key, offset, result = source_key or uuid4().hex, 0, []
@@ -152,17 +161,19 @@ async def prepare(connection, text, chunks, chat, *, source_key=None):
 
 
 async def bind(connection, card_id, chat_id, message_id):
+    """Привязать карточку к ID отправленного сообщения (повторная привязка к тому же ID допустима)."""
     await connection.execute("""UPDATE reading_cards SET telegram_message_id=$3,updated_at=now()
         WHERE id=$1 AND telegram_chat_id=$2 AND (telegram_message_id IS NULL OR telegram_message_id=$3)""",
         card_id, chat_id, message_id)
 
 
 def decoded(value):
+    """Привести JSON-значение из БД к Python-объекту."""
     return json.loads(value) if isinstance(value, str) else value
 
 
 async def available(connection, card):
-    """Only audited editions covering every requested verse; never substitute neighbors."""
+    """Издания, в которых есть все стихи карточки: по одному на язык, исходное первым; соседние стихи вместо недостающих не подставляются."""
     editions = await connection.fetch("""SELECT t.*,l.code AS language_code FROM translations t
         JOIN languages l ON l.id=t.language_id WHERE t.is_active AND t.verse_count>0
         AND t.audit_status IN ('passed','passed_with_warnings') AND NOT EXISTS (
@@ -184,6 +195,7 @@ async def available(connection, card):
 
 
 def pages(text, platform='telegram'):
+    """Разбить текст карточки на страницы: для MAX — по 3600 символов сырого HTML, для Telegram — одной страницей до 24000 байт, иначе по 3900 единиц."""
     if platform == 'max':
         return split_wire_message(str(text), 3600)
     if len(text.encode('utf-8')) <= 24000:
@@ -192,6 +204,7 @@ def pages(text, platform='telegram'):
 
 
 async def render(connection, card, edition):
+    """Текст карточки в выбранном издании (для исходного — оригинал): стихи по ссылкам, название книги, заголовок и подпись издания."""
     if edition['id'] == card['source_translation_id']:
         return card['original_html']
     locale = ui_for_language(edition['language_code']) or card['ui_language']
@@ -213,11 +226,13 @@ async def render(connection, card, edition):
 
 
 async def keyboard(connection, card, *, editions=None, text_pages=None):
+    """Клавиатура под карточкой: языки (по 6 на странице с отметкой выбранного и стрелками), страницы текста и кнопка «Вся глава» для отрывка внутри одной главы."""
     editions = editions if editions is not None else await available(connection, card)
     count = max(1, (len(editions) + PAGE_SIZE - 1) // PAGE_SIZE)
     page = min(card['language_page'], count - 1)
     visible = editions[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
     def button(label, action, value):
+        """Создать кнопку `lc:карточка:действие:значение`."""
         return InlineKeyboardButton(text=label, callback_data=f"lc:{card['id']}:{action}:{value}")
     buttons = []
     for edition in visible:
@@ -240,6 +255,7 @@ async def keyboard(connection, card, *, editions=None, text_pages=None):
 
 
 async def outgoing(connection, chat_id, chunk):
+    """Подготовить часть к отправке или правке: актуальная страница, картинка, напоминание о молитве (если назначено), аудио и клавиатура языков."""
     card = await connection.fetchrow('''SELECT r.*, c.timezone AS prayer_timezone
         FROM reading_cards r JOIN telegram_chats c USING (telegram_chat_id)
         WHERE r.id=$1 AND r.telegram_chat_id=$2''', chunk['card_id'], chat_id)
@@ -257,7 +273,7 @@ async def outgoing(connection, chat_id, chunk):
 
 
 async def select(connection, chat_id, message_id, card_id, action, value):
-    """Called after authorization while holding the same chat lock as delivery."""
+    """Обработать нажатие под карточкой (после проверки прав и под блокировкой чата): выбрать язык (`s`), страницу языков (`p`), страницу текста (`t`) или открыть всю главу (`c`); состояние карточки обновляется, а изменение ставится в очередь правкой исходного сообщения."""
     from app.worker.delivery import insert_payload
 
     async with connection.transaction():

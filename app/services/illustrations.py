@@ -1,4 +1,4 @@
-"""Append-only verse artwork, shared freshness and per-chat archive rotation."""
+"""Иллюстрации к стихам и главам: версии только добавляются, свежесть общая для всех, а картинки чата чередуются из архива."""
 
 from __future__ import annotations
 
@@ -17,33 +17,38 @@ MAX_STORED_BYTES = 2 * 1024**3
 
 
 class IllustratedText(str):
+    """Текст с готовой картинкой (хранит ID картинки)."""
     image_id: int
 
     def __new__(cls, text: str, image_id: int):
+        """Создать строку-текст и запомнить ID картинки."""
         instance = super().__new__(cls, text)
         instance.image_id = image_id
         return instance
 
 
 class ReadingText(str):
-    """One editable reading card, including text while its artwork is pending."""
+    """Одна редактируемая карточка чтения: текст сразу, картинка появится позже (правкой того же сообщения)."""
 
     def __new__(cls, text, image_id=None, request_id=None):
+        """Создать карточку и запомнить ID картинки и запроса ожидания."""
         instance = super().__new__(cls, text)
         instance.image_id, instance.request_id = image_id, request_id
         return instance
 
 
 class ChapterText(ReadingText):
-    """Full chapter, with one editable first card and lossless continuations."""
+    """Глава целиком: первая редактируемая карточка и продолжения без потерь."""
 
     def __new__(cls, text, first, continuations):
+        """Создать главу из текста, первой карточки и списка продолжений."""
         instance = super().__new__(cls, text, first.image_id, first.request_id)
         instance.first, instance.continuations = first, continuations
         return instance
 
 
 def chapter_source(rows):
+    """Собрать «источник» иллюстрации главы из видимых стихов (для запроса и хеша); пустая глава — None."""
     visible = [dict(r) for r in rows if r['text'] and not r.get('is_range_continuation')]
     if not visible:
         return None
@@ -52,7 +57,7 @@ def chapter_source(rows):
 
 
 async def source_row(connection, image):
-    """Rebuild the exact source that defines this verse or complete chapter."""
+    """Восстановить точный источник картинки: стих или вся глава из БД; изменившийся или пропавший — None."""
     from app.services import bible
 
     if image.get('artwork_scope', 'verse') == 'chapter':
@@ -63,7 +68,7 @@ async def source_row(connection, image):
 
 
 async def valid_request_source(connection, request, *, image=None, edition=None):
-    """Validate every frozen verse both when queueing and just before editing."""
+    """Проверить перед правкой сообщения, что текст стиха и каждый замороженный стих запроса не изменились с момента постановки в очередь."""
     from app.services import bible
 
     image = image or await connection.fetchrow('SELECT * FROM verse_illustrations WHERE id=$1',request['image_id'])
@@ -89,6 +94,7 @@ async def valid_request_source(connection, request, *, image=None, edition=None)
 
 async def decorate_chapter(connection, text, translation, book_code, chapter, *, chat,
                            request_key, thread_id=None, max_length=3900, rows=None):
+    """Подготовить главу с иллюстрацией: первая часть получает картинку или запрос ожидания, остальные части идут без изменений."""
     from app.services import bible
 
     row = chapter_source(rows if rows is not None else await bible.chapter_rows(connection, translation['id'], book_code, chapter))
@@ -106,7 +112,7 @@ async def decorate_chapter(connection, text, translation, book_code, chapter, *,
 
 
 async def bind_message(connection, chat_id, request_id, message_id):
-    """Only a confirmed initial send may give a background edit its target."""
+    """Связать запрос ожидания с ID подтверждённо отправленного сообщения — только после этого фоновая правка получает цель."""
     if request_id is not None:
         await connection.execute(
             """UPDATE illustration_requests SET telegram_message_id=$3
@@ -119,6 +125,7 @@ async def bind_message(connection, chat_id, request_id, message_id):
 
 
 def identity(row, translation):
+    """Идентичность источника: издание, книга, глава, стих и SHA-256 текста (для главы — с пометкой)."""
     return (
         translation["id"],
         row["book_code"],
@@ -130,6 +137,7 @@ def identity(row, translation):
 
 @asynccontextmanager
 async def version_lock(connection, row, translation):
+    """Контекстный менеджер: транзакционная блокировка версии картинки для точного текста."""
     async with connection.transaction():
         await connection.execute(
             "SELECT pg_advisory_xact_lock($1)",
@@ -139,7 +147,7 @@ async def version_lock(connection, row, translation):
 
 
 async def pending(connection, row, translation):
-    """One open version per exact source text, including concurrent callers."""
+    """Единственная открытая (ожидающая) версия картинки для точного текста; параллельные вызовы получают ту же запись."""
     key = identity(row, translation)
     await connection.execute(
         """INSERT INTO verse_illustrations(translation_id,book_code,chapter,verse,text_sha256,artwork_scope)
@@ -164,7 +172,7 @@ async def pending(connection, row, translation):
 
 
 async def recent(connection, row, translation):
-    """Calendar months; Telegram cache updates never renew creation age."""
+    """ID готовой картинки моложе трёх календарных месяцев (кэш Telegram возраст не обновляет); иначе None."""
     key = identity(row, translation)
     return await connection.fetchval(
         """SELECT id FROM verse_illustrations WHERE translation_id=$1 AND book_code=$2
@@ -182,6 +190,7 @@ async def recent(connection, row, translation):
 async def lookup_or_queue(
     connection: Any, row: Any, translation: Any, *, chat_id: int | None = None
 ) -> int | None:
+    """Выбрать готовую картинку для чата (непросмотренная или давно показанная в архиве) и, если свежей нет, поставить новую версию в очередь. Возвращает ID или None."""
     async with version_lock(connection, row, translation):
         key = identity(row, translation)
         record = await connection.fetchrow(
@@ -204,6 +213,7 @@ async def lookup_or_queue(
 
 
 async def record_view(connection, chat_id, image_id):
+    """Записать показ картинки чату (для ротации архива)."""
     await connection.execute(
         """INSERT INTO illustration_views(telegram_chat_id,image_id) VALUES($1,$2)
         ON CONFLICT(telegram_chat_id,image_id) DO UPDATE SET last_sent_at=now(),
@@ -223,6 +233,7 @@ async def decorate(
     request_key=None,
     thread_id=None,
 ) -> str:
+    """Добавить к тексту картинку: готовую или запрос ожидания (карточка получит её правкой). При сбое возвращается обычный текст — чтение не ломается."""
     request_id = None
     try:
         image_id = await lookup_or_queue(
@@ -256,6 +267,7 @@ async def decorate(
 
 
 def chunks(text: str, image_id: int | None, max_length: int = 3900) -> list:
+    """Превратить текст в части для отправки: карточки чтения (одно «богатое» сообщение), фото с подписью до 1024 символов либо фото и текст раздельно; длинный текст режется."""
     if isinstance(text, ChapterText):
         return [*chunks(text.first, text.image_id, max_length), *text.continuations]
     if isinstance(text, ReadingText):
@@ -278,6 +290,7 @@ def chunks(text: str, image_id: int | None, max_length: int = 3900) -> list:
 
 
 def image_type(data: bytes) -> str:
+    """Определить MIME по заголовку файла (PNG, JPEG, WebP); размер от 1 байта до 5 МБ."""
     if not 1 <= len(data) <= MAX_IMAGE_BYTES:
         raise ValueError("Image must be 1 byte to 5 MiB")
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -299,7 +312,7 @@ async def store(
     image_id=None,
     prompt_version=1,
 ) -> int:
-    """Fill an explicit pending version; never replace any ready binary."""
+    """Записать картинку в ожидающую версию (готовые версии никогда не заменяются); проверяется общий лимит хранилища 2 ГБ."""
     mime = image_type(data)
     key = identity(row, translation)
     async with connection.transaction():
@@ -342,6 +355,7 @@ async def store(
 
 
 def prompt_for(row: Any, edition_title: str) -> str:
+    """Запрос на картинку для стиха (по требованию) с названием издания."""
     from app.services.artwork import prompt
 
     return prompt(row, {"title": edition_title}, slot="on_demand", variant="symbolic")
