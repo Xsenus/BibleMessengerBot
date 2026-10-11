@@ -1,4 +1,4 @@
-"""Actual-database verification; never substitute the planned language profile for counts."""
+"""Проверка реальной БД: вместо планового профиля языков считаются фактически импортированные строки."""
 from __future__ import annotations
 import json
 import os
@@ -7,12 +7,12 @@ from app.catalog.profiles import normalize_language_code,profile_languages
 
 
 def required_languages() -> set[str]:
-    """An operator can change the explicit bootstrap gate; Russian and English by default."""
+    """Языки, без полноценных изданий которых запуск запрещён (REQUIRED_LANGUAGES, по умолчанию русский и английский)."""
     return {normalize_language_code(x.strip()) for x in os.getenv('REQUIRED_LANGUAGES','rus,eng').split(',') if x.strip()}
 
 
 async def verify_database(connection: Any, *, profile: str = 'extended', full: bool = True) -> dict[str,Any]:
-    """Check imported rows, dense indexes, chapter counts and audit provenance."""
+    """Проверить фактические данные: аудит и происхождение изданий, совпадение числа книг, глав и стихов с метаданными, плотные индексы стихов и глав, корректность диапазонов и хеш содержимого (при `full`), наличие обязательных языков. Возвращает отчёт со статусом `passed` или `failed`."""
     rows = await connection.fetch('''SELECT t.*,l.code AS language_code FROM translations t
         JOIN languages l ON l.id=t.language_id WHERE t.is_active ORDER BY l.code,t.source_translation_id''')
     errors,editions = [],[]

@@ -1,6 +1,6 @@
-"""Anonymous aggregate usage counters (what is used, never by whom).
+"""Анонимные суточные счётчики использования функций: что используют, а не кто.
 
-Failures must never affect a user request, so recording swallows database errors.
+Сбой записи не должен влиять на запрос пользователя, поэтому ошибки БД здесь подавляются.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ EVENT = re.compile(r'^[a-z0-9_:.-]{1,40}$')
 
 
 async def record(connection: Any, event: str, platform: str = 'telegram') -> None:
-    """Increment today's (UTC) counter for an event such as 'cmd:daily' or 'cb:lang'."""
+    """Увеличить сегодняшний (UTC) счётчик события вида `cmd:daily` или `cb:lang`; события неверного формата игнорируются."""
     if not EVENT.match(event):
         return
     try:
@@ -25,6 +25,7 @@ async def record(connection: Any, event: str, platform: str = 'telegram') -> Non
 
 
 async def top_events(connection: Any, days: int = 7, limit: int = 20) -> list[dict[str, Any]]:
+    """Самые частые события за последние `days` дней по платформам."""
     rows = await connection.fetch(
         """SELECT platform,event,sum(count)::bigint AS total FROM usage_events
            WHERE day>(now() AT TIME ZONE 'UTC')::date-$1::int GROUP BY platform,event ORDER BY total DESC LIMIT $2""",

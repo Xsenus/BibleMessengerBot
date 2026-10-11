@@ -1,4 +1,4 @@
-"""Account persistence; incoming group messages do not override destination choices."""
+"""Хранение пользователей и чатов; входящие сообщения групп не переопределяют выбор назначения."""
 from __future__ import annotations
 import secrets
 from typing import Any
@@ -9,7 +9,7 @@ from app.services.locks import lock_key
 async def upsert_user(connection: Any, *, user_id: int, username: str | None,
                       first_name: str | None, last_name: str | None,
                       language_code: str | None, default_timezone: str) -> None:
-    """Refresh public Telegram fields while preserving owner/block/preference state."""
+    """Создать или обновить пользователя Telegram (имя, язык и т. п.), сохраняя признаки владельца, блокировки и настройки."""
     await connection.execute('''INSERT INTO telegram_users(telegram_user_id,username,first_name,last_name,
         telegram_language_code,timezone) VALUES($1,$2,$3,$4,$5,$6)
         ON CONFLICT(telegram_user_id) DO UPDATE SET username=EXCLUDED.username,
@@ -21,7 +21,7 @@ async def upsert_user(connection: Any, *, user_id: int, username: str | None,
 async def upsert_chat(connection: Any, *, chat_id: int, chat_type: str, title: str | None,
                       username: str | None, registered_by: int | None,
                       default_timezone: str, ui_language: str = 'ru') -> None:
-    """Initialize locale once; never copy an administrator's preferences into a channel."""
+    """Создать или обновить чат: язык интерфейса задаётся один раз при создании, настройки администратора в канал не копируются; личный чат всегда активен."""
     await connection.execute('''INSERT INTO telegram_chats(telegram_chat_id,chat_type,title,username,
         registered_by,timezone,ui_language) VALUES($1,$2,$3,$4,$5,$6,$7)
         ON CONFLICT(telegram_chat_id) DO UPDATE SET chat_type=EXCLUDED.chat_type,
@@ -33,7 +33,7 @@ async def upsert_chat(connection: Any, *, chat_id: int, chat_type: str, title: s
 
 async def claim_owner(connection: Any, *, telegram_user_id: int, supplied_code: str,
                       expected_code: str) -> bool:
-    """One owner, one claim, constant-time code comparison and a serialized transaction."""
+    """Назначить владельца бота по секретному коду (сравнение за постоянное время, один владелец и один раз, под блокировкой). Возвращает True при успехе."""
     if len(expected_code) < 16 or not secrets.compare_digest(supplied_code.encode('utf-8'),expected_code.encode('utf-8')):
         return False
     async with connection.transaction():
@@ -50,5 +50,5 @@ async def claim_owner(connection: Any, *, telegram_user_id: int, supplied_code: 
 
 
 async def is_owner(connection: Any, telegram_user_id: int) -> bool:
-    """Blocked users cannot exercise owner privileges."""
+    """Проверить, что пользователь — владелец и не заблокирован."""
     return bool(await connection.fetchval('SELECT is_owner AND NOT is_blocked FROM telegram_users WHERE telegram_user_id=$1',telegram_user_id))

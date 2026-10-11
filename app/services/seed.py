@@ -1,4 +1,4 @@
-"""Seed static books, topics, and reading plan metadata."""
+"""Загрузка справочников: книги, темы и описания планов чтения."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from app.catalog.importer import seed_books
 
 
 async def seed_static_content(connection: Any) -> None:
+    """Записать книги и названия, темы с подборками отрывков и планы чтения (90, 180, 365 дней, Новый Завет, Псалтирь); повторный запуск обновляет данные."""
     await seed_books(connection)
     root = Path(__file__).resolve().parents[2]
     topics = json.loads((root / "data" / "topics.json").read_text(encoding="utf-8"))

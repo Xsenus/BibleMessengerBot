@@ -1,11 +1,11 @@
-"""Database-backed send throttling shared by the polling bot and delivery worker."""
+"""Ограничение скорости отправки на уровне БД, общее для бота и воркера доставки."""
 from __future__ import annotations
 import asyncio
 from typing import Any
 
 
 def intervals(chat_id: int, global_rate: float = 20, chat_rate: float = 1) -> tuple[float,float]:
-    """Enforce conservative free-tier ceilings even with unsafe environment values."""
+    """Минимальные интервалы между отправками (глобальный и для чата) с консервативными потолками: не более 20 в секунду всего, 1 в секунду на чат и 1 в 3,2 с для групп и каналов."""
     if not 0 < global_rate <= 20 or not 0 < chat_rate <= 1:
         raise ValueError('Rates must be positive, global <=20/s, chat <=1/s')
     return 1/global_rate,max(1/chat_rate,3.2 if chat_id < 0 else 1.05)
@@ -13,11 +13,7 @@ def intervals(chat_id: int, global_rate: float = 20, chat_rate: float = 1) -> tu
 
 async def wait_send_slot(connection: Any, chat_id: int, global_rate: float = 20,
                          chat_rate: float = 1) -> None:
-    """Reserve only a currently available slot, avoiding long future reservations.
-
-    All callers lock the global row before a chat row, preventing lock-order
-    deadlocks. Transactions are short and never include the sleep or API request.
-    """
+    """Дождаться свободного слота: резервируется только доступный сейчас слот (без длинных резервов), блокировки берутся в одном порядке (сначала общая, затем чата), транзакции короткие и не включают ожидание и запрос к API."""
     global_interval,chat_interval = intervals(chat_id,global_rate,chat_rate)
     key = f'chat:{chat_id}'
     while True:
