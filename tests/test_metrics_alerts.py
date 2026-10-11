@@ -29,6 +29,8 @@ class FakeConnection:
             return Decimal('9.1')
         if 'min(scheduled_for)' in sql:
             return 4000
+        if any(name in sql for name in ('announcements', 'video_feeds', 'vk_inbox', 'source_posts')):
+            return 0
         return 3
 
 

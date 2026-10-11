@@ -8,6 +8,9 @@ ALTER TABLE reading_cards ADD CONSTRAINT reading_cards_platform_check CHECK (pla
 ALTER TABLE platform_identities DROP CONSTRAINT IF EXISTS platform_identities_platform_check;
 ALTER TABLE platform_identities ADD CONSTRAINT platform_identities_platform_check CHECK (platform IN ('max', 'vk'));
 
+ALTER TABLE usage_events DROP CONSTRAINT IF EXISTS usage_events_platform_check;
+ALTER TABLE usage_events ADD CONSTRAINT usage_events_platform_check CHECK (platform IN ('telegram', 'max', 'vk'));
+
 -- Входящие события Long Poll записываются до подтверждения, дубликат события имеет одну строку.
 CREATE TABLE vk_inbox (
     id bigserial PRIMARY KEY,
