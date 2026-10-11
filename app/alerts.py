@@ -35,6 +35,12 @@ def evaluate(samples: dict[str, float], *, budget_warn: float = 0.8, stale_deliv
         alerts['delivery:stuck'] = f"Есть неотправленная доставка старше {int(samples['bible_oldest_outstanding_delivery_seconds'] // 60)} мин."
     if samples.get('bible_deliveries|uncertain', 0) > 0:
         alerts['delivery:uncertain'] = f"Доставок с неопределённым исходом: {int(samples['bible_deliveries|uncertain'])} (нужно решение оператора)."
+    if samples.get('bible_announcements_overdue', 0) > 0:
+        alerts['announcements:overdue'] = f"Объявлений с опозданием запуска: {int(samples['bible_announcements_overdue'])} (проверьте службу composer)."
+    if samples.get('bible_video_feeds_failing', 0) > 0:
+        alerts['video:failing'] = f"Видеоканалов с ошибкой опроса: {int(samples['bible_video_feeds_failing'])}."
+    if samples.get('bible_vk_inbox_pending', 0) > 500:
+        alerts['vk:backlog'] = f"Очередь событий ВКонтакте растёт: {int(samples['bible_vk_inbox_pending'])}."
     limit = samples.get('bible_image_budget_limit_usd', 0)
     if limit and samples.get('bible_image_budget_spent_usd', 0) >= limit * budget_warn:
         alerts['budget:images'] = (f"Бюджет картинок: {samples['bible_image_budget_spent_usd']:.2f} из {limit:.2f} USD "

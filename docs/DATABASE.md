@@ -10,6 +10,9 @@
 
 Миграция 024 добавляет частичные индексы `delivery_log`, `operator_events`, `max_inbox` и `prayer_occurrences(delivery_id)` для метрик и удаления старых строк без полных просмотров.
 
+Миграции 026–031: `admin_invites`, `broadcasts` и поля картинки (026–027), `media_assets`, `announcements`, `announcement_runs` (028),
+платформа `vk` и `vk_inbox` (029), `content_sources`, `source_posts` (030), `video_feeds`, `video_items` (031).
+
 ## Основные таблицы
 
 | Область | Таблицы и назначение |

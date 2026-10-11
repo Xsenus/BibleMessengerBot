@@ -15,6 +15,10 @@
 | `bible_image_budget_spent_usd` / `bible_image_budget_limit_usd` | бюджет картинок за месяц (UTC) |
 | `bible_image_jobs{state}`, `bible_image_provider_blocked{provider}` | очередь и блокировки генераторов |
 | `bible_backup_age_seconds{kind}` | возраст последней проверенной копии |
+| `bible_announcements_active`, `bible_announcements_overdue` | активные объявления и опоздавшие более чем на 15 минут |
+| `bible_source_posts_new` | посты источников, ожидающие решения |
+| `bible_video_feeds_failing` | видеоканалы с ошибкой последнего опроса |
+| `bible_vk_inbox_pending` | необработанные события ВКонтакте |
 
 Пример `scrape_config` для Prometheus через SSH-туннель или локальный агент:
 
@@ -61,6 +65,9 @@ WHERE day > current_date - 7 GROUP BY 1, 2 ORDER BY 3 DESC;
 |---|---|---|---|
 | `delivery_log` | `sent`/`skipped`, не связанные с `prayer_occurrences` | 365 дней | `RETENTION_DELIVERY_DAYS` |
 | `max_inbox` | обработанные (`done`) события вебхука | 14 дней | `RETENTION_MAX_INBOX_DAYS` |
+| `vk_inbox` | обработанные события ВКонтакте | 14 дней | `RETENTION_VK_INBOX_DAYS` |
+| `video_items` | история видео каналов | 365 дней | `RETENTION_VIDEO_ITEMS_DAYS` |
+| `source_posts` | обработанные посты источников | 180 дней | `RETENTION_SOURCE_POSTS_DAYS` |
 | `operator_events` | события оператора | 180 дней | `RETENTION_EVENTS_DAYS` |
 | `usage_events` | суточные счётчики использования | 400 дней | `RETENTION_USAGE_DAYS` |
 

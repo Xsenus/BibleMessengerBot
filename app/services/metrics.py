@@ -72,4 +72,14 @@ async def collect(connection: Any, monthly_budget_usd: Decimal | float = 10) -> 
             WHERE day>(now() AT TIME ZONE 'UTC')::date-7 GROUP BY platform,event ORDER BY n DESC LIMIT 30"""):
         out.add('bible_usage_events_7d', 'Anonymous feature usage during the last 7 days', row['n'],
                 {'platform': row['platform'], 'event': row['event']})
+    out.add('bible_announcements_active', 'Active scheduled announcements',
+            await connection.fetchval("SELECT count(*) FROM announcements WHERE status='active'"))
+    out.add('bible_announcements_overdue', 'Active announcements whose next run is more than 15 minutes late',
+            await connection.fetchval("SELECT count(*) FROM announcements WHERE status='active' AND next_run_at<now()-interval '15 minutes'"))
+    out.add('bible_source_posts_new', 'Collected source posts waiting for a decision',
+            await connection.fetchval("SELECT count(*) FROM source_posts WHERE status='new'"))
+    out.add('bible_video_feeds_failing', 'Enabled video feeds whose last poll failed',
+            await connection.fetchval('SELECT count(*) FROM video_feeds WHERE is_enabled AND error_count>0'))
+    out.add('bible_vk_inbox_pending', 'VK events waiting to be processed',
+            await connection.fetchval("SELECT count(*) FROM vk_inbox WHERE status IN ('pending','processing')"))
     return out
