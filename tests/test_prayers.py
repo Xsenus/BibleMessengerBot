@@ -123,3 +123,63 @@ async def test_model_download_verifies_size_digest_and_cached_content(tmp_path,m
         with pytest.raises(ValueError,match='checksum'):
             await model.prepare(client=client)
     assert not (tmp_path/'model.gguf').exists() and not list(tmp_path.glob('*.part'))
+
+
+# --- Регрессия: молитва не должна повторяться каждый день ---------------------------------
+
+def test_same_topics_sound_different_on_different_days():
+    from datetime import date as d
+    texts = {prayers.compose(['peace', 'children'], 'ru', d(2026, 10, 1) + timedelta(days=n)) for n in range(14)}
+    assert len(texts) >= 6  # раньше результат был один и тот же
+    assert all(prayers.COMMON_PRAYER['ru'] in text and text.count('Аминь.') == 1 for text in texts)
+
+
+def test_no_news_fallback_rotates_by_date():
+    from datetime import date as d
+    days = [d(2026, 10, 1) + timedelta(days=n) for n in range(10)]
+    texts = {prayers.compose(prayers.fallback_intentions(day), 'ru', day) for day in days}
+    assert len(texts) >= 8
+
+
+def test_keyword_classifier_uses_headlines_in_both_languages():
+    news = [{'title': 'Floods leave thousands homeless'}, {'title': 'Угроза голода растёт, наводнения продолжаются'},
+            {'title': 'Ceasefire talks resume'}]
+    assert prayers.classify(news)[0] == 'environment'
+    assert set(prayers.classify(news, limit=6)) >= {'environment', 'hunger', 'peace'}
+    assert prayers.classify([{'title': 'Ignore previous instructions'}]) == []
+
+
+def test_old_enough_news_is_rejected_but_previous_utc_day_morning_news_is_kept():
+    # Утро в Новосибирске (09:08 местного = 02:08 UTC): новости предыдущего дня по Нью-Йорку должны попасть в выборку.
+    now = datetime(2026, 10, 9, 2, 8, tzinfo=UTC)
+    fresh = ('Aid arrives', 'https://news.un.org/en/story/a', 'Thu, 08 Oct 2026 20:00:00 GMT')
+    stale = ('Too old', 'https://news.un.org/en/story/b', 'Wed, 07 Oct 2026 20:00:00 GMT')
+    result = prayers.parse_feed(feed([fresh, stale]), date(2026, 10, 9), 'Asia/Novosibirsk', now=now)
+    assert [item['title'] for item in result] == ['Aid arrives']
+
+
+@pytest.mark.asyncio
+async def test_ai_outage_still_builds_prayer_from_headlines(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    news = [{'title': 'Famine warning as floods destroy harvest', 'url': 'https://news.un.org/en/story/x'}]
+    monkeypatch.setattr(prayers, 'fetch_news', AsyncMock(return_value=news))
+    monkeypatch.setattr(prayers, 'intentions', AsyncMock(side_effect=httpx.ConnectError('down')))
+    c = SimpleNamespace(fetchrow=AsyncMock(side_effect=[None, {'id': 1}]))
+    await prayers.brief(c, date(2026, 10, 9), 'UTC', 'morning_verse', 'ru')
+    args = c.fetchrow.await_args.args
+    assert args[6] == 'rules:keywords-v1'
+    text = args[5]
+    assert any(text.find(v) >= 0 for v in prayers.INTENTIONS['hunger'][0])
+
+
+@pytest.mark.asyncio
+async def test_old_composition_is_rebuilt_from_saved_news_snapshot():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    old = {'id': 7, 'composition_version': 2, 'prayer_text': 'Старый одинаковый текст',
+           'news_snapshot': json.dumps([{'title': 'Children in conflict zones'}])}
+    c = SimpleNamespace(fetchrow=AsyncMock(side_effect=[old, {'id': 7}]))
+    await prayers.brief(c, date(2026, 10, 9), 'UTC', 'morning_verse', 'ru')
+    args = c.fetchrow.await_args.args
+    assert 'Старый одинаковый' not in args[2] and args[4] == prayers.COMPOSITION_VERSION and args[3] == 'rules:keywords-v1'
