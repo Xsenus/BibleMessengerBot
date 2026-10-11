@@ -17,7 +17,7 @@ from aiogram.types import InlineKeyboardMarkup
 
 from app.bot.common import button
 from app.services import bible, passage
-from app.services.accounts import is_owner
+from app.services.accounts import is_admin
 from app.services.errors import UserError
 from app.services.locks import chat_lock
 
@@ -50,7 +50,7 @@ async def offer(connection: Any, actor_id: int, refs: list[dict], translation_id
 
     Не владельцу и пустому результату ничего не предлагается. Возвращает номер черновика или None.
     """
-    if not refs or not await is_owner(connection, actor_id):
+    if not refs or not await is_admin(connection, actor_id):
         return None
     draft = await connection.fetchval(
         'INSERT INTO broadcasts(created_by,refs,source_translation_id) VALUES($1,$2::jsonb,$3) RETURNING id',
@@ -80,7 +80,7 @@ async def recipients(connection: Any) -> list[Any]:
 
 async def load_draft(connection: Any, draft_id: int, actor_id: int) -> Any:
     """Черновик рассылки; чужой или несуществующий недоступен, действовать может только владелец."""
-    if not await is_owner(connection, actor_id):
+    if not await is_admin(connection, actor_id):
         raise UserError('forbidden')
     draft = await connection.fetchrow('SELECT * FROM broadcasts WHERE id=$1 AND created_by=$2', draft_id, actor_id)
     if not draft:

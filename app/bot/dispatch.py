@@ -9,7 +9,7 @@ from app.bot.commands import mode_name
 from app.bot.ui import main_keyboard,welcome_text,menu_hint,search_prompt
 from app.services import bible, broadcast
 from app.services import passage,illustrations,readings
-from app.services.accounts import claim_owner
+from app.services.accounts import claim_owner,redeem_admin_invite
 from app.services.destinations import configure_chat,ensure_resolved,cancel_queued
 from app.services.errors import UserError
 from app.services.formatting import escape
@@ -107,7 +107,14 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         if enum_value(message.chat.type)!='private':
             raise UserError('private_only')
         ok = len(args)==1 and await claim_owner(connection,telegram_user_id=user.id,supplied_code=args[0],expected_code=settings.owner_claim_code)
+        if not ok and len(args)==1 and await redeem_admin_invite(connection,user.id,args[0]):
+            # Код-приглашение от владельца: пользователь (на любой платформе) становится администратором.
+            return ('✅ Вы назначены администратором. Меню: /admin' if locale=='ru' else '✅ You are now an administrator. Menu: /admin'),None
         return tr(locale,'owner_ok' if ok else 'owner_fail'),None
+    # /admin — меню администратора (доступно администраторам и владельцу)
+    if name=='admin':
+        from app.bot import admin
+        return await admin.command(connection,user.id,chat,args)
     # /language [код] — язык Библии (издание подбирается автоматически)
     if name=='language':
         if not args:

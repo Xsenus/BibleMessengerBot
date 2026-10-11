@@ -32,7 +32,7 @@ from app.bot.menus import (  # noqa: F401 - re-exported for tests and callers
 
 router = Router(name='localized-destinations')
 LOGGER = logging.getLogger(__name__)
-KNOWN_COMMANDS = frozenset({c.command for c in commands_for('en')}|{'start','help'})
+KNOWN_COMMANDS = frozenset({c.command for c in commands_for('en')}|{'start','help','admin','claim'})
 
 
 @router.message(F.text.startswith('/'))
@@ -222,6 +222,10 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
                 text,markup = f"{tr(locale,'time')}: <code>/time 09:00 {escape(chat['timezone'])}{suffix}</code>",None
             elif action=='settings':
                 text,markup = await settings_text(connection,chat),settings_keyboard(chat)
+            elif action=='adm':
+                # Меню администратора: права проверяются внутри.
+                from app.bot import admin
+                text,markup = await admin.callback(connection,callback.from_user.id,chat,value)
             elif action=='bcast':
                 # Рассылка отрывка всем: только владелец бота, сначала подтверждение.
                 text,markup = await broadcast.confirmation(connection,int(value),callback.from_user.id,chat)

@@ -1,7 +1,9 @@
 """Хранение пользователей и чатов; входящие сообщения групп не переопределяют выбор назначения."""
 from __future__ import annotations
+import hashlib
 import secrets
 from typing import Any
+from app.services.errors import UserError
 from app.services.i18n import initial_ui
 from app.services.locks import lock_key
 
@@ -47,6 +49,58 @@ async def claim_owner(connection: Any, *, telegram_user_id: int, supplied_code: 
             return False
         await connection.execute("INSERT INTO app_settings(key,value) VALUES('owner_claimed',$1)",str(telegram_user_id))
     return True
+
+
+async def is_admin(connection: Any, telegram_user_id: int) -> bool:
+    """Администратор бота (владелец или назначенный администратор) и не заблокирован."""
+    return bool(await connection.fetchval(
+        'SELECT (is_owner OR is_admin) AND NOT is_blocked FROM telegram_users WHERE telegram_user_id=$1', telegram_user_id))
+
+
+def _invite_hash(code: str) -> str:
+    return hashlib.sha256(code.strip().encode('utf-8')).hexdigest()
+
+
+async def create_admin_invite(connection: Any, owner_id: int, hours: int = 24) -> str:
+    """Выдать одноразовый код приглашения администратора (только владелец). Код действует `hours` часов."""
+    if not await is_owner(connection, owner_id):
+        raise UserError('forbidden')
+    code = secrets.token_urlsafe(9)
+    await connection.execute(
+        "INSERT INTO admin_invites(code_hash,created_by,expires_at) VALUES($1,$2,now()+make_interval(hours=>$3))",
+        _invite_hash(code), owner_id, hours)
+    return code
+
+
+async def redeem_admin_invite(connection: Any, telegram_user_id: int, code: str) -> bool:
+    """Принять приглашение: пользователь (с любой платформы) становится администратором. Код сгорает."""
+    async with connection.transaction():
+        invite = await connection.fetchrow(
+            """UPDATE admin_invites SET used_by=$2,used_at=now() WHERE code_hash=$1 AND used_at IS NULL
+               AND expires_at>now() RETURNING id""", _invite_hash(code), telegram_user_id)
+        if not invite:
+            return False
+        result = await connection.execute(
+            'UPDATE telegram_users SET is_admin=true,updated_at=now() WHERE telegram_user_id=$1 AND NOT is_blocked', telegram_user_id)
+        if result != 'UPDATE 1':
+            raise UserError('forbidden')
+    return True
+
+
+async def list_admins(connection: Any) -> list[Any]:
+    """Владелец и администраторы с именем и платформой."""
+    return await connection.fetch(
+        """SELECT telegram_user_id,platform,username,first_name,is_owner FROM telegram_users
+           WHERE (is_owner OR is_admin) AND NOT is_blocked ORDER BY is_owner DESC,telegram_user_id""")
+
+
+async def remove_admin(connection: Any, owner_id: int, telegram_user_id: int) -> bool:
+    """Снять права администратора (только владелец; владельца снять нельзя)."""
+    if not await is_owner(connection, owner_id):
+        raise UserError('forbidden')
+    result = await connection.execute(
+        'UPDATE telegram_users SET is_admin=false,updated_at=now() WHERE telegram_user_id=$1 AND is_admin AND NOT is_owner', telegram_user_id)
+    return result == 'UPDATE 1'
 
 
 async def is_owner(connection: Any, telegram_user_id: int) -> bool:
