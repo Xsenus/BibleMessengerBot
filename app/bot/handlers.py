@@ -54,7 +54,7 @@ async def command_handler(message: Message,bot: Any,db_pool: Any,settings: Any) 
             locale = await connection.fetchval('SELECT ui_language FROM telegram_chats WHERE telegram_chat_id=$1',message.chat.id)
             if parsed.name in KNOWN_COMMANDS:
                 await usage.record(connection,'cmd:'+parsed.name,getattr(bot,'platform','telegram'))
-            if parsed.name in {'donate','donations','paysupport','terms'} and not support_enabled():
+            if parsed.name in {'donate','donations','paysupport','terms'} and (not support_enabled() or getattr(bot,'platform','telegram')=='vk'):
                 text,markup = ('Этот раздел временно недоступен.' if locale=='ru' else 'This section is temporarily unavailable.'),None
             elif parsed.name in {'donate','donations','paysupport','terms'}:
                 donation_command = (parsed.name,' '.join(parsed.arguments))

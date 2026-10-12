@@ -80,3 +80,87 @@ def test_event_validation_and_dedup_key():
     for bad in ({}, {'type': 'x', 'object': {}}, {**update, 'event_id': ''}, {**update, 'object': {'message': {'peer_id': 'a'}}}):
         with pytest.raises(ValueError):
             parse_event(bad)
+
+
+# ----- Постраничные клавиатуры VK ----------------------------------------------------------------------------
+
+def rows_of(n_rows, per_row=3, footer=True, audio=False):
+    rows = [[_button(f'B{r}{c}', f'v1:x{r}{c}') for c in range(per_row)] for r in range(n_rows)]
+    if footer:
+        rows.append([_button('◀ Назад', 'v1:settings')])
+    if audio:
+        rows.append([_button('🔊 Слушать', 'vkaudio:1:2')])
+    return rows
+
+
+def test_paginate_never_loses_buttons_and_keeps_back_and_audio_on_every_page():
+    from app.vkbot.ui import paginate
+    rows = rows_of(12, audio=True)                         # 36 кнопок + «Назад» + «Слушать»
+    pages = paginate(rows)
+    assert len(pages) > 1
+    seen = set()
+    for number, page in enumerate(pages):
+        assert len(page) <= 6 and sum(map(len, page)) <= 10
+        labels = [b['action']['label'] for row in page for b in row]
+        assert '◀ Назад' in labels and '🔊 Слушать' in labels
+        assert f'{number + 1}/{len(pages)}' in labels
+        seen |= {label for label in labels if label.startswith('B')}
+    assert seen == {f'B{r}{c}' for r in range(12) for c in range(3)}      # достижимы все 36 кнопок
+
+
+def test_small_keyboard_is_single_page_without_navigation():
+    from app.vkbot.ui import paginate
+    pages = paginate(rows_of(2))
+    assert len(pages) == 1 and all('vkpg' not in b['action'].get('payload', '') for row in pages[0] for b in row)
+
+
+def test_navigation_payloads_wrap_around():
+    from app.vkbot.ui import paginate
+    pages = paginate(rows_of(10))
+    nav = [row for row in pages[0] if row[0]['action']['payload'].startswith('{"d":"vkpg:')][0]
+    assert json.loads(nav[0]['action']['payload'])['d'] == f'vkpg:{len(pages) - 1}'
+    assert json.loads(nav[2]['action']['payload'])['d'] == 'vkpg:1'
+
+
+def test_wide_row_is_split_not_dropped():
+    from app.vkbot.ui import paginate
+    wide = [[_button(f'W{i}', f'v1:w{i}') for i in range(5)]] + rows_of(8)
+    labels = {b['action']['label'] for page in paginate(wide) for row in page for b in row}
+    assert {f'W{i}' for i in range(5)} <= labels
+
+
+@pytest.mark.asyncio
+async def test_voice_upload_uses_audio_message_type_and_parses_response():
+    seen = []
+
+    def handler(request):
+        if request.url.host == 'pu.vk.com':
+            return httpx.Response(200, json={'file': 'F'})
+        form = {k: v for k, v in (x.split('=') for x in request.content.decode().split('&'))}
+        seen.append((request.url.path.rsplit('/', 1)[-1], form.get('type')))
+        if request.url.path.endswith('getMessagesUploadServer'):
+            return httpx.Response(200, json={'response': {'upload_url': 'https://pu.vk.com/up'}})
+        return httpx.Response(200, json={'response': {'type': 'audio_message', 'audio_message': {'id': 9, 'owner_id': -5, 'access_key': 'k'}}})
+    vk = client(handler)
+    assert await vk.upload('voice', 1, b'ogg', 'v.ogg', 'audio/ogg') == 'doc-5_9_k'
+    assert ('docs.getMessagesUploadServer', 'audio_message') in seen
+    await vk.close()
+
+
+@pytest.mark.asyncio
+async def test_reply_uses_forward_with_conversation_message_id():
+    bodies = []
+
+    def handler(request):
+        bodies.append(request.content.decode())
+        return httpx.Response(200, json={'response': [{'peer_id': 5, 'conversation_message_id': 3}]})
+    vk = client(handler)
+    await vk.send(5, message='x', reply_to_cmid=41)
+    from urllib.parse import unquote
+    assert 'conversation_message_ids' in unquote(bodies[0]) and 'reply_to=' not in bodies[0]
+    await vk.close()
+
+
+@pytest.mark.parametrize('code', [900, 912])
+def test_blocked_user_codes_are_forbidden(code):
+    assert VkAPIError(code).send_error().kind == 'forbidden'

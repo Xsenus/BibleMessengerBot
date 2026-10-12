@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
+import logging
 from typing import Any
 
 from PIL import Image
@@ -11,7 +13,7 @@ from app.services.errors import SendError, UserError
 from app.vkbot.client import VkAPIError, VkClient
 from app.vkbot.identities import external
 from app.vkbot.rate_limit import wait_send_slot
-from app.vkbot.ui import keyboard, to_text
+from app.vkbot.ui import keyboard_pages, to_text
 
 
 def image_upload(data: bytes, mime: str) -> tuple[bytes, str, str]:
@@ -24,6 +26,16 @@ def image_upload(data: bytes, mime: str) -> tuple[bytes, str, str]:
     if mime not in {'image/png', 'image/jpeg'}:
         raise SendError('rejected')
     return data, 'png' if mime == 'image/png' else 'jpg', mime
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+async def to_voice(mp3: bytes) -> bytes:
+    """Преобразовать озвучку (MP3) в OGG/Opus — формат голосовых сообщений ВКонтакте."""
+    from app.services.speech import run_process
+    return await run_process('ffmpeg', '-v', 'error', '-i', 'pipe:0', '-vn', '-ac', '1', '-ar', '48000',
+                             '-c:a', 'libopus', '-b:a', '32k', '-f', 'ogg', 'pipe:1', stdin=mp3, timeout=120)
 
 
 class VkSender:
@@ -43,6 +55,7 @@ class VkSender:
             asset = await self.connection.fetchrow('SELECT data AS image_data,mime_type FROM media_assets WHERE id=$1', identifier)
         else:
             asset = await self.connection.fetchrow("SELECT audio_data FROM reading_audio WHERE id=$1 AND state='ready'", identifier)
+            kind = 'voice'                                          # во ВКонтакте озвучка — настоящее голосовое сообщение (OGG/Opus)
         if not asset:
             raise SendError('rejected')
         cached = await self.connection.fetchval('SELECT attachment FROM vk_media WHERE group_id=$1 AND kind=$2 AND asset_id=$3',
@@ -50,8 +63,13 @@ class VkSender:
         if cached:
             return cached
         try:
-            if kind == 'audio':
-                attachment = await self.client.upload('doc', peer_id, bytes(asset['audio_data']), f'reading-{identifier}.mp3', 'audio/mpeg')
+            if kind == 'voice':
+                try:
+                    voice = await to_voice(bytes(asset['audio_data']))
+                    attachment = await self.client.upload('voice', peer_id, voice, f'reading-{identifier}.ogg', 'audio/ogg')
+                except (RuntimeError, OSError, TimeoutError):
+                    # ffmpeg недоступен или файл не преобразуется: безопасный запасной вариант — обычный файл MP3.
+                    attachment = await self.client.upload('doc', peer_id, bytes(asset['audio_data']), f'reading-{identifier}.mp3', 'audio/mpeg')
             else:
                 data, suffix, mime = image_upload(bytes(asset['image_data']), asset['mime_type'])
                 attachment = await self.client.upload('photo', peer_id, data, f'reading-{identifier}.{suffix}', mime)
@@ -82,6 +100,18 @@ class VkSender:
             ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()''', key, attachment)
         return attachment
 
+    async def remember_pages(self, chat_id: int, cmid: int, body: str, attachments: list[str], pages: list[str]) -> None:
+        """Запомнить страницы клавиатуры сообщения, чтобы листание (`vkpg:`) могло показать остальные кнопки; для однострочной клавиатуры запись удаляется."""
+        try:
+            if len(pages) > 1:
+                await self.connection.execute('''INSERT INTO vk_keyboard_pages(chat_id,cmid,body,attachment,pages) VALUES($1,$2,$3,$4,$5::jsonb)
+                    ON CONFLICT(chat_id,cmid) DO UPDATE SET body=EXCLUDED.body,attachment=EXCLUDED.attachment,pages=EXCLUDED.pages,updated_at=now()''',
+                                              chat_id, cmid, body, ','.join(attachments), json.dumps(pages))
+            else:
+                await self.connection.execute('DELETE FROM vk_keyboard_pages WHERE chat_id=$1 AND cmid=$2', chat_id, cmid)
+        except Exception as error:      # сообщение уже отправлено — сбой записи не должен приводить к повторной отправке
+            LOGGER.warning('VK keyboard pages not stored (%s)', type(error).__name__)
+
     async def send(self, chat_id: int, text: str | dict, thread_id: int | None = None, *, reply_markup: Any = None) -> int:
         """Отправить или отредактировать часть сообщения. Потерянное подтверждение отправки — неопределённый исход,
         повтор правки безопасен. Возвращает номер сообщения в беседе (контрольная точка)."""
@@ -97,11 +127,11 @@ class VkSender:
             chunk = dict(text) if isinstance(text, dict) else None
             attachments: list[str] = []
             audio = None
-            keyboard_json = None
+            pages: list[str] = []
             reply_to = None
             if chunk is None:
                 body = to_text(str(text))
-                keyboard_json = keyboard(reply_markup, locale=locale)
+                pages = keyboard_pages(reply_markup, locale=locale)
             else:
                 kind = chunk.get('kind')
                 if kind in {'rich', 'rich_edit'} and chunk.get('card_id'):
@@ -114,7 +144,7 @@ class VkSender:
                         raise SendError('rejected')
                     attachments = [await self.media('audio', chunk['audio_id'], peer_id)]
                     body = '🔊 ' + ('Озвучка' if locale == 'ru' else 'Audio reading')
-                    reply_to = card['telegram_message_id']
+                    reply_to = card['telegram_message_id']              # номер сообщения в беседе (cmid)
                 elif kind in {'rich', 'rich_edit', 'photo', 'asset_photo', 'vk_text', 'vk_welcome'}:
                     if kind == 'vk_welcome':
                         attachments.append(await self.welcome_media(str(chunk.get('asset_sha256')), peer_id))
@@ -128,9 +158,11 @@ class VkSender:
                     body = to_text(content)
                     if chunk.get('card_id') and chunk.get('audio_id'):
                         audio = (chunk['card_id'], chunk['audio_id'])
-                    keyboard_json = chunk.get('vk_keyboard') or keyboard(reply_markup, audio=audio, locale=locale)
+                    pages = ([chunk['vk_keyboard'], *(chunk.get('vk_pages') or [])] if chunk.get('vk_keyboard')
+                             else keyboard_pages(reply_markup, audio=audio, locale=locale))
                 else:
                     raise SendError('rejected')
+            keyboard_json = pages[0] if pages else None
             await wait_send_slot(self.connection, chat_id)
             if editing:
                 assert chunk is not None
@@ -138,9 +170,11 @@ class VkSender:
                                        keyboard=keyboard_json)
                 if audio:
                     await self.connection.execute('UPDATE reading_cards SET audio_offered_id=$2 WHERE id=$1', audio[0], audio[1])
+                await self.remember_pages(chat_id, chunk['message_id'], body, attachments, pages)
                 return chunk['message_id']
             cmid = await self.client.send(peer_id, message=body, attachment=','.join(attachments) or None,
-                                          keyboard=keyboard_json, reply_to=reply_to)
+                                          keyboard=keyboard_json, reply_to_cmid=reply_to)
+            await self.remember_pages(chat_id, cmid, body, attachments, pages)
             if audio:
                 await self.connection.execute('UPDATE reading_cards SET audio_offered_id=$2 WHERE id=$1', audio[0], audio[1])
             if chunk and chunk.get('kind') == 'vk_audio':

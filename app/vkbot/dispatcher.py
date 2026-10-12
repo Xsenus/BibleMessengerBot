@@ -1,6 +1,7 @@
 """Диспетчер событий ВКонтакте: проверенные события превращаются в общие команды и проверки прав, как в Telegram."""
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import UTC, datetime
@@ -223,6 +224,19 @@ class VkDispatcher:
                 await handlers.message_language_handler(callback, self.bridge, self.pool, self.settings)
             elif data.startswith('v1:'):
                 await handlers.callback_handler(callback, self.bridge, self.pool, self.settings)
+            elif data.startswith('vkpg:'):
+                await callback.answer()
+                if not re.fullmatch(r'vkpg:[0-9]{1,2}', data):
+                    raise UserError('invalid')
+                async with self.pool.acquire() as connection:
+                    stored = await connection.fetchrow('SELECT body,attachment,pages FROM vk_keyboard_pages WHERE chat_id=$1 AND cmid=$2', chat.id, cmid)
+                    pages = (json.loads(stored['pages']) if isinstance(stored['pages'], str) else stored['pages']) if stored else []
+                    number = int(data[5:])
+                    if number >= len(pages):
+                        raise UserError('invalid')
+                    from app.vkbot.rate_limit import wait_send_slot
+                    await wait_send_slot(connection, chat.id)
+                await self.bridge.client.edit(peer, cmid, message=stored['body'], attachment=stored['attachment'] or None, keyboard=pages[number])
             elif data.startswith('vkaudio:'):
                 await callback.answer()
                 await handlers.authorize(self.bridge, chat, actor.id)

@@ -30,25 +30,53 @@ def _button(label: str, payload: str, color: str = 'secondary') -> dict:
 
 
 def fit(rows: list[list[dict]]) -> list[list[dict]]:
-    """Уложить кнопки в ограничения inline-клавиатуры VK (6 строк, 5 в ряду, не более 10 кнопок): лишние строки отбрасываются с конца,
-    а последняя строка (озвучка) сохраняется."""
+    """Первая страница клавиатуры в пределах лимитов VK (остальные кнопки доступны через листание, см. `paginate`)."""
+    return paginate(rows)[0] if rows else []
+
+
+def _is_footer(row: list[dict]) -> bool:
+    """Строка «назад / в меню» (подпись начинается со стрелки или домика): её нельзя терять при переполнении."""
+    return len(row) <= 2 and all(str(b['action'].get('label', '')).lstrip().startswith(('◀', '⬅', '🏠', '↩')) for b in row)
+
+
+def paginate(rows: list[list[dict]]) -> list[list[list[dict]]]:
+    """Разложить кнопки по страницам inline-клавиатуры VK (не более 6 рядов и 10 кнопок на страницу).
+
+    Ни одна кнопка не теряется: что не поместилось, уходит на следующие страницы. На каждой странице повторяются строка
+    озвучки («Слушать») и строка «Назад»; при нескольких страницах добавляется строка листания `‹ 1/3 ›`."""
     rows = [row[:MAX_ROW] for row in rows if row]
     if len(rows) <= MAX_INLINE_ROWS and sum(map(len, rows)) <= MAX_INLINE_BUTTONS:
-        return rows
+        return [rows]
     tail = rows[-1] if rows and any(b['action'].get('payload', '').startswith('{"d":"vkaudio:') for b in rows[-1]) else None
     body = rows[:-1] if tail else rows
-    kept: list = []
-    total = len(tail) if tail else 0
-    for row in body:
-        if len(kept) + (1 if tail else 0) >= MAX_INLINE_ROWS or total + len(row) > MAX_INLINE_BUTTONS:
-            break
-        kept.append(row)
-        total += len(row)
-    return kept + ([tail] if tail else [])
+    footer = body[-1] if body and _is_footer(body[-1]) else None
+    body = body[:-1] if footer else body
+    fixed_rows = (1 if tail else 0) + (1 if footer else 0) + 1                   # +1 — строка листания
+    fixed_buttons = (len(tail) if tail else 0) + (len(footer) if footer else 0) + 3
+    rows_cap, buttons_cap = MAX_INLINE_ROWS - fixed_rows, MAX_INLINE_BUTTONS - fixed_buttons
+    pieces: list[list[dict]] = []
+    for row in body:                                                            # слишком длинная для страницы строка делится
+        for i in range(0, len(row), max(1, buttons_cap)):
+            pieces.append(row[i:i + max(1, buttons_cap)])
+    pages: list[list[list[dict]]] = [[]]
+    used = 0
+    for piece in pieces:
+        if len(pages[-1]) >= rows_cap or used + len(piece) > buttons_cap:
+            pages.append([])
+            used = 0
+        pages[-1].append(piece)
+        used += len(piece)
+    total = len(pages)
+    result = []
+    for number, page in enumerate(pages):
+        nav = [_button('‹', f'vkpg:{(number - 1) % total}'), _button(f'{number + 1}/{total}', f'vkpg:{number}'),
+               _button('›', f'vkpg:{(number + 1) % total}')] if total > 1 else None
+        result.append(page + ([nav] if nav else []) + ([footer] if footer else []) + ([tail] if tail else []))
+    return result
 
 
-def keyboard(markup, *, audio: tuple[int, int] | None = None, locale: str = 'ru') -> str | None:
-    """Клавиатура VK (JSON-строка) из inline- или нижней клавиатуры Telegram; при `audio` добавляется кнопка «Слушать»."""
+def keyboard_pages(markup, *, audio: tuple[int, int] | None = None, locale: str = 'ru') -> list[str]:
+    """Клавиатуры VK (JSON-строки, по одной на страницу) из inline- или нижней клавиатуры Telegram; при `audio` добавляется кнопка «Слушать»."""
     rows: list[list[dict]] = []
     if markup is not None and hasattr(markup, 'inline_keyboard'):
         for row in markup.inline_keyboard:
@@ -61,11 +89,17 @@ def keyboard(markup, *, audio: tuple[int, int] | None = None, locale: str = 'ru'
             if converted:
                 rows.append(converted)
     elif markup is not None and hasattr(markup, 'keyboard'):
-        return persistent(markup)
+        single = persistent(markup)
+        return [single] if single else []
     if audio:
         rows.append([_button('🔊 Слушать' if locale == 'ru' else '🔊 Listen', f'vkaudio:{audio[0]}:{audio[1]}')])
-    rows = fit(rows)
-    return json.dumps({'inline': True, 'buttons': rows}, ensure_ascii=False, separators=(',', ':')) if rows else None
+    return [json.dumps({'inline': True, 'buttons': page}, ensure_ascii=False, separators=(',', ':')) for page in paginate(rows) if page]
+
+
+def keyboard(markup, *, audio: tuple[int, int] | None = None, locale: str = 'ru') -> str | None:
+    """Первая страница клавиатуры VK (см. `keyboard_pages`)."""
+    pages = keyboard_pages(markup, audio=audio, locale=locale)
+    return pages[0] if pages else None
 
 
 def persistent(markup) -> str | None:
@@ -74,7 +108,7 @@ def persistent(markup) -> str | None:
     for row in markup.keyboard:
         converted = []
         for item in row:
-            if not keyboard_command(item.text) or keyboard_command(item.text) == '/hide_keyboard':
+            if not keyboard_command(item.text) or keyboard_command(item.text) in {'/hide_keyboard', '/donate'}:       # платежей во ВКонтакте нет
                 continue
             converted.append({'action': {'type': 'text', 'label': item.text[:40]}, 'color': 'primary'})
         if converted:

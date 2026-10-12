@@ -4,7 +4,9 @@
 """
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 from typing import Any
 
 import httpx
@@ -13,9 +15,10 @@ from app.services.errors import SendError
 from app.vkbot.config import VkSettings
 
 # Коды ошибок VK, при которых сообщение пользователю не доставить (нет согласия, закрыт диалог, бот удалён из беседы).
-FORBIDDEN = {7, 15, 901, 902, 917, 920, 925, 945, 946}
+FORBIDDEN = {7, 15, 900, 901, 902, 912, 917, 920, 925, 945, 946}
 RETRY = {6, 9, 10, 14, 29}
 AUTH = {5, 27, 28}
+MIN_INTERVAL = 0.06   # секунд между вызовами API из одного процесса
 
 
 class VkAPIError(Exception):
@@ -48,6 +51,8 @@ class VkClient:
         self.http = httpx.AsyncClient(base_url=settings.api_url, timeout=httpx.Timeout(30, connect=10),
                                       follow_redirects=False, transport=transport)
         # Отдельный клиент для загрузки файлов и Long Poll: токен API на сторонние хосты не уходит.
+        self._pace_lock = asyncio.Lock()
+        self._last_call = 0.0
         self.raw = httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10), follow_redirects=False, transport=transport)
 
     async def close(self) -> None:
@@ -59,6 +64,11 @@ class VkClient:
         """Вызвать метод API и вернуть поле `response`; ошибки VK превращаются в VkAPIError."""
         if not re.fullmatch(r'[a-zA-Z]+\.[a-zA-Z]+', method):
             raise ValueError('Invalid VK method')
+        async with self._pace_lock:                      # все вызовы API (не только отправка) делят лимит ~20 запросов в секунду
+            wait = self._last_call + MIN_INTERVAL - time.monotonic()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_call = time.monotonic()
         data = {k: v for k, v in params.items() if v is not None}
         data.update(access_token=token or self.settings.token, v=self.settings.api_version)
         try:
@@ -114,12 +124,15 @@ class VkClient:
         return body
 
     async def send(self, peer_id: int, *, message: str = '', attachment: str | None = None, keyboard: str | None = None,
-                   reply_to: int | None = None) -> int:
+                   reply_to_cmid: int | None = None) -> int:
         """Отправить сообщение и вернуть его номер в беседе (conversation_message_id) — он нужен для правок."""
         import random
+        import json
+        # Ответ на сообщение по номеру в беседе (conversation_message_id) делается через forward с is_reply.
+        forward = json.dumps({'peer_id': peer_id, 'conversation_message_ids': [reply_to_cmid], 'is_reply': True}) if reply_to_cmid else None
         result = await self.call('messages.send', peer_ids=peer_id, random_id=random.randint(1, 2**31 - 1),
                                  message=message or None, attachment=attachment, keyboard=keyboard,
-                                 dont_parse_links=1, reply_to=reply_to)
+                                 dont_parse_links=1, forward=forward)
         item = result[0] if isinstance(result, list) and result else None
         cmid = (item or {}).get('conversation_message_id')
         if not isinstance(cmid, int) or cmid <= 0 or (item or {}).get('error'):
@@ -140,13 +153,13 @@ class VkClient:
 
     async def upload(self, kind: str, peer_id: int, data: bytes, filename: str, mime_type: str) -> str:
         """Загрузить картинку (`photo`) или документ (`doc`) для сообщений и вернуть строку вложения `photo-1_2_ключ`."""
-        if kind not in {'photo', 'doc'} or not data or len(data) > 50 * 1024 * 1024:
+        if kind not in {'photo', 'doc', 'voice'} or not data or len(data) > 50 * 1024 * 1024:
             raise ValueError('Unsupported VK media')
         if kind == 'photo':
             server = await self.call('photos.getMessagesUploadServer', peer_id=peer_id)
             field = 'photo'
         else:
-            server = await self.call('docs.getMessagesUploadServer', type='doc', peer_id=peer_id)
+            server = await self.call('docs.getMessagesUploadServer', type='audio_message' if kind == 'voice' else 'doc', peer_id=peer_id)
             field = 'file'
         from urllib.parse import urlsplit
         url = urlsplit(str(server.get('upload_url', '')))
@@ -164,6 +177,9 @@ class VkClient:
             key = f"_{item['access_key']}" if item.get('access_key') else ''
             return f"photo{item['owner_id']}_{item['id']}{key}"
         saved = await self.call('docs.save', file=uploaded.get('file'), title=filename[:100])
-        item = saved.get('doc', saved) if isinstance(saved, dict) else saved[0]
+        if isinstance(saved, dict):
+            item = saved.get('audio_message') or saved.get('doc') or saved       # голосовое сообщение возвращается в поле audio_message
+        else:
+            item = saved[0]
         key = f"_{item['access_key']}" if item.get('access_key') else ''
         return f"doc{item['owner_id']}_{item['id']}{key}"

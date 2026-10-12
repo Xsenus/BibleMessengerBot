@@ -23,7 +23,7 @@ from app.services.formatting import split_message
 from app.vkbot.client import VkAPIError, VkClient
 from app.vkbot.identities import external, lookup
 from app.vkbot.transport import VkSender
-from app.vkbot.ui import keyboard, persistent
+from app.vkbot.ui import keyboard_pages, persistent
 from app.worker.delivery import insert_payload
 
 LOGGER = logging.getLogger(__name__)
@@ -133,7 +133,11 @@ class VkBotBridge:
                     prepared.append(chunk)
             frozen_chunks = prepared
             if markup is not None and frozen_chunks and not frozen_chunks[-1].get('card_id'):
-                frozen_chunks[-1]['vk_keyboard'] = keyboard(markup, locale=chat['ui_language'])
+                pages = keyboard_pages(markup, locale=chat['ui_language'])
+                if pages:
+                    frozen_chunks[-1]['vk_keyboard'] = pages[0]
+                    if len(pages) > 1:
+                        frozen_chunks[-1]['vk_pages'] = pages[1:]
         translation = await bible.chat_translation(connection, chat_id)
         return await insert_payload(connection, chat, translation or {'id': None}, str(text), key,
                                     'vk_ui', {'kind': 'vk_ui'}, frozen_chunks=frozen_chunks)

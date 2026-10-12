@@ -1,6 +1,7 @@
 """ВКонтакте целиком: событие → общие обработчики → очередь доставки → отправка через имитацию API (реальная БД)."""
 from __future__ import annotations
 
+import json
 import os
 from urllib.parse import parse_qs
 
@@ -21,6 +22,7 @@ from tests.test_postgres_integration import load_fixture
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(os.getenv('RUN_DB_TESTS') != '1', reason='Real PostgreSQL required')]
 GROUP = 555
+EDITS: list[dict] = []
 
 
 @pytest_asyncio.fixture
@@ -33,6 +35,7 @@ async def vk(db, monkeypatch):
     await load_fixture(connection, path, language='rus')
     pool = await asyncpg.create_pool(settings.database_url, min_size=1, max_size=8)
     sent: list[dict] = []
+    EDITS.clear()
 
     def handle(request):
         form = {k: v[0] for k, v in parse_qs(request.content.decode(errors='ignore')).items()}
@@ -42,6 +45,9 @@ async def vk(db, monkeypatch):
         if method == 'messages.send':
             sent.append(form)
             return httpx.Response(200, json={'response': [{'peer_id': int(form['peer_ids']), 'conversation_message_id': len(sent)}]})
+        if method == 'messages.edit':
+            EDITS.append(form)
+            return httpx.Response(200, json={'response': 1})
         if method == 'messages.sendMessageEventAnswer':
             return httpx.Response(200, json={'response': 1})
         if method.endswith('getMessagesUploadServer'):
@@ -265,3 +271,32 @@ async def test_vk_owner_gets_admin_menu_and_broadcast_reaches_vk_and_telegram(vk
     for row in vk_rows:
         assert await __import__('app.worker.delivery', fromlist=['x']).process_delivery(c, row['id'], transports.sender(c)) == 'sent'
     assert len(sent) == before + len(vk_rows) and 'Всем!' in sent[-1]['message']
+
+
+async def test_long_menu_is_paginated_and_every_page_is_reachable(vk):
+    c, dispatcher, transports, sent = vk
+    start = message('/start', 90)
+    await dispatcher.dispatch(start, parse_event(start)[0])
+    await drain(c, transports)
+    sent.clear()
+    settings = message('/settings', 91)
+    await dispatcher.dispatch(settings, parse_event(settings)[0])
+    await drain(c, transports)
+    stored = await c.fetchrow('SELECT * FROM vk_keyboard_pages')
+    assert stored, 'меню настроек не помещается в одну клавиатуру ВКонтакте и должно храниться постранично'
+    pages = json.loads(stored['pages']) if isinstance(stored['pages'], str) else stored['pages']
+    first = json.loads(sent[-1]['keyboard'])
+    assert len(first['buttons']) <= 6 and sum(len(r) for r in first['buttons']) <= 10
+    every_label = {b['action']['label'] for page in pages for r in json.loads(page)['buttons'] for b in r}
+    assert any('Утро' in label or 'Morning' in label or 'утр' in label.lower() for label in every_label) or len(every_label) > 8
+    event = {'type': 'message_event', 'event_id': 'pg1', 'object': {'user_id': 101, 'peer_id': 101, 'event_id': 'pg1',
+             'conversation_message_id': stored['cmid'], 'payload': {'d': 'vkpg:1'}}}
+    await dispatcher.dispatch(event, parse_event(event)[0])
+    assert EDITS and json.loads(EDITS[-1]['keyboard']) == json.loads(pages[1]) and EDITS[-1]['message'] == stored['body']
+    forged = {**event, 'event_id': 'pg2', 'object': {**event['object'], 'event_id': 'pg2', 'payload': {'d': 'vkpg:9'}}}
+    try:
+        await dispatcher.dispatch(forged, parse_event(forged)[0])
+    except Exception as error:
+        from app.services.errors import UserError
+        assert isinstance(error, UserError)
+    assert len(EDITS) == 1                                                  # несуществующая страница ничего не меняет

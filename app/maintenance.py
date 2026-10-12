@@ -29,6 +29,7 @@ RULES = (
             AND NOT EXISTS(SELECT 1 FROM prayer_occurrences p WHERE p.delivery_id=delivery_log.id)"""),
     Rule('max_inbox', 'RETENTION_MAX_INBOX_DAYS', 14, 'max_inbox', "status='done' AND updated_at<$1"),
     Rule('vk_inbox', 'RETENTION_VK_INBOX_DAYS', 14, 'vk_inbox', "status='done' AND updated_at<$1"),
+    Rule('vk_keyboard_pages', 'RETENTION_VK_KEYBOARDS_DAYS', 30, 'vk_keyboard_pages', 'updated_at<$1'),
     Rule('video_items', 'RETENTION_VIDEO_ITEMS_DAYS', 365, 'video_items', 'created_at<$1'),
     Rule('source_posts', 'RETENTION_SOURCE_POSTS_DAYS', 180, 'source_posts', "status<>'new' AND created_at<$1"),
     Rule('operator_events', 'RETENTION_EVENTS_DAYS', 180, 'operator_events', 'created_at<$1'),
