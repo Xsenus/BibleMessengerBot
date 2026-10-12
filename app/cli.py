@@ -76,10 +76,11 @@ async def seed_only(settings: Settings) -> dict[str, str]:
 def parser() -> argparse.ArgumentParser:
     """Собрать разбор аргументов командной строки (команда, профиль, максимум изданий, обновление, файл вывода)."""
     result = argparse.ArgumentParser(description="BibleMessengerBot operations")
-    result.add_argument("command", choices=("bootstrap", "import", "preview", "stats", "seed", "audit"))
+    result.add_argument("command", choices=("bootstrap", "import", "preview", "stats", "seed", "audit", "migrate"))
     result.add_argument("--profile", choices=("core", "extended", "all-open", "none"))
     result.add_argument("--max-editions", type=int)
     result.add_argument("--refresh", action="store_true")
+    result.add_argument("--check", action="store_true", help="migrate: только проверить ожидающие миграции, ничего не меняя")
     result.add_argument("--output", type=Path)
     return result
 
@@ -112,6 +113,14 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             return await verify_database(connection,profile=settings.bible_profile,full=True)
         finally:
             await connection.close()
+    if args.command == "migrate":
+        from app.db import migration_status
+        await wait_for_database(settings)
+        report = await migration_status(settings)
+        if not args.check and report["status"] == "pending":
+            await seed_only(settings)
+            report = await migration_status(settings)
+        return report
     if args.command == "stats":
         return await db_stats(settings)
     if args.command == "seed":
@@ -129,6 +138,8 @@ def main() -> None:
     if args.output:
         args.output.write_text(payload + "\n", encoding="utf-8")
     print(payload)
+    if args.command == "migrate" and args.check and result.get("status") == "pending":
+        raise SystemExit(3)                               # есть ожидающие миграции (для скриптов обновления)
     if result.get("status") == "failed":
         raise SystemExit(1)
     if result.get("status") == "partial":

@@ -1,7 +1,7 @@
 """Шифрование секретов, которые администратор вводит в панели (ключи генераторов картинок).
 
 Ключ шифрования берётся из `SECRETS_KEY`, а если он не задан — из `ADMIN_API_KEY` (через SHA-256). Алгоритм — Fernet
-(AES-128-CBC + HMAC). При смене ключа шифрования сохранённые секреты не расшифруются: их нужно ввести заново.
+(AES-128-CBC + HMAC). Смена ключа без потерь: новый ключ в `SECRETS_KEY`, прежний — в `SECRETS_KEY_OLD`, затем `python -m app.selfcheck --rotate-secrets`.
 """
 from __future__ import annotations
 
@@ -9,15 +9,36 @@ import base64
 import hashlib
 import os
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
 
-def _fernet() -> Fernet:
-    """Fernet из переменных окружения; без достаточно длинного ключа хранить секреты в БД запрещено."""
-    material = os.getenv('SECRETS_KEY', '').strip() or os.getenv('ADMIN_API_KEY', '').strip()
-    if len(material) < 24:
+def _material() -> list[str]:
+    """Ключи по убыванию приоритета: основной `SECRETS_KEY`, затем старые из `SECRETS_KEY_OLD` (через запятую) и `ADMIN_API_KEY`
+    (им шифровались секреты, пока отдельного ключа не было). Шифрует всегда первый, расшифровать можно любым — так ключ меняют без потерь."""
+    primary = os.getenv('SECRETS_KEY', '').strip()
+    old = [k.strip() for k in os.getenv('SECRETS_KEY_OLD', '').split(',') if k.strip()]
+    admin = os.getenv('ADMIN_API_KEY', '').strip()
+    keys = [k for k in [primary, *old, admin] if len(k) >= 24]
+    return list(dict.fromkeys(keys))
+
+
+def _fernet() -> MultiFernet:
+    keys = _material()
+    if not keys:
         raise RuntimeError('SECRETS_KEY or ADMIN_API_KEY (24+ characters) is required to store secrets')
-    return Fernet(base64.urlsafe_b64encode(hashlib.sha256(material.encode('utf-8')).digest()))
+    return MultiFernet([Fernet(base64.urlsafe_b64encode(hashlib.sha256(k.encode('utf-8')).digest())) for k in keys])
+
+
+def needs_rotation(token: str) -> bool:
+    """True, если секрет зашифрован не основным ключом (его стоит перешифровать)."""
+    keys = _material()
+    if not token or not keys:
+        return False
+    try:
+        Fernet(base64.urlsafe_b64encode(hashlib.sha256(keys[0].encode('utf-8')).digest())).decrypt(token.encode('ascii'))
+        return False
+    except InvalidToken:
+        return True
 
 
 def encrypt(value: str) -> str:

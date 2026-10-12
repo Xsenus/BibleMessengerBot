@@ -10,6 +10,8 @@
 
 Миграция 024 добавляет частичные индексы `delivery_log`, `operator_events`, `max_inbox` и `prayer_occurrences(delivery_id)` для метрик и удаления старых строк без полных просмотров.
 
+Миграции 036–038: `loop_stats` (статистика циклов), `image_generation_attempts.duration_ms`, `verse_illustrations.pinned/quarantined_at`; `admin_audit`, `announcement_templates`, `telegram_users.admin_role`, `admin_invites.role`; `bookmarks`, `reading_marks`. Ключи `app_settings`: `images.ranking` (`priority`/`auto`), `images.style`.
+
 Миграции 034–035: `net_proxies`, `net_policies`, `net_routes`, `net_health` (сетевые маршруты); `vk_keyboard_pages` (страницы клавиатур VK), попытки и статус `failed` у `announcement_runs`, вид `voice` у `vk_media`.
 
 Миграция 033: область иллюстраций `range` и колонка `verse_illustrations.verse_end` (последний стих диапазона).

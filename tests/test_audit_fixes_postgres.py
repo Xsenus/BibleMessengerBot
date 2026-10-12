@@ -61,7 +61,7 @@ async def test_resume_keeps_upcoming_occurrence(db):
     await a.command(c, 101, chat, 'daily 09:00 | T | Текст')
     ann = await c.fetchrow('SELECT * FROM announcements')
     soon = datetime.now(UTC) + timedelta(hours=1)
-    await c.execute('UPDATE announcements SET next_run_at=$2 WHERE id=$1', ann['id'], soon)
+    await c.execute('UPDATE announcements SET next_run_at=$2,send_time=$3 WHERE id=$1', ann['id'], soon, soon.time().replace(second=0, microsecond=0))
     await a.set_status(c, ann['id'], 'paused')
     await a.set_status(c, ann['id'], 'active')
     nxt = await c.fetchval('SELECT next_run_at FROM announcements')

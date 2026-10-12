@@ -79,3 +79,17 @@ WHERE day > current_date - 7 GROUP BY 1, 2 ORDER BY 3 DESC;
 
 По умолчанию — текст. `LOG_FORMAT=json` включает по одному JSON-объекту на строку (`ts`, `level`, `logger`, `message`, `exception`)
 для сборщиков журналов; редактирование секретов применяется в обоих форматах. `/metrics` кэшируется на 10 секунд, поэтому частые опросы не нагружают БД.
+
+
+## Prometheus и Grafana (профиль `monitoring`)
+
+```bash
+echo 'GRAFANA_PASSWORD=придумайте-пароль' >> .env
+make monitoring            # или: docker compose --profile monitoring up -d prometheus grafana
+```
+
+- Prometheus: `http://127.0.0.1:9090`, собирает `/metrics` панели (HTTP Basic: `admin` / `ADMIN_API_KEY`, пароль берётся из окружения при запуске).
+- Правила оповещений: `deploy/monitoring/alerts.yml` — служба не отвечает, очередь доставки отстаёт, неопределённые доставки, остановившиеся и медленные циклы, опаздывающие объявления, бюджет картинок, устаревшая резервная копия, сбои видеоканалов, очередь ВКонтакте.
+- Grafana: `http://127.0.0.1:3000` (логин `admin`), дашборд «BibleMessengerBot» создаётся автоматически.
+- Оба порта слушают только локальный интерфейс; для доступа извне используйте SSH-туннель или обратный прокси с авторизацией.
+- Метрики циклов: `bible_loop_duration_ms`, `bible_loop_errors_total`, `bible_loop_last_ok_age_seconds`.

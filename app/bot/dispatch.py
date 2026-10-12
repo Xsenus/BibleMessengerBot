@@ -140,10 +140,10 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
     if name in {'bookmark','bookmarks','unbookmark','done','streak'}:
         from app.services import reader
         ru = locale=='ru'
-        edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
-        if not edition:
-            raise UserError('not_ready')
         today = datetime.now(ZoneInfo(chat['timezone'])).date()
+        edition = await bible.chat_translation(connection,chat['telegram_chat_id']) if name in {'bookmark','bookmarks'} else None
+        if name in {'bookmark','bookmarks'} and not edition:
+            raise UserError('not_ready')
         if name=='bookmark':
             if not args:
                 return ('Укажите адрес: <code>/bookmark Ин 3:16 заметка</code>' if ru else 'Give a reference: <code>/bookmark John 3:16 note</code>'),None

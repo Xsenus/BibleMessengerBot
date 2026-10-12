@@ -66,6 +66,27 @@ def migration_files(schema_path: Path | None = None) -> list[Path]:
     return [base, *sorted((base.parent / 'migrations').glob('*.sql'))]
 
 
+async def migration_status(settings: Settings, schema_path: Path | None = None) -> dict[str, Any]:
+    """Предварительная проверка миграций без изменений: какие уже применены, какие ожидают, какие применённые файлы изменены."""
+    import asyncpg
+    connection = await asyncpg.connect(normalize_asyncpg_dsn(settings.database_url),timeout=30)
+    try:
+        exists = await connection.fetchval("SELECT to_regclass('schema_migrations') IS NOT NULL")
+        known = {r['name']: r['sha256'] for r in await connection.fetch('SELECT name,sha256 FROM schema_migrations')} if exists else {}
+    finally:
+        await connection.close()
+    applied, pending, modified = [], [], []
+    for path in migration_files(schema_path):
+        digest = hashlib.sha256(path.read_text(encoding='utf-8').encode()).hexdigest()
+        if path.name not in known:
+            pending.append(path.name)
+        elif known[path.name] != digest:
+            modified.append(path.name)
+        else:
+            applied.append(path.name)
+    return {'status': 'failed' if modified else 'pending' if pending else 'ok', 'applied': len(applied), 'pending': pending, 'modified': modified}
+
+
 async def apply_schema(settings: Settings, schema_path: Path | None = None) -> None:
     """Применить все ещё не применённые миграции под общей блокировкой. Каждая миграция выполняется в своей транзакции, её SHA-256 записывается в `schema_migrations`; если уже применённый файл изменён — выбрасывается ошибка."""
     import asyncpg

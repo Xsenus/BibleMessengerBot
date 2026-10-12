@@ -310,9 +310,9 @@ async def test_invalid_edition_never_falls_back_to_russian():
 
 @pytest.mark.asyncio
 async def test_search_escapes_like_wildcards():
-    connection=SimpleNamespace(fetch=AsyncMock(return_value=[]))
+    connection=SimpleNamespace(fetch=AsyncMock(return_value=[]),fetchval=AsyncMock(return_value='ru'))
     await bible.search_verses(connection,123,'10%_'+chr(92),5)
-    assert connection.fetch.await_args.args[2]==r'%10\%\_\\%'
+    assert connection.fetch.await_args_list[0].args[2]==r'%10\%\_\\%'      # подстрока экранируется; затем поиск по словам с обычным запросом
 
 
 def test_all_literal_sql_parameter_counts_match_call_arguments():
