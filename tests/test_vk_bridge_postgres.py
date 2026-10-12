@@ -238,3 +238,30 @@ async def test_unknown_or_forged_callbacks_are_answered_not_executed(vk):
             from app.services.errors import UserError
             assert isinstance(error, UserError)
     assert await c.fetchval("SELECT count(*) FROM delivery_log WHERE mode='broadcast'") == 0
+
+
+async def test_vk_owner_gets_admin_menu_and_broadcast_reaches_vk_and_telegram(vk):
+    from app.services import fanout
+    from tests.test_postgres_integration import create_destination
+    c, dispatcher, transports, sent = vk
+    start = message('/start', 80)
+    await dispatcher.dispatch(start, parse_event(start)[0])
+    await drain(c, transports)
+    user = await c.fetchval("SELECT telegram_user_id FROM telegram_users WHERE platform='vk'")
+    await c.execute('UPDATE telegram_users SET is_owner=true WHERE telegram_user_id=$1', user)
+    before = len(sent)
+    admin = message('/admin', 81)
+    await dispatcher.dispatch(admin, parse_event(admin)[0])
+    await drain(c, transports)
+    assert len(sent) > before and 'keyboard' in sent[-1]                      # меню администратора с кнопками
+    other = await create_destination(c, 909)                                  # второй получатель — Telegram
+    counts = await fanout.enqueue(c, key='test:b', text='Всем!', mode='announcement', audience={})
+    assert counts['recipients'] >= 2 and counts['queued'] >= 2
+    platforms = {r['platform'] for r in await c.fetch(
+        "SELECT ch.platform FROM delivery_log d JOIN telegram_chats ch ON ch.telegram_chat_id=d.telegram_chat_id WHERE d.payload_key='test:b'")}
+    assert {'vk', 'telegram'} <= platforms and other
+    vk_rows = await c.fetch("SELECT id FROM delivery_log d JOIN telegram_chats ch USING(telegram_chat_id) WHERE d.payload_key='test:b' AND ch.platform='vk'")
+    before = len(sent)
+    for row in vk_rows:
+        assert await __import__('app.worker.delivery', fromlist=['x']).process_delivery(c, row['id'], transports.sender(c)) == 'sent'
+    assert len(sent) == before + len(vk_rows) and 'Всем!' in sent[-1]['message']
