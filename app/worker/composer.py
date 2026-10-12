@@ -7,6 +7,7 @@ from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
 from app.net import store as net_store
 from app.services import announcements, prayers
+from app.services import loops as loops_module
 from app.services.locks import lock_key
 
 LOGGER=logging.getLogger(__name__)
@@ -21,12 +22,9 @@ async def heartbeat(pool):
 
 
 async def run_video_watch(connection):
-    """Опросить видеоканалы, срок которых наступил; сбой слежения не должен останавливать подготовку молитв и объявления."""
-    try:
-        from app.services import video_watch
-        await video_watch.run_due(connection)
-    except Exception as error:
-        LOGGER.error('Video watch failed (%s)', type(error).__name__)
+    """Опросить видеоканалы, срок которых наступил (сбой фиксируется в статистике цикла и не останавливает остальные циклы)."""
+    from app.services import video_watch
+    await video_watch.run_due(connection)
 
 
 async def worker():
@@ -43,17 +41,16 @@ async def worker():
                 raise RuntimeError('Another prayer composer is running')
             beat=asyncio.create_task(heartbeat(pool))
             netloop=asyncio.create_task(net_store.refresh_loop(pool))
-            while True:
-                async with pool.acquire() as connection:
-                    # Каждый шаг изолирован: сбой объявлений не останавливает молитвы и наоборот.
-                    for step in (prayers.prepare_due, announcements.run_due, run_video_watch):
-                        try:
-                            await step(connection)
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception as error:
-                            LOGGER.error('Composer step %s failed (%s)', getattr(step, '__name__', 'step'), type(error).__name__)
-                await asyncio.sleep(10)
+            # Независимые циклы: медленный опрос видео не задерживает объявления и молитвы; итоги проходов пишутся в loop_stats.
+            loops = [asyncio.create_task(loops_module.run_forever(pool, name, step, interval))
+                     for name, step, interval in (('prayers', prayers.prepare_due, 10), ('announcements', announcements.run_due, 10),
+                                                  ('videos', run_video_watch, 30))]
+            try:
+                await asyncio.gather(*loops)
+            finally:
+                for task in loops:
+                    task.cancel()
+                await asyncio.gather(*loops, return_exceptions=True)
     finally:
         for task in (beat, netloop):
             if task:

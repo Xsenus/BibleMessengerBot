@@ -72,6 +72,11 @@ async def collect(connection: Any, monthly_budget_usd: Decimal | float = 10) -> 
             WHERE day>(now() AT TIME ZONE 'UTC')::date-7 GROUP BY platform,event ORDER BY n DESC LIMIT 30"""):
         out.add('bible_usage_events_7d', 'Anonymous feature usage during the last 7 days', row['n'],
                 {'platform': row['platform'], 'event': row['event']})
+    for row in await connection.fetch("SELECT name,runs,errors,last_duration_ms,EXTRACT(EPOCH FROM now()-COALESCE(last_ok_at,'epoch'))::double precision AS age FROM loop_stats"):
+        label = {'loop': row['name']}
+        out.add('bible_loop_duration_ms', 'Duration of the last pass of a service loop', row['last_duration_ms'], label)
+        out.add('bible_loop_errors_total', 'Failed passes of a service loop since start of statistics', row['errors'], label)
+        out.add('bible_loop_last_ok_age_seconds', 'Seconds since a service loop last finished without error', row['age'], label)
     out.add('bible_announcements_active', 'Active scheduled announcements',
             await connection.fetchval("SELECT count(*) FROM announcements WHERE status='active'"))
     out.add('bible_announcements_overdue', 'Active announcements whose next run is more than 15 minutes late',

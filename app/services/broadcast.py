@@ -160,12 +160,18 @@ async def send(connection: Any, draft_id: int, actor_id: int, max_length: int = 
     refs = json.loads(draft['refs']) if isinstance(draft['refs'], str) else draft['refs']
     targets = await recipients(connection)
     queued = skipped = 0
+    rendered: dict[tuple[int, str], Any] = {}        # (издание, язык интерфейса) → готовый текст: один раз на все чаты с тем же изданием
     for target in targets:
         try:
             async with chat_lock(connection, target['telegram_chat_id']), connection.transaction():
                 chat = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1', target['telegram_chat_id'])
                 edition = await bible.chat_translation(connection, target['telegram_chat_id'])
-                text = await render_for(connection, edition, refs, chat['ui_language'], draft['image_id']) if edition and chat['is_active'] else None
+                text = None
+                if edition and chat['is_active']:
+                    cache_key = (edition['id'], chat['ui_language'])
+                    if cache_key not in rendered:
+                        rendered[cache_key] = await render_for(connection, edition, refs, chat['ui_language'], draft['image_id'])
+                    text = rendered[cache_key]
                 if text is None:
                     skipped += 1
                     continue

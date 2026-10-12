@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -79,29 +80,62 @@ def chunks_for(platform: str, text: str, asset_id: int | None, max_length: int =
     return [dict(kind='asset_photo', asset_id=asset_id, caption=''), *platform_parts(platform, text, max_length)]
 
 
+BATCH = 500
+
+
+async def _enqueue_one(connection: Any, target: Any, text: str, key: str, mode: str, progress: dict, asset_id: int | None,
+                       max_length: int) -> bool:
+    """Запасной путь для одного чата (с блокировкой и повторной проверкой): используется, когда пакетная вставка не удалась."""
+    from app.worker.delivery import insert_payload
+    async with chat_lock(connection, target['telegram_chat_id']), connection.transaction():
+        chat = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1', target['telegram_chat_id'])
+        if not chat or not chat['is_active']:
+            return False
+        await insert_payload(connection, chat, {'id': None}, text, key, mode, dict(progress, kind=mode),
+                             frozen_chunks=chunks_for(chat['platform'], text, asset_id, max_length))
+        return True
+
+
 async def enqueue(connection: Any, *, key: str, text: str, mode: str, audience: dict | None = None,
                   asset_id: int | None = None, progress: dict | None = None, max_length: int = 3900,
                   exclude: tuple = ()) -> dict[str, int]:
-    """Поставить сообщение в очередь доставки каждому назначению аудитории. Возвращает {recipients, queued, skipped}.
+    """Поставить сообщение в очередь доставки каждому назначению аудитории. Возвращает {recipients, queued, skipped, failed}.
 
-    `key` уникален для рассылки: заданию каждого чата присваивается ключ `key`, повторная постановка безопасна.
+    `key` уникален для рассылки: заданию каждого чата присваивается ключ `key`, повторная постановка безопасна
+    (`UNIQUE(чат, ключ)`). Части сообщения считаются один раз на платформу, а запись идёт пакетами по 500 чатов одной
+    вставкой — это в десятки раз быстрее, чем по одному чату с блокировкой. Если пакет не прошёл, его чаты ставятся по одному.
     """
-    from app.worker.delivery import insert_payload
     targets = await recipients(connection, audience, exclude)
+    progress_json = json.dumps(dict(progress or {}, kind=mode))
+    parts: dict[str, str] = {}                                    # платформа → JSON частей (одинаковый для всех её чатов)
     queued = skipped = failed = 0
-    for target in targets:
+    for start in range(0, len(targets), BATCH):
+        batch = targets[start:start + BATCH]
+        for target in batch:
+            if target['platform'] not in parts:
+                parts[target['platform']] = json.dumps(chunks_for(target['platform'], text, asset_id, max_length), ensure_ascii=False)
         try:
-            async with chat_lock(connection, target['telegram_chat_id']), connection.transaction():
-                chat = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1', target['telegram_chat_id'])
-                if not chat or not chat['is_active']:
-                    skipped += 1
-                    continue
-                parts = chunks_for(chat['platform'], text, asset_id, max_length)
-                await insert_payload(connection, chat, {'id': None}, text, key, mode,
-                                     dict(progress or {}, kind=mode), frozen_chunks=parts)
-                queued += 1
+            async with connection.transaction():
+                await connection.execute(
+                    '''INSERT INTO delivery_log(telegram_chat_id,mode,payload_key,scheduled_for,status,payload_preview,chunks,progress,
+                           chat_revision,ui_language,message_thread_id)
+                       SELECT t.chat_id,$2,$3,now(),'pending',$4,t.chunks::jsonb,$5::jsonb,t.revision,t.ui_language,t.thread
+                       FROM unnest($1::bigint[],$6::text[],$7::int[],$8::text[],$9::bigint[]) AS t(chat_id,chunks,revision,ui_language,thread)
+                       ON CONFLICT(telegram_chat_id,payload_key) DO NOTHING''',
+                    [t['telegram_chat_id'] for t in batch], mode, key, text[:1000], progress_json,
+                    [parts[t['platform']] for t in batch], [t['revision'] for t in batch], [t['ui_language'] for t in batch],
+                    [t['message_thread_id'] for t in batch])
+            queued += len(batch)
         except Exception as error:
-            skipped += 1
-            failed += 1
-            LOGGER.warning('Fan-out %s skipped one destination (%s)', key, type(error).__name__)
+            LOGGER.warning('Fan-out %s batch failed (%s); falling back to one-by-one', key, type(error).__name__)
+            for target in batch:
+                try:
+                    if await _enqueue_one(connection, target, text, key, mode, progress or {}, asset_id, max_length):
+                        queued += 1
+                    else:
+                        skipped += 1
+                except Exception as inner:
+                    skipped += 1
+                    failed += 1
+                    LOGGER.warning('Fan-out %s skipped one destination (%s)', key, type(inner).__name__)
     return {'recipients': len(targets), 'queued': queued, 'skipped': skipped, 'failed': failed}

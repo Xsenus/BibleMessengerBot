@@ -27,6 +27,10 @@ def evaluate(samples: dict[str, float], *, budget_warn: float = 0.8, stale_deliv
         name, _, label = key.partition('|')
         if name == 'bible_service_heartbeat_age_seconds' and value > heartbeat_stale:
             alerts[f'heartbeat:{label}'] = f'Служба {label} не отвечает {int(value // 60)} мин.'
+        elif name == 'bible_loop_last_ok_age_seconds' and value > 300:
+            alerts[f'loop:{label}'] = f'Цикл {label} не завершался без ошибок {int(value // 60)} мин.'
+        elif name == 'bible_loop_duration_ms' and value > 120_000:
+            alerts[f'loopslow:{label}'] = f'Цикл {label} выполняется слишком долго: {int(value / 1000)} с.'
         elif name == 'bible_backup_age_seconds' and value > backup_stale:
             alerts[f'backup:{label}'] = f'Последняя проверенная копия ({label}) старше {int(value // 3600)} ч.'
         elif name == 'bible_image_provider_blocked' and value >= 1:
