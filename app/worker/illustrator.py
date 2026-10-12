@@ -43,6 +43,8 @@ async def worker():
     art = artwork.ArtSettings.from_env()
     if art.provider == 'openai':
         art = replace(art, provider_order=('openai',))
+    elif art.provider == 'manual':
+        art = replace(art, provider_order=())       # ручной режим: платные ключи не используются, работают только провайдеры из панели
     cloud = cloud_backup.CloudSettings.from_env()
     await wait_for_database(settings)
     pool = await create_pool(settings)
@@ -56,8 +58,7 @@ async def worker():
             ):
                 raise RuntimeError("Another illustrator is running")
             await image_router.recover(owner)
-            if art.provider in {'auto', 'openai'}:
-                await image_router.configure(owner, art)
+            await image_router.configure(owner, art)
             beat = asyncio.create_task(heartbeat(pool))
             copies = asyncio.create_task(mirror(pool, cloud))
             while True:
@@ -65,7 +66,8 @@ async def worker():
                     await artwork.upgrade_queued_prompts(c)
                     await artwork.plan_ahead(c)
                     await artwork.dispatch_requests(c)
-                    if art.provider in {'auto', 'openai'}:
+                    await image_router.load_custom(c)               # провайдеры из панели подхватываются без перезапуска
+                    if art.provider in {'auto', 'openai'} or image_router.has_custom():
                         jobs = await artwork.due_jobs(c, max_attempts=image_router.attempt_limit(art))
                         for job in jobs:
                             outcome = await image_router.process_job(c, job['id'], art)

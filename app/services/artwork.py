@@ -33,6 +33,7 @@ class ArtSettings:
     openai_keys: tuple = field(default=(), repr=False)
     openai_daily_scope: str = 'provider'
     provider_order: tuple = ('openai', 'gemini', 'bfl', 'ideogram', 'stability')
+    skip_custom: bool = False  # Временно не использовать провайдеров из панели (например, если не удалось описать сцену).
 
     @classmethod
     def from_env(cls):

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+
 import httpx
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -13,15 +15,50 @@ from app.services import image_providers as api
 from app.services.locks import lock_key
 
 
+LOGGER = logging.getLogger(__name__)
+_CUSTOM: list = []          # провайдеры из панели; обновляются из БД перед каждым заданием
+PAID_RANK_BASE = 1000       # платные встроенные провайдеры идут после тех, у кого приоритет в панели меньше 1000
+
+
+async def load_custom(connection):
+    """Прочитать включённые провайдеры из панели (ключи расшифровываются); провайдер с нечитаемым ключом пропускается с записью в журнал."""
+    from app.services import secrets_box
+    rows = await connection.fetch("SELECT * FROM image_custom_providers WHERE is_enabled ORDER BY priority,id")
+    loaded = []
+    for row in rows:
+        try:
+            key = secrets_box.decrypt(row['api_key_enc'])
+        except (ValueError, RuntimeError):
+            LOGGER.error('Image provider %s skipped: secret cannot be decrypted', row['slug'])
+            continue
+        spec = dict(row, api_key=key, extra=json.loads(row['extra']) if isinstance(row['extra'], str) else row['extra'])
+        loaded.append(api.Provider('x-' + row['slug'], key or 'keyless:' + row['slug'], custom=spec))
+    _CUSTOM[:] = loaded
+    return loaded
+
+
+def has_custom():
+    """Есть ли включённые провайдеры из панели."""
+    return bool(_CUSTOM)
+
+
+def rank(settings, provider):
+    """Порядок выбора: провайдеры из панели по своему приоритету, встроенные — после PAID_RANK_BASE в заданном порядке."""
+    if provider.custom is not None:
+        return provider.custom['priority']
+    return PAID_RANK_BASE + settings.provider_order.index(provider.name)
+
+
 def providers(settings):
     """Список настроенных провайдеров в порядке приоритета (для OpenAI — по каждому ключу); провайдеры без ключа пропускаются."""
     from app.services.openai_credentials import image_keys
     keys = {"openai": settings.key, **settings.extra_keys}
-    return [
+    builtin = [
         api.Provider(name, key) for name in settings.provider_order
         for key in (image_keys(settings.key, settings.openai_keys) if name == 'openai' else (keys.get(name, ''),))
         if key
     ]
+    return builtin + ([] if settings.skip_custom else list(_CUSTOM))
 
 
 def attempt_limit(settings):
@@ -36,6 +73,7 @@ def fingerprint(provider):
 
 async def configure(connection, settings):
     """Завести состояние здоровья для новых ключей (существующие блокировки и история сохраняются) и вернуть в очередь задания, остановленные из-за авторизации или квоты, если появился другой провайдер."""
+    await load_custom(connection)
     for provider in providers(settings):
         await connection.execute(
             """INSERT INTO image_provider_health(provider,key_fingerprint)
@@ -92,7 +130,8 @@ async def reserve(connection, job_id, settings):
             identifier = (provider.name, fingerprint(provider))
             daily_count = (credential_used.get(identifier, 0) + credential_used.get(('openai', None), 0) if provider.name == 'openai'
                            and settings.openai_daily_scope == 'key' else daily_used.get(provider.name, 0))
-            if daily_count >= settings.daily_requests:
+            limit = provider.custom['daily_limit'] if provider.custom is not None else settings.daily_requests
+            if daily_count >= limit:
                 daily_exhausted = True
                 continue
             state = health.get(identifier)
@@ -106,8 +145,7 @@ async def reserve(connection, job_id, settings):
                 continue
             candidates.append(provider)
         # Preserve provider order, balancing usage only between keys of the same service.
-        candidates.sort(key=lambda p: (settings.provider_order.index(p.name),
-                                      credential_used.get((p.name, fingerprint(p)), 0)))
+        candidates.sort(key=lambda p: (rank(settings, p), credential_used.get((p.name, fingerprint(p)), 0)))
         if not candidates:
             if daily_exhausted:
                 # Keep the job eligible for the next UTC day; another provider
@@ -202,6 +240,7 @@ async def recover(connection):
 
 async def process_job(connection, job_id, settings, *, generator=None):
     """Обработать одно задание картинки: проверить, что текст стиха не изменился, при необходимости получить описание сцены у локальной модели (для Stability), зарезервировать провайдера или продолжить опрос принятой задачи, сгенерировать, проверить OCR-фильтром на надписи и сохранить картинку; при любом неясном сбое сохранения платный запрос не повторяется. Возвращает короткий код результата."""
+    await load_custom(connection)
     job = await connection.fetchrow(
         """SELECT j.*,i.translation_id,i.book_code,i.chapter,i.verse,
         i.text_sha256,i.artwork_scope,i.status AS image_status FROM image_generation_jobs j
@@ -231,7 +270,8 @@ async def process_job(connection, job_id, settings, *, generator=None):
     )
     resume = None
     scene = None
-    if not generator and not pending and any(p.name == 'stability' for p in providers(settings)):
+    needs_scene = lambda p: p.name == 'stability' or p.custom is not None  # noqa: E731
+    if not generator and not pending and any(needs_scene(p) for p in providers(settings)):
         try:
             stored_usage=json.loads(job['usage']) if isinstance(job['usage'],str) else job['usage'] or {}
             scene=stored_usage.get('scene_description')
@@ -240,7 +280,8 @@ async def process_job(connection, job_id, settings, *, generator=None):
                 await connection.execute("UPDATE image_generation_jobs SET usage=$2::jsonb WHERE id=$1",job_id,json.dumps(dict(stored_usage,scene_description=scene)))
         except (ValueError, KeyError, IndexError, TypeError, httpx.HTTPError, TimeoutError):
             # No paid reservation when the free planner cannot prepare a scene.
-            settings = replace(settings, provider_order=tuple(p for p in settings.provider_order if p != 'stability'))
+            settings = replace(settings, skip_custom=True,
+                               provider_order=tuple(p for p in settings.provider_order if p != 'stability'))
     if pending:
         provider = next((p for p in providers(settings) if p.name == pending["provider"]
                          and fingerprint(p) == pending['key_fingerprint']), None)
@@ -275,17 +316,20 @@ async def process_job(connection, job_id, settings, *, generator=None):
     try:
         if generator:
             data, usage, request_id = await generator(
-                provider, scene if provider.name == 'stability' and scene else job["prompt"], accepted=accepted, resume=resume
+                provider, scene if needs_scene(provider) and scene else job["prompt"], accepted=accepted, resume=resume
             )
         elif provider.name == "openai":
             data, usage, request_id = await artwork.generate(
                 replace(settings, key=provider.key), job["prompt"]
             )
+        elif provider.custom is not None:
+            from app.services import free_image_providers
+            data, usage, request_id = await free_image_providers.generate(provider.custom, scene or job["prompt"][:1500])
         else:
             data, usage, request_id = await api.generate(
-                provider, scene if provider.name == 'stability' and scene else job["prompt"], accepted=accepted, resume=resume
+                provider, scene if needs_scene(provider) and scene else job["prompt"], accepted=accepted, resume=resume
             )
-        if provider.name == 'stability' and scene:
+        if needs_scene(provider) and scene:
             usage=dict(usage,scene_description=scene)
         # The source may have changed while waiting for the external API.
         current = await illustrations.source_row(connection, job)
