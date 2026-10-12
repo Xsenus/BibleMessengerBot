@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api.js';
-import { Status, useAction, useData, when } from '../ui.jsx';
+import { AudienceEditor, Status, describeAudience, useAction, useData, when } from '../ui.jsx';
 
 const KINDS = { once: 'Один раз', daily: 'Каждый день', weekly: 'По дням недели', monthly: 'Раз в месяц', interval: 'Через интервал' };
 const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
@@ -56,7 +56,21 @@ function Form({ onCreated }) {
   );
 }
 
+function Editor({ item, onSave, busy }) {
+  const [draft, setDraft] = useState({ title: item.title, body: item.body, audience: item.audience || {} });
+  return (
+    <div>
+      <input value={draft.title} maxLength={200} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Заголовок" />
+      <textarea rows={4} maxLength={3500} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
+      <AudienceEditor value={draft.audience} onChange={(audience) => setDraft({ ...draft, audience })} />
+      {item.asset_id && <button className="small" disabled={busy} onClick={() => onSave({ clear_asset: true })}>Убрать картинку</button>}
+      <button disabled={busy || !draft.body.trim()} onClick={() => onSave(draft)}>Сохранить</button>
+    </div>
+  );
+}
+
 export default function Announcements() {
+  const [open, setOpen] = useState(null);
   const { data, error, loading, reload } = useData('/announcements');
   const { run, message, busy } = useAction(reload);
   const status = (id, value) => run(() => api(`/announcements/${id}/status`, { method: 'POST', body: { status: value } }));
@@ -68,19 +82,21 @@ export default function Announcements() {
       <table>
         <thead><tr><th>Объявление</th><th>Расписание</th><th>Следующий запуск</th><th></th></tr></thead>
         <tbody>
-          {(data || []).map((a) => (
+          {(data || []).flatMap((a) => [
             <tr key={a.id}>
               <td><b>{a.title || `#${a.id}`}</b><br /><small className="pre">{a.body.slice(0, 120)}</small></td>
               <td>{KINDS[a.kind]}{a.send_time ? ` ${a.send_time.slice(0, 5)}` : ''}<br /><small>{a.status} · запусков {a.runs_done}{a.max_runs ? `/${a.max_runs}` : ''}</small></td>
-              <td>{when(a.next_run_at)}</td>
+              <td>{when(a.next_run_at)}<br /><small className="muted">{describeAudience(a.audience)}</small></td>
               <td className="actions">
+                {['active', 'paused'].includes(a.status) && <button className="small" onClick={() => setOpen(open === a.id ? null : a.id)}>Править</button>}
                 <button className="small" disabled={busy} onClick={() => confirm('Отправить сейчас всем?') && run(() => api(`/announcements/${a.id}/run`, { method: 'POST' }), 'Отправлено')}>Сейчас</button>
                 {a.status === 'active' && <button className="small" disabled={busy} onClick={() => status(a.id, 'paused')}>Пауза</button>}
                 {a.status === 'paused' && <button className="small" disabled={busy} onClick={() => status(a.id, 'active')}>Возобновить</button>}
                 {['active', 'paused'].includes(a.status) && <button className="small danger" disabled={busy} onClick={() => confirm('Отменить?') && status(a.id, 'cancelled')}>Отмена</button>}
               </td>
-            </tr>
-          ))}
+            </tr>,
+            open === a.id && <tr key={`e${a.id}`}><td colSpan="4"><Editor item={a} busy={busy} onSave={async (draft) => { if (await run(() => api(`/announcements/${a.id}`, { method: 'PATCH', body: draft }))) setOpen(null); }} /></td></tr>,
+          ])}
         </tbody>
       </table>
       {message && <p className="muted">{message}</p>}

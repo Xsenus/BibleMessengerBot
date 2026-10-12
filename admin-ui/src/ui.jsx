@@ -38,3 +38,33 @@ export function useAction(after) {
 export const Status = ({ error, loading }) => (error ? <p className="error">{error}</p> : loading ? <p className="muted">Загрузка…</p> : null);
 export const Badge = ({ on, yes = 'вкл', no = 'выкл' }) => <span className={`badge ${on ? 'ok' : 'off'}`}>{on ? yes : no}</span>;
 export const when = (value) => (value ? new Date(value).toLocaleString('ru-RU') : '—');
+
+export const PLATFORMS = [['telegram', 'Telegram'], ['max', 'MAX'], ['vk', 'ВКонтакте']];
+export const CHAT_TYPES = [['private', 'личные'], ['group', 'группы'], ['channel', 'каналы']];
+
+const toggleIn = (list, value) => (list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
+
+/** Выбор аудитории: пусто = все. */
+export function AudienceEditor({ value, onChange }) {
+  const audience = { platforms: [], chat_types: [], ...(value || {}) };
+  return (
+    <div className="row">
+      <span className="muted">Кому (пусто — всем):</span>
+      {PLATFORMS.map(([id, label]) => (
+        <label key={id}><input type="checkbox" checked={audience.platforms.includes(id)}
+          onChange={() => onChange({ ...audience, platforms: toggleIn(audience.platforms, id) })} /> {label}</label>
+      ))}
+      <span className="muted">·</span>
+      {CHAT_TYPES.map(([id, label]) => (
+        <label key={id}><input type="checkbox" checked={audience.chat_types.includes(id)}
+          onChange={() => onChange({ ...audience, chat_types: toggleIn(audience.chat_types, id) })} /> {label}</label>
+      ))}
+    </div>
+  );
+}
+
+export const describeAudience = (a) => {
+  const platforms = (a?.platforms || []).join(', ') || 'все платформы';
+  const types = (a?.chat_types || []).join(', ') || 'все чаты';
+  return `${platforms} · ${types}`;
+};

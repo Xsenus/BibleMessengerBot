@@ -6,10 +6,16 @@ import Announcements from './pages/Announcements.jsx';
 import Sources from './pages/Sources.jsx';
 import Videos from './pages/Videos.jsx';
 import Admins from './pages/Admins.jsx';
+import ImageProviders from './pages/ImageProviders.jsx';
+import Chats from './pages/Chats.jsx';
+import Deliveries from './pages/Deliveries.jsx';
+import Settings from './pages/Settings.jsx';
 
 const PAGES = [
   ['overview', 'Состояние', Overview], ['announcements', 'Объявления', Announcements],
-  ['sources', 'Источники', Sources], ['videos', 'Видео', Videos], ['admins', 'Администраторы', Admins],
+  ['sources', 'Источники', Sources], ['videos', 'Видео', Videos], ['images', 'Генераторы картинок', ImageProviders],
+  ['chats', 'Чаты и пользователи', Chats], ['deliveries', 'Доставки', Deliveries], ['admins', 'Администраторы', Admins],
+  ['settings', 'Настройки', Settings],
 ];
 
 function Login({ onDone }) {

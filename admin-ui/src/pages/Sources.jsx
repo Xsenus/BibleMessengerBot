@@ -1,5 +1,6 @@
 import { api } from '../api.js';
-import { Badge, Status, useAction, useData, when } from '../ui.jsx';
+import { useState } from 'react';
+import { AudienceEditor, Badge, Status, describeAudience, useAction, useData, when } from '../ui.jsx';
 
 const MODES = { capture: 'только сохранять', approve: 'с подтверждением', auto: 'отправлять сразу' };
 
@@ -24,7 +25,20 @@ function Posts() {
   );
 }
 
+function Editor({ source, onSave, busy }) {
+  const [draft, setDraft] = useState({ prefix: source.prefix || '', min_length: source.min_length, audience: source.audience || {} });
+  return (
+    <div className="row">
+      <input value={draft.prefix} maxLength={200} onChange={(e) => setDraft({ ...draft, prefix: e.target.value })} placeholder="Приставка перед текстом копии" />
+      <label>Мин. длина <input type="number" min="1" value={draft.min_length} onChange={(e) => setDraft({ ...draft, min_length: Number(e.target.value) })} /></label>
+      <AudienceEditor value={draft.audience} onChange={(audience) => setDraft({ ...draft, audience })} />
+      <button disabled={busy} onClick={() => onSave(draft)}>Сохранить</button>
+    </div>
+  );
+}
+
 export default function Sources() {
+  const [open, setOpen] = useState(null);
   const { data, error, loading, reload } = useData('/sources');
   const { run, message, busy } = useAction(reload);
   const patch = (id, body) => run(() => api(`/sources/${id}`, { method: 'PATCH', body }));
@@ -36,15 +50,17 @@ export default function Sources() {
       <table>
         <thead><tr><th>Источник</th><th>Платформа</th><th>Режим</th><th>Состояние</th></tr></thead>
         <tbody>
-          {(data || []).map((s) => (
+          {(data || []).flatMap((s) => [
             <tr key={s.id}>
               <td>{s.title || s.external_id}</td><td>{s.platform}</td>
               <td><select value={s.mode} disabled={busy} onChange={(e) => patch(s.id, { mode: e.target.value })}>
                 {Object.entries(MODES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select></td>
-              <td><button className="small" disabled={busy} onClick={() => patch(s.id, { is_enabled: !s.is_enabled })}><Badge on={s.is_enabled} /></button></td>
-            </tr>
-          ))}
+              <td><button className="small" disabled={busy} onClick={() => patch(s.id, { is_enabled: !s.is_enabled })}><Badge on={s.is_enabled} /></button>{' '}
+                <button className="small" onClick={() => setOpen(open === s.id ? null : s.id)}>Настроить</button><br /><small className="muted">{describeAudience(s.audience)}</small></td>
+            </tr>,
+            open === s.id && <tr key={`e${s.id}`}><td colSpan="4"><Editor source={s} busy={busy} onSave={async (draft) => { if (await patch(s.id, draft)) setOpen(null); }} /></td></tr>,
+          ])}
         </tbody>
       </table>
       {message && <p className="muted">{message}</p>}
