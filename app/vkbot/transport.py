@@ -29,6 +29,7 @@ def image_upload(data: bytes, mime: str) -> tuple[bytes, str, str]:
 
 
 LOGGER = logging.getLogger(__name__)
+VOICE_MAX_BYTES = 8 * 1024 * 1024        # ≈ 30 минут при 32 кбит/с; длиннее — отправляется файлом
 
 
 async def to_voice(mp3: bytes) -> bytes:
@@ -66,9 +67,11 @@ class VkSender:
             if kind == 'voice':
                 try:
                     voice = await to_voice(bytes(asset['audio_data']))
+                    if len(voice) > VOICE_MAX_BYTES:            # очень длинная озвучка: голосовое сообщение слишком большое
+                        raise RuntimeError('voice_too_long')
                     attachment = await self.client.upload('voice', peer_id, voice, f'reading-{identifier}.ogg', 'audio/ogg')
-                except (RuntimeError, OSError, TimeoutError):
-                    # ffmpeg недоступен или файл не преобразуется: безопасный запасной вариант — обычный файл MP3.
+                except (RuntimeError, OSError, TimeoutError, VkAPIError):
+                    # ffmpeg недоступен, файл не преобразуется или слишком длинный/отклонён: запасной вариант — обычный файл MP3.
                     attachment = await self.client.upload('doc', peer_id, bytes(asset['audio_data']), f'reading-{identifier}.mp3', 'audio/mpeg')
             else:
                 data, suffix, mime = image_upload(bytes(asset['image_data']), asset['mime_type'])

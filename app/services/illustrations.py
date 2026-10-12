@@ -225,7 +225,7 @@ async def recent(connection, row, translation):
     key = identity(row, translation)
     return await connection.fetchval(
         """SELECT id FROM verse_illustrations WHERE translation_id=$1 AND book_code=$2
-        AND chapter=$3 AND verse=$4 AND text_sha256=$5 AND status='ready'
+        AND chapter=$3 AND verse=$4 AND text_sha256=$5 AND status='ready' AND quarantined_at IS NULL
         AND generated_at > now()-interval '3 months'
         ORDER BY generated_at DESC,id DESC LIMIT 1""",
         key[0],
@@ -246,8 +246,8 @@ async def lookup_or_queue(
             """SELECT i.id FROM verse_illustrations i
             LEFT JOIN illustration_views h ON h.image_id=i.id AND h.telegram_chat_id=$6
             WHERE i.translation_id=$1 AND i.book_code=$2 AND i.chapter=$3 AND i.verse=$4
-            AND i.text_sha256=$5 AND i.status='ready'
-            ORDER BY (h.image_id IS NULL) DESC,h.last_sent_at ASC NULLS FIRST,h.send_count ASC NULLS FIRST,
+            AND i.text_sha256=$5 AND i.status='ready' AND i.quarantined_at IS NULL
+            ORDER BY i.pinned DESC,(h.image_id IS NULL) DESC,h.last_sent_at ASC NULLS FIRST,h.send_count ASC NULLS FIRST,
             i.generated_at DESC,i.id DESC LIMIT 1""",
             key[0],
             key[1],
@@ -408,3 +408,27 @@ def prompt_for(row: Any, edition_title: str) -> str:
     from app.services.artwork import prompt
 
     return prompt(row, {"title": edition_title}, slot="on_demand", variant="symbolic")
+
+
+async def set_pinned(connection: Any, image_id: int, pinned: bool) -> bool:
+    """Закрепить версию картинки: она показывается первой; закрепление снимается с остальных версий того же текста."""
+    async with connection.transaction():
+        row = await connection.fetchrow("SELECT * FROM verse_illustrations WHERE id=$1 AND status='ready'", image_id)
+        if not row:
+            return False
+        if pinned:
+            await connection.execute(
+                """UPDATE verse_illustrations SET pinned=false WHERE translation_id=$1 AND book_code=$2 AND chapter=$3
+                   AND verse=$4 AND text_sha256=$5 AND id<>$6""",
+                row['translation_id'], row['book_code'], row['chapter'], row['verse'], row['text_sha256'], image_id)
+        await connection.execute('UPDATE verse_illustrations SET pinned=$2,quarantined_at=CASE WHEN $2 THEN NULL ELSE quarantined_at END WHERE id=$1',
+                                 image_id, pinned)
+    return True
+
+
+async def set_quarantine(connection: Any, image_id: int, quarantined: bool) -> bool:
+    """Скрыть версию картинки от показа (или вернуть); скрытая версия не закрепляется."""
+    result = await connection.execute(
+        """UPDATE verse_illustrations SET quarantined_at=CASE WHEN $2 THEN now() ELSE NULL END,
+           pinned=pinned AND NOT $2 WHERE id=$1 AND status='ready'""", image_id, quarantined)
+    return result.endswith('1')

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import logging
 
 import httpx
@@ -23,6 +24,7 @@ PAID_RANK_BASE = 1000       # платные встроенные провайд
 async def load_custom(connection):
     """Прочитать включённые провайдеры из панели (ключи расшифровываются); провайдер с нечитаемым ключом пропускается с записью в журнал."""
     from app.services import secrets_box
+    await load_ranking(connection)
     rows = await connection.fetch("SELECT * FROM image_custom_providers WHERE is_enabled ORDER BY priority,id")
     loaded = []
     for row in rows:
@@ -37,6 +39,40 @@ async def load_custom(connection):
     return loaded
 
 
+RANKING: dict = {'mode': 'priority', 'scores': {}, 'style': '', 'loaded_at': 0.0}
+STATS_TTL = 60.0
+
+
+async def provider_stats(connection, days=7):
+    """Показатели провайдеров за `days` суток: попытки, успехи, браки по надписям, среднее время успеха (секунд) и оценка 0..1."""
+    rows = await connection.fetch("""SELECT provider,count(*) AS attempts,
+        count(*) FILTER (WHERE state='succeeded') AS ok,
+        count(*) FILTER (WHERE error_code='quality_text') AS rejected,
+        avg(duration_ms) FILTER (WHERE state='succeeded') AS avg_ms
+        FROM image_generation_attempts WHERE created_at>now()-make_interval(days=>$1) GROUP BY provider""", days)
+    result = {}
+    for row in rows:
+        attempts, ok, rejected = row['attempts'], row['ok'], row['rejected']
+        rate = (ok + 1) / (attempts + 2)                                    # сглаживание: у нового провайдера оценка близка к 0.5
+        reject_rate = rejected / attempts if attempts else 0.0
+        speed = 1 / (1 + float(row['avg_ms'] or 0) / 60000)
+        result[row['provider']] = dict(attempts=attempts, ok=ok, rejected=rejected, avg_seconds=round(float(row['avg_ms'] or 0) / 1000, 1),
+                                       success_rate=round(ok / attempts, 3) if attempts else None,
+                                       score=round(max(0.0, rate - 0.5 * reject_rate) * (0.7 + 0.3 * speed), 3))
+    return result
+
+
+async def load_ranking(connection):
+    """Режим выбора (`priority` — по числу приоритета, `auto` — по статистике успехов) и оценки провайдеров; обновляется раз в минуту."""
+    if time.monotonic() - RANKING['loaded_at'] < STATS_TTL:
+        return
+    mode = await connection.fetchval("SELECT value FROM app_settings WHERE key='images.ranking'") or 'priority'
+    RANKING['mode'] = mode if mode in {'priority', 'auto'} else 'priority'
+    RANKING['style'] = (await connection.fetchval("SELECT value FROM app_settings WHERE key='images.style'") or '')[:300]
+    RANKING['scores'] = {name: item['score'] for name, item in (await provider_stats(connection)).items()} if RANKING['mode'] == 'auto' else {}
+    RANKING['loaded_at'] = time.monotonic()
+
+
 def has_custom():
     """Есть ли включённые провайдеры из панели."""
     return bool(_CUSTOM)
@@ -45,6 +81,9 @@ def has_custom():
 def rank(settings, provider):
     """Порядок выбора: провайдеры из панели по своему приоритету, встроенные — после PAID_RANK_BASE в заданном порядке."""
     if provider.custom is not None:
+        if RANKING['mode'] == 'auto':
+            # Лучшая статистика — раньше; у провайдера без истории оценка 0.5; приоритет разрешает ничьи.
+            return 500 - RANKING['scores'].get(provider.name, 0.5) * 400 + provider.custom['priority'] / 1_000_000
         return provider.custom['priority']
     return PAID_RANK_BASE + settings.provider_order.index(provider.name)
 
@@ -313,23 +352,25 @@ async def process_job(connection, job_id, settings, *, generator=None):
             url,
         )
 
+    started = time.monotonic()
+    styled = lambda text: f"{text} Art style: {RANKING['style']}." if RANKING['style'] else text  # noqa: E731
     try:
         if generator:
             data, usage, request_id = await generator(
-                provider, scene if needs_scene(provider) and scene else job["prompt"], accepted=accepted, resume=resume
+                provider, styled(scene if needs_scene(provider) and scene else job["prompt"]), accepted=accepted, resume=resume
             )
         elif provider.name == "openai":
             data, usage, request_id = await artwork.generate(
-                replace(settings, key=provider.key), job["prompt"]
+                replace(settings, key=provider.key), styled(job["prompt"])
             )
         elif provider.custom is not None:
             from app.services import free_image_providers
             if not scene:                                   # текст стиха во внешние бесплатные сервисы не отправляется
                 raise api.GenerationError("scene_unavailable", retry=True, retry_after=60)
-            data, usage, request_id = await free_image_providers.generate(provider.custom, scene)
+            data, usage, request_id = await free_image_providers.generate(provider.custom, styled(scene))
         else:
             data, usage, request_id = await api.generate(
-                provider, scene if needs_scene(provider) and scene else job["prompt"], accepted=accepted, resume=resume
+                provider, styled(scene if needs_scene(provider) and scene else job["prompt"]), accepted=accepted, resume=resume
             )
         if needs_scene(provider) and scene:
             usage=dict(usage,scene_description=scene)
@@ -346,7 +387,8 @@ async def process_job(connection, job_id, settings, *, generator=None):
                 job_id,
             )
             return "source_changed"
-        await connection.execute('UPDATE image_generation_attempts SET request_id=$2 WHERE id=$1',attempt,request_id)
+        await connection.execute('UPDATE image_generation_attempts SET request_id=$2,duration_ms=$3 WHERE id=$1',
+                                 attempt, request_id, int((time.monotonic() - started) * 1000))
         verdict = await image_quality.gate(connection, job['image_id'], attempt, data)
         if verdict == 'rejected':
             await fail(connection, job_id, attempt, provider, api.GenerationError('quality_text'), max_attempts=attempt_limit(settings))

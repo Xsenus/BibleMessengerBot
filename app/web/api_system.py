@@ -8,11 +8,11 @@ from collections.abc import Awaitable, Callable
 from io import BytesIO
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from app.services import artwork, features, free_image_providers, secrets_box
+from app.services import artwork, features, illustrations, free_image_providers, image_router, secrets_box
 from app.services.image_providers import MODELS, GenerationError
 from app.worker.delivery import resolve_uncertain
 
@@ -136,6 +136,56 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
         return dict(mode=art.provider, monthly_budget_usd=str(art.monthly_usd), builtin=builtin, custom=custom, jobs=jobs,
                     templates=free_image_providers.TEMPLATES, secrets_ready=_secrets_ready(), secrets_dedicated=bool(os.getenv('SECRETS_KEY', '').strip()),
                     planner_ready=await _planner_ready())
+
+    class ImageTuning(BaseModel):
+        ranking: str | None = Field(None, pattern='^(priority|auto)$')
+        style: str | None = Field(None, max_length=300)
+
+    @router.get('/image-tuning')
+    async def image_tuning(conn: Any = Conn) -> dict:
+        """Режим выбора генератора, общий стиль картинок и статистика генераторов за 7 суток."""
+        values = {r['key']: r['value'] for r in await conn.fetch("SELECT key,value FROM app_settings WHERE key IN ('images.ranking','images.style')")}
+        return dict(ranking=values.get('images.ranking', 'priority'), style=values.get('images.style', ''),
+                    stats=await image_router.provider_stats(conn))
+
+    @router.put('/image-tuning')
+    async def set_image_tuning(payload: ImageTuning, conn: Any = Conn) -> dict:
+        for key, value in (('images.ranking', payload.ranking), ('images.style', payload.style)):
+            if value is not None:
+                await conn.execute("""INSERT INTO app_settings(key,value) VALUES($1,$2)
+                                      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()""", key, value.strip())
+        image_router.RANKING['loaded_at'] = 0.0
+        return await image_tuning(conn)
+
+    @router.get('/illustrations')
+    async def illustration_list(q: str = '', limit: int = 30, offset: int = 0, conn: Any = Conn) -> dict:
+        """Готовые картинки с признаками закрепления/карантина; `q` — книга (код) для фильтра."""
+        limit = max(1, min(limit, 100))
+        rows = await conn.fetch(
+            """SELECT id,book_code,chapter,verse,verse_end,artwork_scope,pinned,quarantined_at,generated_at,translation_id
+               FROM verse_illustrations WHERE status='ready' AND ($1='' OR book_code=$1)
+               ORDER BY generated_at DESC,id DESC LIMIT $2 OFFSET $3""", q.strip(), limit, max(0, offset))
+        return dict(items=[dict(r, quarantined_at=r['quarantined_at'].isoformat() if r['quarantined_at'] else None,
+                                generated_at=r['generated_at'].isoformat() if r['generated_at'] else None) for r in rows])
+
+    @router.get('/illustrations/{image_id}/thumb')
+    async def illustration_thumb(image_id: int, conn: Any = Conn) -> Response:
+        row = await conn.fetchrow("SELECT image_data,mime_type FROM verse_illustrations WHERE id=$1 AND status='ready'", image_id)
+        if not row:
+            raise HTTPException(404, 'not_found')
+        return Response(bytes(row['image_data']), media_type=row['mime_type'], headers={'Cache-Control': 'private, max-age=3600'})
+
+    @router.post('/illustrations/{image_id}/pin')
+    async def illustration_pin(image_id: int, pinned: bool = True, conn: Any = Conn) -> dict:
+        if not await illustrations.set_pinned(conn, image_id, pinned):
+            raise HTTPException(404, 'not_found')
+        return dict(ok=True, pinned=pinned)
+
+    @router.post('/illustrations/{image_id}/quarantine')
+    async def illustration_quarantine(image_id: int, quarantined: bool = True, conn: Any = Conn) -> dict:
+        if not await illustrations.set_quarantine(conn, image_id, quarantined):
+            raise HTTPException(404, 'not_found')
+        return dict(ok=True, quarantined=quarantined)
 
     async def _planner_ready() -> bool | None:
         """Отвечает ли локальная нейросеть, описывающая сцены (без неё бесплатные генераторы пропускаются). None — адрес не проверялся."""
