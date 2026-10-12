@@ -34,10 +34,11 @@ def pool_for(connection):
 def test_every_localized_keyboard_has_navigation_and_explicit_hide(locale):
     keyboard = main_keyboard(locale)
     assert keyboard.resize_keyboard and not keyboard.is_persistent and keyboard.one_time_keyboard
-    assert [len(row) for row in keyboard.keyboard] == [2, 2, 2, 2, 1]
+    count = len(BUTTONS)
+    assert [len(row) for row in keyboard.keyboard] == [2] * (count // 2) + [1] * (count % 2) + [1]
     labels = [button.text for row in keyboard.keyboard for button in row]
     assert [keyboard_command(label) for label in labels] == ['/' + name for name, _ in BUTTONS]+['/hide_keyboard']
-    assert len(set(labels)) == 9
+    assert len(set(labels)) == count + 1
     assert split_message(welcome_text(locale, 'Fixture <Edition> & text'))
     assert split_message(search_prompt(locale))
     assert split_message(handlers.help_text(locale))

@@ -136,6 +136,15 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         if args and args[0] != 'list':
             await audit.record(connection,user.id,'bot','video.'+args[0][:20],' '.join(args[1:])[:100])
         return result
+    # /prayerbook [код] — молитвослов: подборки отрывков для молитвы
+    if name=='prayerbook':
+        from app.services import prayerbook
+        if not args:
+            return prayerbook.menu(chat)
+        edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
+        if not edition:
+            raise UserError('not_ready')
+        return await prayerbook.show(connection,chat,edition,args[0])
     # Закладки и серия чтения
     if name in {'bookmark','bookmarks','unbookmark','done','streak'}:
         from app.services import reader

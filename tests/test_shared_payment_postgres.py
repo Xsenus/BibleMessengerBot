@@ -104,7 +104,7 @@ async def test_delivered_max_welcome_updates_payment_button_and_preserves_image(
     body=client.edit.await_args.args[1]
     assert body['attachments'][0]=={'type':'image','payload':image}
     payloads={b['payload'] for row in body['attachments'][1]['payload']['buttons'] for b in row}
-    assert 'maxcmd:/donate' not in payloads and len(payloads)==7
+    assert 'maxcmd:/donate' not in payloads and len(payloads)==8
     assert await payment_menus.refresh(c,client,900,asyncio.Event())==0
     monkeypatch.setattr(payment_menus,'merchant_available',lambda:True)
     assert await payment_menus.refresh(c,client,900,asyncio.Event())==1

@@ -24,7 +24,7 @@ WELCOME_PATH = Path(__file__).resolve().parents[2] / 'assets' / 'brand' / 'welco
 _BASE_BUTTONS = (
     ('next', '📖'), ('today', '🌅'), ('random', '🎲'),
     ('search', '🔎'), ('settings', '⚙️'), ('help', '❔'),
-    ('daily', '🔔'),
+    ('daily', '🔔'), ('prayerbook', '🙏'),
 )
 BUTTONS_WITH_SUPPORT = (*_BASE_BUTTONS, ('donate', '⭐'))
 
@@ -63,6 +63,8 @@ def button_label(locale: str, command: str, emoji: str) -> str:
         return f"{emoji} " + ('Скрыть кнопки' if locale == 'ru' else 'Hide buttons')
     if command == 'donate':
         return f"{emoji} " + ('Поддержать' if locale == 'ru' else 'Support')
+    if command == 'prayerbook':
+        return f"{emoji} " + ('Молитвослов' if locale == 'ru' else 'Prayer book')
     if command == 'daily':
         return f"{emoji} " + ('Стих каждый день' if locale == 'ru' else 'Daily verse')
     return f"{emoji} {LABELS.get(locale, {}).get(command, tr(locale, command))}"

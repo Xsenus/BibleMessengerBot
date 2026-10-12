@@ -32,7 +32,7 @@ from app.bot.menus import (  # noqa: F401 - re-exported for tests and callers
 
 router = Router(name='localized-destinations')
 LOGGER = logging.getLogger(__name__)
-KNOWN_COMMANDS = frozenset({c.command for c in commands_for('en')}|{'start','help','admin','claim','announce','post','video','bookmark','bookmarks','unbookmark','done','streak'})
+KNOWN_COMMANDS = frozenset({c.command for c in commands_for('en')}|{'start','help','admin','claim','announce','post','video','bookmark','bookmarks','unbookmark','done','streak','prayerbook'})
 
 
 @router.message(F.text.startswith('/'))
@@ -222,6 +222,16 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
                 text,markup = f"{tr(locale,'time')}: <code>/time 09:00 {escape(chat['timezone'])}{suffix}</code>",None
             elif action=='settings':
                 text,markup = await settings_text(connection,chat),settings_keyboard(chat)
+            elif action=='pb':
+                # Молитвослов: пустое значение — список, иначе код молитвы.
+                from app.services import prayerbook
+                if not value:
+                    text,markup = prayerbook.menu(chat)
+                else:
+                    edition = await bible.chat_translation(connection,chat_id)
+                    if not edition:
+                        raise UserError('not_ready')
+                    text,markup = await prayerbook.show(connection,chat,edition,value)
             elif action=='adm':
                 # Меню администратора: права проверяются внутри.
                 from app.bot import admin
