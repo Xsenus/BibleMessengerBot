@@ -42,9 +42,14 @@ async def worker():
             beat=asyncio.create_task(heartbeat(pool))
             while True:
                 async with pool.acquire() as connection:
-                    await prayers.prepare_due(connection)
-                    await announcements.run_due(connection)
-                    await run_video_watch(connection)
+                    # Каждый шаг изолирован: сбой объявлений не останавливает молитвы и наоборот.
+                    for step in (prayers.prepare_due, announcements.run_due, run_video_watch):
+                        try:
+                            await step(connection)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as error:
+                            LOGGER.error('Composer step %s failed (%s)', getattr(step, '__name__', 'step'), type(error).__name__)
                 await asyncio.sleep(10)
     finally:
         if beat:

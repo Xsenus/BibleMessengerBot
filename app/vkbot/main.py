@@ -26,37 +26,44 @@ async def heartbeat(connection) -> None:
         await asyncio.sleep(15)
 
 
-async def poll_loop(client: VkClient, pool, stop: asyncio.Event) -> None:
-    """Принимать события Long Poll и записывать их в `vk_inbox` одной транзакцией; позиция `ts` сдвигается только после
-    успешной записи, поэтому события не теряются, а повторные доставки дедуплицируются по `event_id`."""
-    server = await client.long_poll_server()
-    while not stop.is_set():
+async def poll_once(client: VkClient, pool, server: dict) -> dict:
+    """Один шаг Long Poll. Возвращает (возможно обновлённый) сервер. Позиция `ts` сдвигается только после успешной записи
+    событий в БД; сбои сети, API и БД не пробрасываются — шаг просто повторится."""
+    try:
+        body = await client.poll(server)
+    except VkAPIError:
+        await asyncio.sleep(3)
+        return server
+    failed = body.get('failed')
+    if failed == 1:                                         # потеряна часть истории: взять новый ts
+        return dict(server, ts=body.get('ts', server['ts']))
+    if failed:                                              # 2 — ключ устарел, 3 — потеряна информация: получить сервер заново
         try:
-            body = await client.poll(server)
+            return await client.long_poll_server()
         except VkAPIError:
             await asyncio.sleep(3)
-            continue
-        failed = body.get('failed')
-        if failed == 1:
-            server['ts'] = body.get('ts', server['ts'])
-            continue
-        if failed:                                          # 2 — ключ устарел, 3 — потеряна информация: получить сервер заново
-            server = await client.long_poll_server()
-            continue
-        updates = body.get('updates') or []
-        if updates:
-            try:
-                async with pool.acquire() as connection, connection.transaction():
-                    for update in updates:
-                        try:
-                            await ingest(connection, update)
-                        except ValueError:
-                            LOGGER.warning('Unsupported VK event skipped')
-            except Exception as error:
-                LOGGER.error('VK events were not stored (%s); retrying', type(error).__name__)
-                await asyncio.sleep(3)
-                continue
-        server['ts'] = body.get('ts', server['ts'])
+            return server
+    updates = body.get('updates') or []
+    if updates:
+        try:
+            async with pool.acquire() as connection, connection.transaction():
+                for update in updates:
+                    try:
+                        await ingest(connection, update)
+                    except ValueError:
+                        LOGGER.warning('Unsupported VK event skipped')
+        except Exception as error:
+            LOGGER.error('VK events were not stored (%s); retrying', type(error).__name__)
+            await asyncio.sleep(3)
+            return server
+    return dict(server, ts=body.get('ts', server['ts']))
+
+
+async def poll_loop(client: VkClient, pool, stop: asyncio.Event) -> None:
+    """Принимать события Long Poll и записывать их в `vk_inbox` одной транзакцией; повторные доставки дедуплицируются по `event_id`."""
+    server = await client.long_poll_server()
+    while not stop.is_set():
+        server = await poll_once(client, pool, server)
 
 
 async def main() -> None:

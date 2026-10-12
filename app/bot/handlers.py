@@ -255,8 +255,13 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
 @router.channel_post()
 async def channel_post_handler(message: Message,bot: Any,db_pool: Any) -> None:
     """Пост канала, где бот состоит администратором: передаётся в источники контента (если источник включён)."""
-    from app.services.chat_sources import ingest_post
+    from app.services.chat_sources import ensure_source, ingest_post
     text = message.text or message.caption or ''
+    title = message.chat.title or ''
+    async with db_pool.acquire() as connection:
+        source = await ensure_source(connection,'telegram',message.chat.id,title)
+        if not source['is_enabled']:
+            return                                       # выключенный источник: картинку не скачиваем
     image = None
     if message.photo:
         try:
@@ -266,7 +271,7 @@ async def channel_post_handler(message: Message,bot: Any,db_pool: Any) -> None:
             LOGGER.warning('Channel photo download failed: %s',type(error).__name__)
     async with db_pool.acquire() as connection:
         await ingest_post(connection,'telegram',message.chat.id,str(message.message_id),text,{},
-            posted_at=int(message.date.timestamp()),title=message.chat.title or '',image=image)
+            posted_at=int(message.date.timestamp()),title=title,image=image)
 
 
 @router.message(F.chat.type.in_({'group','supergroup'}),F.text,~F.text.startswith('/'))

@@ -103,3 +103,138 @@ async def test_repeated_event_is_not_processed_twice_by_inbox(vk):
     assert await ingest(c, event) is True
     assert await ingest(c, event) is False
     assert await c.fetchval('SELECT count(*) FROM vk_inbox') == 1
+
+
+# ----- Устойчивость: Long Poll, очередь событий, события разных типов -----------------------------------
+
+class FakeClient:
+    """Имитация VkClient для Long Poll: отдаёт заранее заданные ответы."""
+    def __init__(self, bodies, server=None):
+        self.bodies, self.fresh = list(bodies), server or {'server': 'https://lp.vk.com/x', 'key': 'new', 'ts': '100'}
+        self.fetched = 0
+
+    async def poll(self, server):
+        body = self.bodies.pop(0)
+        if isinstance(body, Exception):
+            raise body
+        return body
+
+    async def long_poll_server(self):
+        self.fetched += 1
+        if isinstance(self.fresh, Exception):
+            raise self.fresh
+        return dict(self.fresh)
+
+
+async def test_poll_once_stores_events_then_advances_ts_and_dedups(vk, monkeypatch):
+    from app.vkbot import main as vk_main
+    c, dispatcher, *_ = vk
+    monkeypatch.setattr(vk_main.asyncio, 'sleep', lambda _s: _noop())
+    event = message('/today', 21)
+    client = FakeClient([{'ts': '6', 'updates': [event, event, {'bad': 1}]}])
+    server = await vk_main.poll_once(client, dispatcher.pool, {'server': 's', 'key': 'k', 'ts': '5'})
+    assert server['ts'] == '6'
+    assert await c.fetchval('SELECT count(*) FROM vk_inbox') == 1          # дубль и мусор не создают строк
+
+
+async def _noop():
+    return None
+
+
+async def test_poll_once_failures_keep_position_and_never_raise(vk, monkeypatch):
+    from app.vkbot import main as vk_main
+    from app.vkbot.client import VkAPIError
+    _, dispatcher, *_ = vk
+    monkeypatch.setattr(vk_main.asyncio, 'sleep', lambda _s: _noop())
+    start = {'server': 's', 'key': 'k', 'ts': '5'}
+    assert (await vk_main.poll_once(FakeClient([VkAPIError(0)]), dispatcher.pool, start)) == start
+    assert (await vk_main.poll_once(FakeClient([{'failed': 1, 'ts': '9'}]), dispatcher.pool, start))['ts'] == '9'
+    client = FakeClient([{'failed': 2}])
+    assert (await vk_main.poll_once(client, dispatcher.pool, start))['key'] == 'new' and client.fetched == 1
+    broken = FakeClient([{'failed': 3}], server=VkAPIError(0))
+    assert (await vk_main.poll_once(broken, dispatcher.pool, start)) == start          # получить сервер не удалось — повтор позже
+
+
+async def test_db_failure_while_storing_does_not_advance_ts(vk, monkeypatch):
+    from app.vkbot import main as vk_main
+    _, dispatcher, *_ = vk
+    monkeypatch.setattr(vk_main.asyncio, 'sleep', lambda _s: _noop())
+
+    async def explode(*_a, **_k):
+        raise RuntimeError('db down')
+    monkeypatch.setattr(vk_main, 'ingest', explode)
+    start = {'server': 's', 'key': 'k', 'ts': '5'}
+    assert (await vk_main.poll_once(FakeClient([{'ts': '8', 'updates': [message('/x', 30)]}]), dispatcher.pool, start))['ts'] == '5'
+
+
+async def test_unexpected_dispatcher_failure_marks_event_uncertain_without_retry(vk):
+    from app.vkbot.events import ingest
+    from app.vkbot.inbox import process, recover
+    c, dispatcher, *_ = vk
+
+    class Boom:
+        calls = 0
+
+        async def dispatch(self, event, key):
+            Boom.calls += 1
+            raise RuntimeError('boom')
+    await ingest(c, message('/today', 40))
+    identifier = await c.fetchval('SELECT id FROM vk_inbox')
+    assert await process(dispatcher.pool, Boom(), identifier) == 'uncertain'
+    assert await process(dispatcher.pool, Boom(), identifier) == 'stale' and Boom.calls == 1
+    await c.execute("UPDATE vk_inbox SET status='processing'")
+    await recover(c)
+    assert await c.fetchval('SELECT status FROM vk_inbox') == 'uncertain'
+
+
+async def test_events_in_one_chat_are_taken_in_order(vk):
+    from app.vkbot.events import ingest
+    from app.vkbot.inbox import due_events
+    c, *_ = vk
+    for n in (50, 51):
+        await ingest(c, message('/today', n))
+    first = await due_events(c)
+    assert len(first) == 1
+    await c.execute("UPDATE vk_inbox SET status='processing' WHERE id=$1", first[0]['id'])
+    assert await due_events(c) == []                                       # пока идёт первое событие, второе ждёт
+
+
+async def test_message_deny_and_allow_toggle_chat_and_subscriptions(vk):
+    c, dispatcher, transports, sent = vk
+    event = message('/start', 60)
+    await dispatcher.dispatch(event, parse_event(event)[0])
+    deny = {'type': 'message_deny', 'event_id': 'd1', 'object': {'user_id': 101}}
+    await dispatcher.dispatch(deny, parse_event(deny)[0])
+    assert await c.fetchval("SELECT is_active FROM telegram_chats WHERE platform='vk'") is False
+    allow = {'type': 'message_allow', 'event_id': 'a1', 'object': {'user_id': 101}}
+    await dispatcher.dispatch(allow, parse_event(allow)[0])
+    assert await c.fetchval("SELECT is_active FROM telegram_chats WHERE platform='vk'") is True
+
+
+async def test_wall_post_and_group_chat_text_feed_sources_only_when_enabled(vk):
+    from app.services import chat_sources
+    c, dispatcher, *_ = vk
+    wall = {'type': 'wall_post_new', 'event_id': 'w1', 'object': {'owner_id': -GROUP, 'id': 5, 'text': 'Новость сообщества', 'date': 1700000000}}
+    await dispatcher.dispatch(wall, parse_event(wall)[0])
+    source = await c.fetchrow("SELECT * FROM content_sources WHERE platform='vk'")
+    assert source and source['is_enabled'] is False and await c.fetchval('SELECT count(*) FROM source_posts') == 0
+    await c.execute("UPDATE content_sources SET is_enabled=true,mode='capture' WHERE id=$1", source['id'])
+    await dispatcher.dispatch(wall, parse_event(wall)[0])
+    await dispatcher.dispatch(wall, parse_event(wall)[0])                  # повтор того же поста
+    assert await c.fetchval('SELECT count(*) FROM source_posts') == 1
+    assert chat_sources  # модуль доступен
+
+
+async def test_unknown_or_forged_callbacks_are_answered_not_executed(vk):
+    c, dispatcher, transports, sent = vk
+    start = message('/start', 70)
+    await dispatcher.dispatch(start, parse_event(start)[0])
+    for number, data in enumerate(['vkcmd:/admin_evil', 'v1:garbage', 'zzz'], 1):
+        event = {'type': 'message_event', 'event_id': f'e{number}', 'object': {
+            'user_id': 101, 'peer_id': 101, 'event_id': f'e{number}', 'conversation_message_id': 1, 'payload': {'d': data}}}
+        try:
+            await dispatcher.dispatch(event, parse_event(event)[0])
+        except Exception as error:                                         # допустима только ожидаемая ошибка пользователя
+            from app.services.errors import UserError
+            assert isinstance(error, UserError)
+    assert await c.fetchval("SELECT count(*) FROM delivery_log WHERE mode='broadcast'") == 0
