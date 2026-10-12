@@ -65,6 +65,7 @@ export default function Gallery() {
             <Thumb id={i.id} />
             <div className="muted">{i.book_code} {i.chapter}:{i.verse}{i.verse_end ? `–${i.verse_end}` : ''} · {when(i.generated_at)}</div>
             <button className="small" disabled={busy} onClick={() => run(() => api(`/illustrations/${i.id}/pin?pinned=${!i.pinned}`, { method: 'POST' }))}>{i.pinned ? '📌 Открепить' : 'Закрепить'}</button>{' '}
+            <button className="small" disabled={busy} title="Создать ещё один вариант для этого текста" onClick={() => run(() => api(`/illustrations/${i.id}/variant`, { method: 'POST' }), 'Вариант заказан')}>+ вариант</button>{' '}
             <button className="small" disabled={busy} onClick={() => run(() => api(`/illustrations/${i.id}/quarantine?quarantined=${!i.quarantined_at}`, { method: 'POST' }))}>{i.quarantined_at ? 'Вернуть' : 'В карантин'}</button>
           </div>))}
       </div>

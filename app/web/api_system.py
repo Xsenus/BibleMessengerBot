@@ -181,6 +181,14 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             raise HTTPException(404, 'not_found')
         return dict(ok=True, pinned=pinned)
 
+    @router.post('/illustrations/{image_id}/variant', status_code=202)
+    async def illustration_variant(image_id: int, conn: Any = Conn) -> dict:
+        """Заказать ещё один вариант картинки для того же текста (до 5 версий)."""
+        created = await illustrations.request_variant(conn, image_id)
+        if created is None:
+            raise HTTPException(409, 'variant_unavailable')
+        return dict(ok=True, image_id=created)
+
     @router.post('/illustrations/{image_id}/quarantine')
     async def illustration_quarantine(image_id: int, quarantined: bool = True, conn: Any = Conn) -> dict:
         if not await illustrations.set_quarantine(conn, image_id, quarantined):

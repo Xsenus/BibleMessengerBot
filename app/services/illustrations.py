@@ -432,3 +432,33 @@ async def set_quarantine(connection: Any, image_id: int, quarantined: bool) -> b
         """UPDATE verse_illustrations SET quarantined_at=CASE WHEN $2 THEN now() ELSE NULL END,
            pinned=pinned AND NOT $2 WHERE id=$1 AND status='ready'""", image_id, quarantined)
     return result.endswith('1')
+
+
+MAX_VARIANTS = 5
+
+
+async def request_variant(connection: Any, image_id: int) -> int | None:
+    """Заказать ещё один вариант картинки для того же текста: новая ожидающая версия и задание с тем же описанием
+    (с просьбой о другой композиции). Не больше `MAX_VARIANTS` версий на текст; None — нельзя (нет исходной, лимит)."""
+    async with connection.transaction():
+        row = await connection.fetchrow("SELECT * FROM verse_illustrations WHERE id=$1 AND status='ready'", image_id)
+        job = await connection.fetchrow('SELECT prompt,prompt_variant,prompt_version,model FROM image_generation_jobs WHERE image_id=$1', image_id)
+        if not row or not job:
+            return None
+        key = (row['translation_id'], row['book_code'], row['chapter'], row['verse'], row['text_sha256'])
+        await connection.execute('SELECT pg_advisory_xact_lock($1)', lock_key('illustration-verse', key))
+        total = await connection.fetchval(
+            """SELECT count(*) FROM verse_illustrations WHERE translation_id=$1 AND book_code=$2 AND chapter=$3
+               AND verse=$4 AND text_sha256=$5""", *key)
+        if total >= MAX_VARIANTS:
+            return None
+        pending_id = await connection.fetchval(
+            """INSERT INTO verse_illustrations(translation_id,book_code,chapter,verse,text_sha256,artwork_scope,verse_end)
+               VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(translation_id,book_code,chapter,verse,text_sha256) WHERE status='pending'
+               DO UPDATE SET updated_at=now() RETURNING id""", *key, row['artwork_scope'], row['verse_end'])
+        prompt = job['prompt'] if 'Alternative composition' in job['prompt'] else job['prompt'] + '\n\nAlternative composition: choose a different viewpoint and arrangement from earlier versions.'
+        await connection.execute(
+            """INSERT INTO image_generation_jobs(image_id,prompt,prompt_variant,model,prompt_version)
+               VALUES($1,$2,$3,$4,$5) ON CONFLICT(image_id) DO NOTHING""",
+            pending_id, prompt, job['prompt_variant'], job['model'], job['prompt_version'])
+        return pending_id
