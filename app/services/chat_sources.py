@@ -52,18 +52,43 @@ def safe_image_url(url: str) -> bool:
     host = (parsed.hostname or '').lower()
     if parsed.scheme != 'https' or not host or parsed.username or parsed.port not in {None, 443}:
         return False
-    if host == 'localhost' or host.endswith(('.local', '.internal')):
+    if host == 'localhost' or host.endswith(('.local', '.internal', '.localhost')):
         return False
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
-        return True
+        return '.' in host                                   # имена без точки (docker-хосты вроде `postgres`) не допускаются
     return address.is_global
+
+
+DNS_CHECK = True            # в тестах отключается: имена там вымышленные
+
+
+async def public_host(url: str) -> bool:
+    """Адрес допустим И все адреса, в которые превращается его имя, — публичные (иначе внутреннее имя, смотрящее на частную сеть,
+    обошло бы проверку). Остаётся теоретическое окно подмены DNS между проверкой и соединением."""
+    if not safe_image_url(url):
+        return False
+    host = urlsplit(url).hostname or ''
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    if not DNS_CHECK:
+        return True
+    import asyncio
+    import socket
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    except OSError:
+        return False
+    return bool(infos) and all(ipaddress.ip_address(info[4][0]).is_global for info in infos)
 
 
 async def download_image(url: str, client: httpx.AsyncClient | None = None) -> bytes | None:
     """Скачать картинку по HTTPS без перенаправлений с ограничением размера; при любой проблеме — None."""
-    if not safe_image_url(url):
+    if not await public_host(url):
         return None
     owned = client is None
     client = client or httpx.AsyncClient(timeout=20, follow_redirects=False)
@@ -120,7 +145,10 @@ async def ingest_post(connection: Any, platform: str, external_id: Any, message_
         asset = await store_asset(connection, image)
     if not body and asset is None:
         return None
-    when = datetime.fromtimestamp(posted_at, UTC) if isinstance(posted_at, int) else datetime.now(UTC)
+    try:
+        when = datetime.fromtimestamp(posted_at, UTC) if isinstance(posted_at, int) else datetime.now(UTC)
+    except (ValueError, OverflowError, OSError):          # например, время в миллисекундах
+        when = datetime.now(UTC)
     post_id = await connection.fetchval(
         '''INSERT INTO source_posts(source_id,external_id,body,asset_id,meta,posted_at) VALUES($1,$2,$3,$4,$5::jsonb,$6)
            ON CONFLICT(source_id,external_id) DO NOTHING RETURNING id''',
@@ -159,9 +187,14 @@ async def publish(connection: Any, post_id: int, audience: dict | None = None) -
     if audience is None:
         audience = post['source_audience']
         audience = json.loads(audience) if isinstance(audience, str) else audience
-    return await fanout.enqueue(connection, key=f'source-post:{post_id}', text=render_post(post, post['body']), mode='source_post',
-                                audience=audience, asset_id=post['asset_id'], progress={'post_id': post_id},
-                                exclude=(post['chat_id'],) if post['chat_id'] else ())
+    try:
+        return await fanout.enqueue(connection, key=f'source-post:{post_id}', text=render_post(post, post['body']), mode='source_post',
+                                    audience=audience, asset_id=post['asset_id'], progress={'post_id': post_id},
+                                    exclude=(post['chat_id'],) if post['chat_id'] else ())
+    except Exception:
+        # Рассылка не поставлена в очередь: вернуть пост в «новые», чтобы его можно было отправить повторно (ключ доставки идемпотентен).
+        await connection.execute("UPDATE source_posts SET status='new',published_at=NULL WHERE id=$1 AND status='published'", post_id)
+        raise
 
 
 async def ignore(connection: Any, post_id: int) -> bool:

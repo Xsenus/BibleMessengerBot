@@ -18,3 +18,10 @@ def _reset_feature_overrides():
     yield
     features._override.clear()
     image_router._CUSTOM.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_dns_checks(monkeypatch):
+    """В тестах имена хостов вымышленные: проверка разрешения DNS отключена (её поведение проверяется отдельным тестом)."""
+    from app.services import chat_sources
+    monkeypatch.setattr(chat_sources, 'DNS_CHECK', False)

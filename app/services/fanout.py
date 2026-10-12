@@ -23,7 +23,7 @@ def normalize_audience(audience: dict | None) -> dict:
     audience = audience or {}
     platforms = [p for p in audience.get('platforms') or [] if p in PLATFORMS]
     kinds = [t for t in audience.get('chat_types') or [] if t in {'private', 'group', 'channel'}]
-    ids = [int(x) for x in audience.get('chat_ids') or [] if str(x).lstrip('-').isdigit()]
+    ids = [int(x) for x in (audience.get('chat_ids') or [])[:5000] if str(x).lstrip('-').isdigit() and abs(int(x)) < 2**62]
     return {k: v for k, v in (('platforms', platforms), ('chat_types', kinds), ('chat_ids', ids)) if v}
 
 
@@ -44,6 +44,18 @@ async def recipients(connection: Any, audience: dict | None = None, exclude: tup
         ORDER BY c.telegram_chat_id''', audience.get('platforms', []), audience.get('chat_types', []), only,
         [int(x) for x in exclude])
     return rows
+
+
+async def count_recipients(connection: Any, audience: dict | None = None) -> int:
+    """Сколько назначений получит рассылка (без загрузки самих строк)."""
+    audience = normalize_audience(audience)
+    return int(await connection.fetchval('''SELECT count(*) FROM telegram_chats c
+        LEFT JOIN telegram_users u ON c.chat_type='private' AND u.telegram_user_id=c.telegram_chat_id
+        WHERE c.is_active AND NOT COALESCE(u.is_blocked,false)
+        AND (cardinality($1::text[])=0 OR c.platform=ANY($1::text[]))
+        AND (cardinality($2::text[])=0 OR CASE WHEN c.chat_type='supergroup' THEN 'group' ELSE c.chat_type END=ANY($2::text[]))
+        AND (cardinality($3::bigint[])=0 OR c.telegram_chat_id=ANY($3::bigint[]))''',
+                                      audience.get('platforms', []), audience.get('chat_types', []), audience.get('chat_ids', [])))
 
 
 def platform_parts(platform: str, text: str, max_length: int = 3900) -> list:
@@ -75,7 +87,7 @@ async def enqueue(connection: Any, *, key: str, text: str, mode: str, audience: 
     """
     from app.worker.delivery import insert_payload
     targets = await recipients(connection, audience, exclude)
-    queued = skipped = 0
+    queued = skipped = failed = 0
     for target in targets:
         try:
             async with chat_lock(connection, target['telegram_chat_id']), connection.transaction():
@@ -89,5 +101,6 @@ async def enqueue(connection: Any, *, key: str, text: str, mode: str, audience: 
                 queued += 1
         except Exception as error:
             skipped += 1
+            failed += 1
             LOGGER.warning('Fan-out %s skipped one destination (%s)', key, type(error).__name__)
-    return {'recipients': len(targets), 'queued': queued, 'skipped': skipped}
+    return {'recipients': len(targets), 'queued': queued, 'skipped': skipped, 'failed': failed}

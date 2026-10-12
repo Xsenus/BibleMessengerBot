@@ -106,7 +106,7 @@ async def ready() -> dict[str,Any]:
     except Exception:
         raise HTTPException(503,'Database unavailable') from None
     if report['status']!='passed':
-        raise HTTPException(503,{'status':'not_ready','errors':report['errors']})
+        raise HTTPException(503,{'status':'not_ready'})
     return {'status':'ready','editions':report['edition_count'],'languages':report['language_count']}
 
 

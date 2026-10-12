@@ -151,6 +151,7 @@ export default function ImageProviders() {
           <div className="card">
             <h3>Готовность</h3>
             <div className="check">{data.secrets_ready ? '✅' : '❌'} Шифрование ключей {data.secrets_ready ? 'настроено' : <>не настроено: задайте <code>SECRETS_KEY</code> или <code>ADMIN_API_KEY</code> (24+ символа) и пересоздайте службу admin</>}</div>
+            {data.secrets_ready && !data.secrets_dedicated && <div className="check">⚠ Ключи шифруются ключом <code>ADMIN_API_KEY</code>: при его смене все сохранённые ключи генераторов придётся ввести заново. Задайте отдельный <code>SECRETS_KEY</code> в <code>.env</code> (и больше не меняйте его).</div>}
             <div className="check">{data.planner_ready === true ? '✅' : data.planner_ready === false ? '❌' : '❔'} Локальная нейросеть описания сцен {data.planner_ready === true ? 'работает' : data.planner_ready === false ? <>не отвечает: без неё бесплатные генераторы пропускаются. Запустите <code>docker compose --profile prayers up -d</code></> : 'не проверена'}</div>
             <div className="check">{data.custom.some((c) => c.is_enabled) ? '✅' : '❌'} Включён хотя бы один добавленный генератор</div>
             <div className="check">{data.custom.some((c) => c.last_test_ok) ? '✅' : '❔'} Успешная проверка выполнена</div>

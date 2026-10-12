@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import time
 from collections.abc import Awaitable, Callable
 from io import BytesIO
@@ -133,7 +134,8 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             custom.append(item)
         jobs = {r['state']: r['n'] for r in await conn.fetch('SELECT state,count(*) AS n FROM image_generation_jobs GROUP BY state')}
         return dict(mode=art.provider, monthly_budget_usd=str(art.monthly_usd), builtin=builtin, custom=custom, jobs=jobs,
-                    templates=free_image_providers.TEMPLATES, secrets_ready=_secrets_ready(), planner_ready=await _planner_ready())
+                    templates=free_image_providers.TEMPLATES, secrets_ready=_secrets_ready(), secrets_dedicated=bool(os.getenv('SECRETS_KEY', '').strip()),
+                    planner_ready=await _planner_ready())
 
     async def _planner_ready() -> bool | None:
         """Отвечает ли локальная нейросеть, описывающая сцены (без неё бесплатные генераторы пропускаются). None — адрес не проверялся."""

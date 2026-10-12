@@ -16,6 +16,7 @@ from typing import Any
 
 import httpx
 
+from app.net.transport import routed_client
 from app.services import fanout
 from app.services.errors import UserError
 
@@ -58,7 +59,7 @@ def parse_youtube(body: bytes) -> list[dict]:
         vid = entry.findtext('yt:videoId', default='', namespaces=NS)
         if not re.fullmatch(r'[\w-]{11}', vid):
             continue
-        items.append({'id': vid, 'title': (entry.findtext('a:title', default='', namespaces=NS) or '')[:300],
+        items.append({'id': vid, 'title': clean(entry.findtext('a:title', default='', namespaces=NS)),
                       'url': f'https://www.youtube.com/watch?v={vid}', 'published': _time(entry.findtext('a:published', namespaces=NS))})
     return items
 
@@ -69,7 +70,7 @@ def parse_rutube(data: Any) -> list[dict]:
     for row in (data.get('results') if isinstance(data, dict) else None) or []:
         vid = str(row.get('id', '')) if isinstance(row, dict) else ''
         if re.fullmatch(r'[0-9a-f]{32}', vid):
-            items.append({'id': vid, 'title': str(row.get('title', ''))[:300], 'url': f'https://rutube.ru/video/{vid}/',
+            items.append({'id': vid, 'title': clean(row.get('title', '')), 'url': f'https://rutube.ru/video/{vid}/',
                           'published': _time(row.get('created_ts') or row.get('publication_ts'))})
     return items
 
@@ -80,9 +81,14 @@ def parse_vk(data: Any) -> list[dict]:
     for row in (data.get('items') if isinstance(data, dict) else None) or []:
         if isinstance(row, dict) and type(row.get('id')) is int and type(row.get('owner_id')) is int:
             key = f"{row['owner_id']}_{row['id']}"
-            items.append({'id': key, 'title': str(row.get('title', ''))[:300], 'url': f'https://vk.com/video{key}',
+            items.append({'id': key, 'title': clean(row.get('title', '')), 'url': f'https://vk.com/video{key}',
                           'published': _time(row.get('date'))})
     return items
+
+
+def clean(value: Any, limit: int = 300) -> str:
+    """Строка для БД: без нулевых символов (PostgreSQL их не принимает) и не длиннее `limit`."""
+    return str(value or '').replace('\x00', '')[:limit]
 
 
 def _time(value: Any) -> datetime | None:
@@ -100,11 +106,14 @@ def _time(value: Any) -> datetime | None:
 
 async def _get(client: httpx.AsyncClient, url: str) -> bytes:
     """Скачать ответ с ограничением размера и без перенаправлений."""
-    response = await client.get(url, headers={'User-Agent': 'BibleMessengerBot/1.0'})
-    response.raise_for_status()
-    if len(response.content) > MAX_BODY:
-        raise ValueError('response too large')
-    return response.content
+    async with client.stream('GET', url, headers={'User-Agent': 'BibleMessengerBot/1.0'}) as response:
+        response.raise_for_status()
+        data = bytearray()
+        async for block in response.aiter_bytes():
+            data.extend(block)
+            if len(data) > MAX_BODY:
+                raise ValueError('response too large')
+    return bytes(data)
 
 
 async def fetch(feed: Any, client: httpx.AsyncClient, vk_call: Any = None) -> list[dict]:
@@ -134,17 +143,15 @@ async def poll_feed(connection: Any, feed: Any, client: httpx.AsyncClient, vk_ca
     try:
         items = await fetch(feed, client, vk_call)
     except Exception as error:
-        count = feed['error_count'] + 1
-        delay = min(feed['interval_minutes'] * 2 ** min(count, 8), BACKOFF_CAP_MINUTES)
         LOGGER.warning('Video feed %s poll failed (%s)', feed['id'], type(error).__name__)
-        await connection.execute('''UPDATE video_feeds SET error_count=$2,last_error=$3,last_checked_at=now(),
-            next_check_at=now()+make_interval(mins=>$4) WHERE id=$1''', feed['id'], count, type(error).__name__, delay)
+        await _record_failure(connection, feed, type(error).__name__)
         return 0
     queued = 0
     async with connection.transaction():
         fresh = []
         for item in items:
-            status = 'skipped' if not feed['baselined'] else 'new'
+            older = item['published'] is not None and item['published'] < feed['created_at']   # старое видео вернулось в окно ленты
+            status = 'skipped' if (not feed['baselined'] or older) else 'new'
             row = await connection.fetchrow('''INSERT INTO video_items(feed_id,external_id,title,url,published_at,status)
                 VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(feed_id,external_id) DO NOTHING RETURNING id,status''',
                 feed['id'], item['id'], item['title'], item['url'], item['published'], status)
@@ -164,10 +171,30 @@ async def poll_feed(connection: Any, feed: Any, client: httpx.AsyncClient, vk_ca
     return queued
 
 
+async def claim_due(connection: Any, limit: int = 5) -> list[Any]:
+    """Захватить каналы, срок которых наступил: следующая проверка сдвигается на 10 минут, поэтому другая копия службы или
+    повторный цикл их не возьмёт; сеть и запись результата выполняются уже вне этой короткой транзакции."""
+    return await connection.fetch('''UPDATE video_feeds SET next_check_at=now()+interval '10 minutes' WHERE id IN (
+        SELECT id FROM video_feeds WHERE is_enabled AND next_check_at<=now() ORDER BY next_check_at LIMIT $1 FOR UPDATE SKIP LOCKED)
+        RETURNING *''', limit)
+
+
+async def _record_failure(connection: Any, feed: Any, error: str) -> None:
+    """Записать сбой опроса и отодвинуть следующую проверку (экспоненциально, не более 6 часов)."""
+    count = feed['error_count'] + 1
+    delay = min(feed['interval_minutes'] * 2 ** min(count, 8), BACKOFF_CAP_MINUTES)
+    await connection.execute('''UPDATE video_feeds SET error_count=$2,last_error=$3,last_checked_at=now(),
+        next_check_at=now()+make_interval(mins=>$4) WHERE id=$1''', feed['id'], count, error[:60], delay)
+
+
 async def run_due(connection: Any, client: httpx.AsyncClient | None = None, vk_call: Any = None, limit: int = 5) -> int:
-    """Опросить каналы, срок которых наступил (не более `limit` за вызов); безопасно при нескольких копиях службы."""
+    """Опросить каналы, срок которых наступил (не более `limit` за вызов). Каждый канал обрабатывается отдельно: сбой одного
+    (сеть, база, разбор) записывается в его состояние и не мешает остальным и не вызывает бесконечного повтора."""
+    feeds = await claim_due(connection, limit)
+    if not feeds:
+        return 0
     owned = client is None
-    client = client or httpx.AsyncClient(timeout=httpx.Timeout(20, connect=10), follow_redirects=False)
+    client = client or routed_client(timeout=httpx.Timeout(20, connect=10), follow_redirects=False)
     vk_client = None
     if vk_call is None:
         from app.vkbot.client import VkClient
@@ -185,11 +212,12 @@ async def run_due(connection: Any, client: httpx.AsyncClient | None = None, vk_c
                 return await vk_client.call(method, token=token, **params)
     total = 0
     try:
-        async with connection.transaction():
-            feeds = await connection.fetch('''SELECT * FROM video_feeds WHERE is_enabled AND next_check_at<=now()
-                ORDER BY next_check_at LIMIT $1 FOR UPDATE SKIP LOCKED''', limit)
-            for feed in feeds:
+        for feed in feeds:
+            try:
                 total += await poll_feed(connection, feed, client, vk_call)
+            except Exception as error:
+                LOGGER.error('Video feed %s processing failed (%s)', feed['id'], type(error).__name__)
+                await _record_failure(connection, feed, type(error).__name__)
     finally:
         if owned:
             await client.aclose()

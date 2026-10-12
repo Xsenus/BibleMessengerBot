@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from datetime import datetime, time
-from typing import Any, Literal
+from datetime import UTC, datetime, time
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.services import accounts, announcements, chat_sources, fanout, video_watch
 
@@ -23,7 +23,7 @@ class AudienceIn(BaseModel):
     """Аудитория рассылки: пустые поля означают «все»."""
     platforms: list[Literal['telegram', 'max', 'vk']] = []
     chat_types: list[Literal['private', 'group', 'channel']] = []
-    chat_ids: list[int] = Field(default=[], max_length=500)
+    chat_ids: list[Annotated[int, Field(ge=-2**62, le=2**62)]] = Field(default=[], max_length=500)
 
 
 class AnnouncementIn(BaseModel):
@@ -35,12 +35,28 @@ class AnnouncementIn(BaseModel):
     timezone: str = 'UTC'
     days_of_week: list[int] = [1, 2, 3, 4, 5, 6, 7]
     day_of_month: int | None = Field(None, ge=1, le=31)
-    interval_minutes: int | None = Field(None, ge=5)
+    interval_minutes: int | None = Field(None, ge=5, le=525600)
     start_at: datetime | None = None
     end_at: datetime | None = None
     max_runs: int | None = Field(None, ge=1)
     audience: AudienceIn = AudienceIn()
-    asset_id: int | None = None
+    asset_id: int | None = Field(None, ge=1, le=2**62)
+
+    @field_validator('send_time')
+    @classmethod
+    def clock_is_naive_minutes(cls, value: time | None) -> time | None:
+        """Время отправки — часы и минуты без секунд и часового пояса (пояс задаётся отдельным полем)."""
+        if value is not None and (value.second or value.microsecond or value.tzinfo is not None):
+            raise ValueError('send_time')
+        return value
+
+    @field_validator('start_at', 'end_at')
+    @classmethod
+    def moment_is_aware(cls, value: datetime | None) -> datetime | None:
+        """Моменты без часового пояса считаются UTC, чтобы сравнения с расписанием не падали."""
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value
 
 
 class SourcePatch(BaseModel):
@@ -151,6 +167,8 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             ZoneInfo(schedule['timezone'])
         except Exception:
             raise HTTPException(422, 'invalid_timezone') from None
+        if payload.asset_id is not None and not await conn.fetchval('SELECT 1 FROM media_assets WHERE id=$1', payload.asset_id):
+            raise HTTPException(422, 'invalid_asset')
         row = await announcements.create(conn, await owner_id(conn), payload.title, payload.body, schedule,
                                          audience=payload.audience.model_dump(), asset_id=payload.asset_id)
         return rows([row])[0]
@@ -190,6 +208,8 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
     @router.post('/media', status_code=201)
     async def upload_media(request: Request, conn: Any = Conn) -> dict:
         """Загрузить картинку (тело запроса — файл PNG/JPEG/WebP) и получить `asset_id` для объявления."""
+        if int(request.headers.get('content-length') or 0) > MAX_IMAGE_REQUEST:
+            raise HTTPException(413, 'too_large')
         data = await request.body()
         if len(data) > MAX_IMAGE_REQUEST:
             raise HTTPException(413, 'too_large')
@@ -202,7 +222,7 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
     async def audience_size(platform: str = '', chat_type: str = '', conn: Any = Conn) -> dict:
         """Сколько назначений получит рассылка с такой аудиторией."""
         audience = {'platforms': [platform] if platform else [], 'chat_types': [chat_type] if chat_type else []}
-        return {'recipients': len(await fanout.recipients(conn, audience))}
+        return {'recipients': await fanout.count_recipients(conn, audience)}
 
     # --- Источники контента -------------------------------------------------------------------
     @router.get('/sources')

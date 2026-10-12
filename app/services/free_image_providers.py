@@ -17,7 +17,8 @@ from urllib.parse import quote, urlsplit
 
 import httpx
 
-from app.services.chat_sources import safe_image_url
+from app.net.transport import routed_client
+from app.services.chat_sources import public_host, safe_image_url
 from app.services.image_providers import GenerationError, check_status, normalize_download
 
 ADAPTERS = ('cloudflare', 'huggingface', 'pollinations', 'horde', 'openai_compatible')
@@ -80,6 +81,8 @@ def validate_spec(spec: dict) -> None:
         raise ValueError('base_url')
     if adapter in {'cloudflare', 'huggingface', 'openai_compatible'} and not spec.get('model'):
         raise ValueError('model')
+    if spec.get('model') and not re.fullmatch(r'[\w@./:+-]{1,200}', str(spec['model'])) or '..' in str(spec.get('model') or ''):
+        raise ValueError('model')
     if adapter == 'cloudflare' and not re.fullmatch(r'[0-9a-f]{32}', str(spec.get('account_id', ''))):
         raise ValueError('account_id')
 
@@ -120,7 +123,7 @@ def _image_from(content: bytes, content_type: str) -> bytes:
 
 async def _fetch_url(client: httpx.AsyncClient, url: str) -> bytes:
     """Скачать результат по ссылке сервиса: HTTPS, не локальная сеть, без ключа и перенаправлений, до 20 МБ."""
-    if not safe_image_url(url):
+    if not await public_host(url):
         raise GenerationError('response_invalid')
     async with client.stream('GET', url, follow_redirects=False) as response:
         if response.status_code != 200:
@@ -185,7 +188,11 @@ async def _horde(spec: dict, prompt: str, client: httpx.AsyncClient) -> bytes:
         raise GenerationError('response_invalid') from None
     if not re.fullmatch(r'[0-9a-fA-F-]{8,64}', task):
         raise GenerationError('response_invalid')
-    deadline = time.monotonic() + float((spec.get('extra') or {}).get('timeout', 200))
+    try:
+        limit = float((spec.get('extra') or {}).get('timeout', 200))
+    except (TypeError, ValueError):
+        limit = 200.0
+    deadline = time.monotonic() + min(600.0, max(10.0, limit))
     while time.monotonic() < deadline:
         await asyncio.sleep(4)
         check = await client.get(f'{base}/generate/check/{task}', headers=headers)
@@ -214,6 +221,8 @@ async def _horde(spec: dict, prompt: str, client: httpx.AsyncClient) -> bytes:
 async def _openai_compatible(spec: dict, prompt: str, client: httpx.AsyncClient) -> bytes:
     """`POST {base}/images/generations`: ответ `data[0].b64_json` либо ссылка `data[0].url` / `images[0].url`."""
     base = safe_base(spec['base_url'])
+    if not await public_host(base):
+        raise GenerationError('response_invalid')
     body = {'model': spec['model'], 'prompt': prompt[:4000], 'n': 1, 'size': f"{spec['width']}x{spec['height']}"}
     if not (spec.get('extra') or {}).get('no_response_format'):
         body['response_format'] = 'b64_json'
@@ -241,7 +250,7 @@ async def generate(spec: dict, prompt: str, *, client: httpx.AsyncClient | None 
     if NEEDS_KEY.get(spec['adapter']) and not spec.get('api_key'):
         raise GenerationError('missing_key')
     owned = client is None
-    client = client or httpx.AsyncClient(timeout=httpx.Timeout(240, connect=15), follow_redirects=False)
+    client = client or routed_client('images', timeout=httpx.Timeout(240, connect=15), follow_redirects=False)
     try:
         try:
             data = await _RUNNERS[spec['adapter']](spec, prompt, client)

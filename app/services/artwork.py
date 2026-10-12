@@ -13,6 +13,7 @@ from io import BytesIO
 import httpx
 from PIL import Image
 
+from app.net.transport import routed_client
 from app.services import bible, devotionals, illustrations, readings
 from app.services.locks import lock_key
 from app.services.image_providers import GenerationError
@@ -176,8 +177,8 @@ async def generate(settings: ArtSettings, text: str, *, client=None):
     if not settings.key:
         raise GenerationError("missing_key")
     owned = client is None
-    client = client or httpx.AsyncClient(
-        timeout=httpx.Timeout(240, connect=20), follow_redirects=False
+    client = client or routed_client(
+        'images', timeout=httpx.Timeout(240, connect=20), follow_redirects=False
     )
     try:
         try:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import calendar
 import json
+import logging
 import re
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
@@ -18,6 +19,8 @@ from app.services import fanout
 from app.services.errors import UserError
 from app.services.formatting import escape
 from app.services.scheduling import next_occurrence, on_date, parse_hhmm, validate_timezone
+
+LOGGER = logging.getLogger(__name__)
 
 DAYS = {'mon': 1, 'пн': 1, 'tue': 2, 'вт': 2, 'wed': 3, 'ср': 3, 'thu': 4, 'чт': 4,
         'fri': 5, 'пт': 5, 'sat': 6, 'сб': 6, 'sun': 7, 'вс': 7}
@@ -87,10 +90,10 @@ def parse_when(text: str, default_timezone: str = 'UTC', now: datetime | None = 
     elif kind == 'daily':
         schedule['send_time'] = _clock(args)
     elif kind == 'weekly':
-        if len(args) != 2:
+        if len(args) < 2:
             raise UserError('invalid')
-        schedule['days_of_week'] = _days(args[0])
-        schedule['send_time'] = _clock(args[1:])
+        schedule['days_of_week'] = _days(','.join(args[:-1]))          # `sat,sun` разбирается на два слова — склеиваем дни обратно
+        schedule['send_time'] = _clock(args[-1:])
     elif kind == 'monthly':
         if len(args) != 2 or not args[0].isdigit() or not 1 <= int(args[0]) <= 31:
             raise UserError('invalid')
@@ -114,7 +117,12 @@ def parse_when(text: str, default_timezone: str = 'UTC', now: datetime | None = 
 
 
 def _zone_case(token: str) -> str:
-    """Вернуть название пояса с заглавными буквами (`europe/moscow` → `Europe/Moscow`)."""
+    """Вернуть точное название пояса IANA (`europe/moscow` → `Europe/Moscow`); неизвестное возвращается с заглавными буквами."""
+    from zoneinfo import available_timezones
+    wanted = token.lower()
+    for name in available_timezones():
+        if name.lower() == wanted:
+            return name
     return '/'.join('_'.join(part.capitalize() for part in piece.split('_')) for piece in token.split('/'))
 
 
@@ -212,7 +220,10 @@ async def set_status(connection: Any, announcement_id: int, status: str) -> bool
         return False
     next_run = row['next_run_at']
     if status == 'active':
-        next_run = compute_next(row, row['next_run_at'], datetime.now(UTC)) if row['next_run_at'] else None
+        now = datetime.now(UTC)
+        # Для расписаний по времени суток ближайший запуск считается от текущего момента, чтобы пауза не съедала предстоящий запуск.
+        previous = row['next_run_at'] if row['kind'] == 'interval' else None
+        next_run = compute_next(dict(row, runs_done=row['runs_done']), previous, now) if row['next_run_at'] else None
         if row['kind'] == 'once' and row['runs_done'] == 0:
             next_run = row['start_at'] if row['start_at'] and row['start_at'] > datetime.now(UTC) else datetime.now(UTC)
     result = await connection.execute(
@@ -227,6 +238,9 @@ async def deliver_run(connection: Any, announcement: Any, run_id: int) -> dict[s
     counts = await fanout.enqueue(connection, key=f'announcement:{run_id}', text=render(announcement['title'], announcement['body']),
                                   mode='announcement', audience=audience, asset_id=announcement['asset_id'],
                                   progress={'announcement_id': announcement['id']})
+    if counts['recipients'] and not counts['queued'] and counts.get('failed'):
+        # Ничего не поставлено в очередь из-за сбоев: запуск остаётся `sending` и будет повторён (ключи доставки идемпотентны).
+        raise RuntimeError('announcement run queued nothing')
     await connection.execute("UPDATE announcement_runs SET status='done',recipients=$2,queued=$3,skipped=$4 WHERE id=$1",
                              run_id, counts['recipients'], counts['queued'], counts['skipped'])
     return counts
@@ -249,7 +263,10 @@ async def run_one(connection: Any, announcement_id: int, now: datetime | None = 
                ON CONFLICT(announcement_id,scheduled_for) DO NOTHING RETURNING id''',
             announcement_id, scheduled, 'skipped_late' if late else 'sending')
         done = row['runs_done'] + (0 if late else 1)
-        following = compute_next(dict(row, runs_done=row['runs_done']), scheduled, now)
+        try:
+            following = compute_next(dict(row, runs_done=row['runs_done']), scheduled, now)
+        except ValueError:                                  # локальное время не существует (переход на летнее время) — следующий день
+            following = compute_next(dict(row, runs_done=row['runs_done']), scheduled + timedelta(days=1), now)
         if row['max_runs'] and done >= row['max_runs']:
             following = None
         await connection.execute(
@@ -266,16 +283,26 @@ async def run_due(connection: Any, now: datetime | None = None, limit: int = 20)
     запуски, прерванные перезапуском. Возвращает число выполненных запусков."""
     now = now or datetime.now(UTC)
     stuck = await connection.fetch(
-        """SELECT r.id AS run_id,a.* FROM announcement_runs r JOIN announcements a ON a.id=r.announcement_id
-           WHERE r.status='sending' AND r.created_at<now()-interval '1 minute' LIMIT 5""")
+        """SELECT r.id AS run_id,r.attempts,a.* FROM announcement_runs r JOIN announcements a ON a.id=r.announcement_id
+           WHERE r.status='sending' AND r.created_at<now()-interval '1 minute' ORDER BY r.id LIMIT 5""")
     for row in stuck:
-        await deliver_run(connection, row, row['run_id'])
+        # Один неисправный запуск не должен блокировать остальные: ошибка считается попыткой, после пяти запуск помечается `failed`.
+        attempts = await connection.fetchval('UPDATE announcement_runs SET attempts=attempts+1 WHERE id=$1 RETURNING attempts', row['run_id'])
+        try:
+            await deliver_run(connection, row, row['run_id'])
+        except Exception as error:
+            LOGGER.error('Announcement run %s failed (%s), attempt %s', row['run_id'], type(error).__name__, attempts)
+            if attempts >= 5:
+                await connection.execute("UPDATE announcement_runs SET status='failed' WHERE id=$1", row['run_id'])
     due = await connection.fetch(
         "SELECT id FROM announcements WHERE status='active' AND next_run_at<=$1 ORDER BY next_run_at LIMIT $2", now, limit)
     count = 0
     for item in due:
-        if await run_one(connection, item['id'], now):
-            count += 1
+        try:
+            if await run_one(connection, item['id'], now):
+                count += 1
+        except Exception as error:                      # сбой одного объявления не мешает остальным; запуск повторится как «зависший»
+            LOGGER.error('Announcement %s run failed (%s)', item['id'], type(error).__name__)
     return count
 
 
@@ -298,7 +325,7 @@ def describe(row: Any) -> str:
 # ----- Команды и меню администратора в боте -------------------------------------------------------------
 
 def _split_command(raw: str) -> list[str]:
-    return [part.strip() for part in raw.split('|')]
+    return [part.strip() for part in raw.split('|', 2)]            # знак «|» допустим в тексте объявления
 
 
 async def command(connection: Any, actor_id: int, chat: Any, raw: str) -> tuple[str, Any]:

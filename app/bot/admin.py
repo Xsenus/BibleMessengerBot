@@ -118,7 +118,7 @@ async def callback(connection: Any, actor_id: int, chat: Any, value: str) -> tup
     """Обработать нажатие кнопки меню администратора (`adm:раздел[:аргумент]`); права проверяются заново."""
     if not await accounts.is_admin(connection, actor_id):
         raise UserError('forbidden')
-    if value.startswith('rm'):
+    if value.startswith('rm') and value[2:].isdigit():
         return await remove(connection, actor_id, chat, value[2:])
     if value[:2] in {'ap', 'ar', 'an', 'ad'} and value[2:].isdigit():
         return await announcements_section(connection, actor_id, chat, value)

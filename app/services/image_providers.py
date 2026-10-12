@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from PIL import Image
+from app.net.transport import routed_client
 from app.services.visual_scene import NEGATIVE
 
 NAMES = ("openai", "gemini", "bfl", "ideogram", "stability")
@@ -184,8 +185,8 @@ async def generate(provider, prompt, *, client=None, accepted=None, resume=None)
     if len(prompt.encode("utf-8")) > 160000:
         raise GenerationError("prompt_too_large")
     owned = client is None
-    client = client or httpx.AsyncClient(
-        timeout=httpx.Timeout(240, connect=15), follow_redirects=False
+    client = client or routed_client(
+        'images', timeout=httpx.Timeout(240, connect=15), follow_redirects=False
     )
     try:
         try:
