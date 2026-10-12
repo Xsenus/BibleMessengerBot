@@ -68,3 +68,13 @@ export const describeAudience = (a) => {
   const types = (a?.chat_types || []).join(', ') || 'все чаты';
   return `${platforms} · ${types}`;
 };
+
+/** Раскрывающаяся справка: что это и как настроить. */
+export function Help({ title = 'Как это настроить', children, open = false }) {
+  return (
+    <details className="help" open={open}>
+      <summary>ℹ️ {title}</summary>
+      <div className="helpbody">{children}</div>
+    </details>
+  );
+}

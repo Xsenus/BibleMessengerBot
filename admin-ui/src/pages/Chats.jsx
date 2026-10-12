@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api.js';
-import { Badge, PLATFORMS, Status, useAction, useData, when } from '../ui.jsx';
+import { Help, Badge, PLATFORMS, Status, useAction, useData, when } from '../ui.jsx';
 
 function ChatsTab() {
   const [platform, setPlatform] = useState('');
@@ -51,6 +51,9 @@ export default function Chats() {
   return (
     <section>
       <h2>Чаты и пользователи</h2>
+      <Help title="Что здесь можно сделать">
+        <p><b>Чаты</b>: «получает» / «отключён» — включает или выключает все рассылки этому чату (подписки при отключении ставятся на паузу). <b>Пользователи</b>: «заблокирован» — бот перестаёт отвечать и присылать рассылки; владельца заблокировать нельзя. Роли администраторов меняются в разделе «Администраторы».</p>
+      </Help>
       <div className="row"><button className={tab === 'chats' ? '' : 'small'} onClick={() => setTab('chats')}>Чаты</button>
         <button className={tab === 'users' ? '' : 'small'} onClick={() => setTab('users')}>Пользователи</button></div>
       {tab === 'chats' ? <ChatsTab /> : <UsersTab />}

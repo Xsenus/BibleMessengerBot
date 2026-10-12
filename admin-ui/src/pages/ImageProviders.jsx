@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api.js';
-import { Badge, Status, useAction, useData, when } from '../ui.jsx';
+import { Badge, Help, Status, useAction, useData, when } from '../ui.jsx';
 
 const ADAPTERS = {
   cloudflare: 'Cloudflare Workers AI', huggingface: 'Hugging Face', pollinations: 'Pollinations',
@@ -35,7 +35,13 @@ function AddForm({ templates, onCreated, secretsReady }) {
         <option value="">— выберите шаблон —</option>
         {templates.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
       </select>
-      {template && <p className="muted">{template.free} {template.signup && <a href={template.signup} target="_blank" rel="noreferrer">Получить ключ</a>}</p>}
+      {template && (
+        <Help title={`Как подключить: ${template.label}`} open>
+          <p>{template.free} {template.signup && <a href={template.signup} target="_blank" rel="noreferrer">Открыть сайт сервиса</a>}</p>
+          <ol>{(template.howto || []).map((step, i) => <li key={i}>{step}</li>)}</ol>
+          <p className="muted">Названия пунктов в кабинете сервиса могут отличаться: ориентируйтесь на смысл. Условия бесплатного тарифа уточняйте на сайте сервиса.</p>
+        </Help>
+      )}
       {templateId && (
         <>
           <div className="row">
@@ -129,9 +135,26 @@ export default function ImageProviders() {
     <section>
       <h2>Генераторы картинок</h2>
       <p className="muted">Бот перебирает генераторы по приоритету: сначала добавленные здесь (бесплатные), затем платные из настроек сервера. Если один недоступен или исчерпал дневной лимит, берётся следующий. Изменения подхватываются без перезапуска.</p>
+      <Help title="Как это работает и что нужно для запуска">
+        <p>Каждой картинке нужен генератор. Бот пробует их по очереди: сначала добавленные здесь (по приоритету — меньшее число раньше), потом платные из <code>.env</code>. Если генератор вернул ошибку или исчерпал дневной лимит, берётся следующий.</p>
+        <ol>
+          <li><b>Подготовьте сервер</b> (один раз): задайте <code>SECRETS_KEY</code> или <code>ADMIN_API_KEY</code> (24+ символа) — ими шифруются ключи; запустите локальную нейросеть описания сцен: <code>docker compose --profile prayers up -d</code>. Это не даёт тексту стиха уйти во внешний сервис: наружу идёт только описание картинки.</li>
+          <li><b>Добавьте генератор</b>: выберите шаблон ниже, следуйте подсказке, вставьте ключ.</li>
+          <li><b>Нажмите «Проверить»</b>: появится пробная картинка. Если видите ошибку — подсказка по коду есть в справке ниже.</li>
+          <li><b>Настройте порядок и лимит</b>: «Приоритет» (меньше — раньше) и «В сутки, не более». Самые надёжные ставьте первыми, медленные (AI Horde) — последними.</li>
+        </ol>
+        <p>Коды ошибок: <code>auth</code> — неверный ключ или Account ID; <code>rate_limited</code> — квота исчерпана, подождите или снизьте лимит; <code>response_invalid</code>/<code>no_image</code> — неверный адрес или модель; <code>remote_timeout</code> — сервис перегружен; <code>scene_unavailable</code> — не запущена локальная нейросеть.</p>
+      </Help>
       <Status error={error} loading={loading} />
       {data && (
         <>
+          <div className="card">
+            <h3>Готовность</h3>
+            <div className="check">{data.secrets_ready ? '✅' : '❌'} Шифрование ключей {data.secrets_ready ? 'настроено' : <>не настроено: задайте <code>SECRETS_KEY</code> или <code>ADMIN_API_KEY</code> (24+ символа) и пересоздайте службу admin</>}</div>
+            <div className="check">{data.planner_ready === true ? '✅' : data.planner_ready === false ? '❌' : '❔'} Локальная нейросеть описания сцен {data.planner_ready === true ? 'работает' : data.planner_ready === false ? <>не отвечает: без неё бесплатные генераторы пропускаются. Запустите <code>docker compose --profile prayers up -d</code></> : 'не проверена'}</div>
+            <div className="check">{data.custom.some((c) => c.is_enabled) ? '✅' : '❌'} Включён хотя бы один добавленный генератор</div>
+            <div className="check">{data.custom.some((c) => c.last_test_ok) ? '✅' : '❔'} Успешная проверка выполнена</div>
+          </div>
           <div className="grid">
             <div className="card"><h3>Режим</h3><big>{data.mode}</big><small className="muted">ILLUSTRATION_PROVIDER</small></div>
             <div className="card"><h3>Очередь</h3><small>{Object.entries(data.jobs).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'пусто'}</small><br />
@@ -142,6 +165,9 @@ export default function ImageProviders() {
           {data.custom.length === 0 && <p className="muted">Пока нет. Добавьте бесплатный генератор ниже.</p>}
           <AddForm templates={data.templates} onCreated={reload} secretsReady={data.secrets_ready} />
           <h3>Платные (из настроек сервера)</h3>
+          <Help title="Как включить платные генераторы">
+            <p>Ключи задаются только в файле <code>.env</code> на сервере (панель их не меняет): <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>BFL_API_KEY</code>, <code>IDEOGRAM_API_KEY</code>, <code>STABILITY_API_KEY</code>. После правки пересоздайте службу: <code>docker compose up -d --no-deps --force-recreate illustrator</code>. Режим <code>ILLUSTRATION_PROVIDER=auto</code> включает перебор всех ключей, <code>manual</code> — работают только генераторы из панели.</p>
+          </Help>
           <table><thead><tr><th>Сервис</th><th>Модель</th><th>Ключ</th><th>Сегодня</th><th>Пауза</th></tr></thead><tbody>
             {data.builtin.map((b) => (
               <tr key={b.name}><td>{b.name}</td><td>{b.model}</td><td><Badge on={b.configured} yes="задан" no="нет" /></td>

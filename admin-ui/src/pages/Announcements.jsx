@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api.js';
-import { AudienceEditor, Status, describeAudience, useAction, useData, when } from '../ui.jsx';
+import { Help, AudienceEditor, Status, describeAudience, useAction, useData, when } from '../ui.jsx';
 
 const KINDS = { once: 'Один раз', daily: 'Каждый день', weekly: 'По дням недели', monthly: 'Раз в месяц', interval: 'Через интервал' };
 const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
@@ -77,6 +77,14 @@ export default function Announcements() {
   return (
     <section>
       <h2>Объявления</h2>
+      <Help title="Как пользоваться">
+        <ol>
+          <li>Выберите <b>когда</b> отправлять: «Один раз» (пусто — сразу), «Каждый день», «По дням недели» (например, суббота 10:00), «Раз в месяц» или «Через интервал» (не реже 5 минут).</li>
+          <li>Для повторов укажите время и <b>часовой пояс</b> (например, <code>Europe/Moscow</code>). «Повторов» — сколько раз отправить всего; пусто — без предела.</li>
+          <li>Отметьте платформы, которым отправлять; если ничего не отмечено — получат все. Можно приложить картинку.</li>
+          <li>После создания объявление видно в списке ниже: «Сейчас» — отправить немедленно, «Пауза», «Править» (текст и аудитория), «Отмена». Если служба была остановлена, опоздавший больше чем на час запуск пропускается, а не высылается пачкой.</li>
+        </ol>
+      </Help>
       <Form onCreated={reload} />
       <Status error={error} loading={loading} />
       <table>

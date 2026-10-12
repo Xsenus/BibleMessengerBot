@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api.js';
-import { AudienceEditor, Badge, Status, describeAudience, useAction, useData, when } from '../ui.jsx';
+import { Help, AudienceEditor, Badge, Status, describeAudience, useAction, useData, when } from '../ui.jsx';
 
 function Editor({ feed, onSave, busy }) {
   const [draft, setDraft] = useState({ title: feed.title || '', template: feed.template || '', audience: feed.audience || {} });
@@ -27,6 +27,14 @@ export default function Videos() {
   return (
     <section>
       <h2>Видеоканалы</h2>
+      <Help title="Как добавить канал">
+        <ul>
+          <li><b>YouTube</b>: нужен ID канала вида <code>UC…</code> (24 символа). Его видно в адресе <code>youtube.com/channel/UC…</code>; если у канала адрес вида <code>@имя</code>, откройте страницу канала → «О канале» → «Поделиться» → «Копировать ID канала».</li>
+          <li><b>RuTube</b>: числовой ID автора из адреса <code>rutube.ru/channel/12345/</code>.</li>
+          <li><b>ВКонтакте</b>: адрес сообщества вида <code>club123</code> или число; нужен <code>VK_SERVICE_TOKEN</code> в <code>.env</code>.</li>
+        </ul>
+        <p>Первая проверка только запоминает уже вышедшие видео. Чтобы бот присылал ссылки, включите «Рассылка» у канала. «Настроить» задаёт название, шаблон (<code>{'{title}'}</code>, <code>{'{url}'}</code>, <code>{'{channel}'}</code>) и аудиторию. При ошибках интервал проверки растёт; причина видна под названием канала.</p>
+      </Help>
       <p className="muted">Бот периодически проверяет канал. Первая проверка только запоминает уже вышедшие видео. Для ВКонтакте нужен VK_SERVICE_TOKEN.</p>
       <Status error={error} loading={loading} />
       <table>

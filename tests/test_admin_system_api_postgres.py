@@ -26,6 +26,7 @@ async def test_image_provider_crud_hides_secrets_and_validates(db, monkeypatch):
     async with make(monkeypatch, c) as client:
         listing = (await client.get('/api/admin/image-providers', headers=H)).json()
         assert [b['name'] for b in listing['builtin']][0] == 'openai' and listing['templates'] and listing['secrets_ready']
+        assert all(t['howto'] for t in listing['templates']) and 'planner_ready' in listing
         good = {'slug': 'hf-flux', 'adapter': 'huggingface', 'model': 'black-forest-labs/FLUX.1-schnell', 'api_key': 'hf_secret_value_1234'}
         created = await client.post('/api/admin/image-providers', headers=H, json=good)
         assert created.status_code == 201 and created.json()['has_key'] is True and 'secret' not in created.text
