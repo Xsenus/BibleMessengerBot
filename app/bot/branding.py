@@ -77,6 +77,8 @@ def commands_for(locale: str) -> list[BotCommand]:
         BotCommand(command='read', description='Найти главу или стих по адресу' if language == 'ru' else 'Read a chapter or verse by reference'),
         BotCommand(command='devotions', description='Стихи утром и вечером' if language == 'ru' else 'Morning and evening verses'),
         BotCommand(command='voice', description='Выбрать голос чтения: Давид или Мария' if language == 'ru' else 'Choose Russian reading voice: David or Mary'),
+        BotCommand(command='bookmarks', description='Мои закладки: /bookmark Ин 3:16' if language == 'ru' else 'My bookmarks: /bookmark John 3:16'),
+        BotCommand(command='streak', description='Серия дней чтения (/done — отметить)' if language == 'ru' else 'Reading streak (/done to mark)'),
         BotCommand(command='hide_keyboard', description='Скрыть нижние кнопки' if language == 'ru' else 'Hide the bottom keyboard'),
         BotCommand(command='menu', description='Показать нижние кнопки' if language == 'ru' else 'Show the bottom keyboard'),
     ])

@@ -17,12 +17,13 @@ from aiogram.types import InlineKeyboardMarkup
 
 from app.bot.common import button
 from app.services import bible, passage
-from app.services.accounts import is_admin
+from app.services.accounts import require_role, role_of
 from app.services.errors import UserError
 from app.services.locks import chat_lock
 
 LOGGER = logging.getLogger(__name__)
 MAX_REFS = 5
+EDIT_ROLES = {'editor', 'admin', 'owner'}
 # Предложение рассылки, подготовленное при обработке команды; читается и сбрасывается обработчиком.
 _offer: ContextVar[int | None] = ContextVar('broadcast_offer', default=None)
 
@@ -52,7 +53,7 @@ async def offer(connection: Any, actor_id: int, refs: list[dict], translation_id
     Не администратору и пустому результату ничего не предлагается. `image_id` — картинка, созданная (или заказанная)
     при поиске: она уйдёт всем получателям. Возвращает номер черновика или None.
     """
-    if not refs or not await is_admin(connection, actor_id):
+    if not refs or await role_of(connection, actor_id) not in EDIT_ROLES:
         return None
     draft = await connection.fetchval(
         'INSERT INTO broadcasts(created_by,refs,source_translation_id,image_id) VALUES($1,$2::jsonb,$3,$4) RETURNING id',
@@ -78,8 +79,7 @@ async def recipients(connection: Any) -> list[Any]:
 
 async def load_draft(connection: Any, draft_id: int, actor_id: int) -> Any:
     """Черновик рассылки; чужой или несуществующий недоступен, действовать может только владелец."""
-    if not await is_admin(connection, actor_id):
-        raise UserError('forbidden')
+    await require_role(connection, actor_id, 'editor')
     draft = await connection.fetchrow('SELECT * FROM broadcasts WHERE id=$1 AND created_by=$2', draft_id, actor_id)
     if not draft:
         raise UserError('no_result')
@@ -187,6 +187,8 @@ async def send(connection: Any, draft_id: int, actor_id: int, max_length: int = 
     await connection.execute(
         "INSERT INTO operator_events(actor_id,action,details) VALUES($1,'broadcast',$2::jsonb)", actor_id,
         json.dumps({'broadcast_id': draft_id, 'recipients': len(targets), 'queued': queued, 'skipped': skipped}))
+    from app.services import audit
+    await audit.record(connection, actor_id, 'bot', 'broadcast.send', str(draft_id), {'recipients': len(targets), 'queued': queued})
     return {'recipients': len(targets), 'queued': queued, 'skipped': skipped}
 
 

@@ -1,0 +1,76 @@
+groups:
+  - name: biblebot
+    rules:
+      - alert: BibleServiceDown
+        expr: bible_service_heartbeat_age_seconds > 180
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Служба {{ $labels.service }} не подаёт признаков жизни"
+          description: "Последний сигнал {{ $value | humanizeDuration }} назад."
+      - alert: BibleDeliveryBacklog
+        expr: bible_oldest_outstanding_delivery_seconds > 900
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Очередь доставки отстаёт больше 15 минут"
+      - alert: BibleDeliveriesFailing
+        expr: bible_deliveries_failed_last_day > 50
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Много неудачных доставок за сутки: {{ $value }}"
+      - alert: BibleDeliveriesNeedDecision
+        expr: bible_deliveries{status="uncertain"} > 0
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "Есть доставки с неопределённым исходом — нужно решение в панели («Доставки»)"
+      - alert: BibleLoopStalled
+        expr: bible_loop_last_ok_age_seconds > 300
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Цикл {{ $labels.loop }} давно не завершался без ошибок"
+      - alert: BibleLoopSlow
+        expr: bible_loop_duration_ms > 120000
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Цикл {{ $labels.loop }} работает дольше 2 минут"
+      - alert: BibleAnnouncementsOverdue
+        expr: bible_announcements_overdue > 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Объявления опаздывают больше чем на 15 минут"
+      - alert: BibleImageBudgetNearLimit
+        expr: bible_image_budget_spent_usd > 0.9 * bible_image_budget_limit_usd and bible_image_budget_limit_usd > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Израсходовано более 90% месячного бюджета на картинки"
+      - alert: BibleImageProviderBlocked
+        expr: bible_image_provider_blocked == 1
+        for: 30m
+        labels: {severity: info}
+        annotations:
+          summary: "Генератор {{ $labels.provider }} заблокирован дольше 30 минут"
+      - alert: BibleBackupStale
+        expr: bible_backup_age_seconds > 2 * 86400
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Резервная копия {{ $labels.kind }} старше двух суток"
+      - alert: BibleVideoFeedsFailing
+        expr: bible_video_feeds_failing > 0
+        for: 1h
+        labels: {severity: info}
+        annotations:
+          summary: "Есть видеоканалы, которые не опрашиваются"
+      - alert: BibleVkInboxBacklog
+        expr: bible_vk_inbox_pending > 100
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Очередь событий ВКонтакте не разбирается"

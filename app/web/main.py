@@ -70,6 +70,8 @@ async def user_error(_request: Request, error: UserError) -> JSONResponse:
 app.include_router(build_router(require_key, lambda: create_pool(settings)))
 app.include_router(build_system_router(require_key, lambda: create_pool(settings)))
 app.include_router(build_net_router(require_key, lambda: create_pool(settings)))
+from app.web.api_ops import build_router as build_ops_router  # noqa: E402
+app.include_router(build_ops_router(require_key, lambda: create_pool(settings)))
 
 
 PANEL_DIR = Path(__file__).parent / 'static' / 'panel'
@@ -79,6 +81,15 @@ PANEL_DIR = Path(__file__).parent / 'static' / 'panel'
 async def panel_headers(request: Request, call_next):
     """Заголовки безопасности для статической панели и API: без кэша, без вложения в чужие страницы, скрипты только свои."""
     response = await call_next(request)
+    if (request.method in {'POST', 'PUT', 'PATCH', 'DELETE'} and request.url.path.startswith('/api/admin')
+            and response.status_code < 400 and not request.url.path.endswith('/preview')):
+        try:
+            from app.services import audit
+            pool = await create_pool(settings)
+            async with pool.acquire() as connection:
+                await audit.record(connection, 'panel', 'panel', f'{request.method} {request.url.path[10:]}'[:100])
+        except Exception:
+            pass                                             # журнал не должен ломать ответ
     if request.url.path.startswith(('/panel', '/api/admin')):
         response.headers.setdefault('X-Content-Type-Options', 'nosniff')
         response.headers.setdefault('Content-Security-Policy',

@@ -204,9 +204,8 @@ async def ignore(connection: Any, post_id: int) -> bool:
 
 async def command(connection: Any, actor_id: int, args: list[str], ru: bool = True) -> str:
     """Команда `/post ID` (отправить копию поста всем) и `/post ignore ID` (пропустить)."""
-    from app.services.accounts import is_admin
-    if not await is_admin(connection, actor_id):
-        raise UserError('forbidden')
+    from app.services.accounts import require_role
+    await require_role(connection, actor_id, 'editor')
     if len(args) == 2 and args[0] == 'ignore' and args[1].isdigit():
         ok = await ignore(connection, int(args[1]))
         return ('Пост пропущен.' if ru else 'Post ignored.') if ok else ('Не найден.' if ru else 'Not found.')

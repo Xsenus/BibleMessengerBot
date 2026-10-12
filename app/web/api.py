@@ -11,9 +11,10 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, time
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.errors import UserError
 from app.services import accounts, announcements, chat_sources, fanout, video_watch
 
 MAX_IMAGE_REQUEST = 6 * 1024 * 1024
@@ -152,6 +153,23 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
     @router.post('/announcements', status_code=201)
     async def create_announcement(payload: AnnouncementIn, conn: Any = Conn) -> dict:
         """Создать объявление (разовое или по расписанию)."""
+        return await _create(payload, conn)
+
+    @router.post('/announcements/import', status_code=201)
+    async def import_announcements(payload: Annotated[list[AnnouncementIn], Body(max_length=100)], conn: Any = Conn) -> dict:
+        """Загрузить список объявлений (JSON). Либо создаются все, либо ни одно (при ошибке в любом — откат)."""
+        created = []
+        async with conn.transaction():
+            for index, item in enumerate(payload):
+                try:
+                    created.append((await _create(item, conn))['id'])
+                except HTTPException as error:
+                    raise HTTPException(422, f'item_{index + 1}:{error.detail}') from None
+                except UserError as error:
+                    raise HTTPException(422, f'item_{index + 1}:{error.key}') from None
+        return {'created': created}
+
+    async def _create(payload: AnnouncementIn, conn: Any) -> dict:
         schedule = payload.model_dump(include={'kind', 'send_time', 'timezone', 'days_of_week', 'day_of_month',
                                                'interval_minutes', 'start_at', 'end_at', 'max_runs'})
         if payload.kind in {'daily', 'weekly', 'monthly'} and schedule['send_time'] is None:
@@ -304,9 +322,9 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
         return rows(await accounts.list_admins(conn))
 
     @router.post('/admins/invite', status_code=201)
-    async def invite_admin(conn: Any = Conn) -> dict:
-        """Создать одноразовый код приглашения; новый администратор отправляет боту `/claim КОД`."""
-        return {'code': await accounts.create_admin_invite(conn, await owner_id(conn))}
+    async def invite_admin(role: Literal['viewer', 'editor', 'admin'] = 'admin', conn: Any = Conn) -> dict:
+        """Создать одноразовый код приглашения с ролью; новый администратор отправляет боту `/claim КОД`."""
+        return {'code': await accounts.create_admin_invite(conn, await owner_id(conn), role=role), 'role': role}
 
     @router.delete('/admins/{user_id}')
     async def remove_admin(user_id: int, conn: Any = Conn) -> dict:

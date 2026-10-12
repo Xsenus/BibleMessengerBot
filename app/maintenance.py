@@ -34,6 +34,7 @@ RULES = (
     Rule('video_items', 'RETENTION_VIDEO_ITEMS_DAYS', 365, 'video_items', 'created_at<$1'),
     Rule('source_posts', 'RETENTION_SOURCE_POSTS_DAYS', 180, 'source_posts', "status<>'new' AND created_at<$1"),
     Rule('operator_events', 'RETENTION_EVENTS_DAYS', 180, 'operator_events', 'created_at<$1'),
+    Rule('admin_audit', 'RETENTION_AUDIT_DAYS', 365, 'admin_audit', 'created_at<$1'),
     Rule('usage_events', 'RETENTION_USAGE_DAYS', 400, 'usage_events', 'day<($1)::date'),
 )
 

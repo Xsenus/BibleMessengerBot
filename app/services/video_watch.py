@@ -237,9 +237,8 @@ async def add(connection: Any, platform: str, value: str, *, notify: bool = Fals
 
 async def command(connection: Any, actor_id: int, chat: Any, args: list[str]) -> tuple[str, Any]:
     """Команда `/video`: без аргументов — раздел; `add платформа канал [notify]`, `on|off|notify|silent|del ID`."""
-    from app.services.accounts import is_admin
-    if not await is_admin(connection, actor_id):
-        raise UserError('forbidden')
+    from app.services.accounts import require_role
+    await require_role(connection, actor_id, 'editor')
     ru = chat['ui_language'] == 'ru'
     if not args:
         return await section(connection, actor_id, chat, '')

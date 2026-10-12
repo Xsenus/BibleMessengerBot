@@ -57,18 +57,42 @@ async def is_admin(connection: Any, telegram_user_id: int) -> bool:
         'SELECT (is_owner OR is_admin) AND NOT is_blocked FROM telegram_users WHERE telegram_user_id=$1', telegram_user_id))
 
 
+ROLES = ('viewer', 'editor', 'admin', 'owner')       # по возрастанию прав
+
+
+async def role_of(connection: Any, telegram_user_id: int) -> str | None:
+    """Роль пользователя: owner, admin, editor, viewer; None — не администратор или заблокирован."""
+    row = await connection.fetchrow(
+        'SELECT is_owner,is_admin,admin_role,is_blocked FROM telegram_users WHERE telegram_user_id=$1', telegram_user_id)
+    if not row or row['is_blocked']:
+        return None
+    if row['is_owner']:
+        return 'owner'
+    return row['admin_role'] if row['is_admin'] else None
+
+
+async def require_role(connection: Any, telegram_user_id: int, minimum: str = 'editor') -> str:
+    """Проверить, что у пользователя роль не ниже `minimum` (просмотр — viewer, изменения — editor, настройки — admin)."""
+    role = await role_of(connection, telegram_user_id)
+    if role is None or ROLES.index(role) < ROLES.index(minimum):
+        raise UserError('forbidden')
+    return role
+
+
 def _invite_hash(code: str) -> str:
     return hashlib.sha256(code.strip().encode('utf-8')).hexdigest()
 
 
-async def create_admin_invite(connection: Any, owner_id: int, hours: int = 24) -> str:
+async def create_admin_invite(connection: Any, owner_id: int, hours: int = 24, role: str = 'admin') -> str:
     """Выдать одноразовый код приглашения администратора (только владелец). Код действует `hours` часов."""
     if not await is_owner(connection, owner_id):
         raise UserError('forbidden')
+    if role not in {'viewer', 'editor', 'admin'}:
+        raise UserError('invalid')
     code = secrets.token_urlsafe(9)
     await connection.execute(
-        "INSERT INTO admin_invites(code_hash,created_by,expires_at) VALUES($1,$2,now()+make_interval(hours=>$3))",
-        _invite_hash(code), owner_id, hours)
+        "INSERT INTO admin_invites(code_hash,created_by,expires_at,role) VALUES($1,$2,now()+make_interval(hours=>$3),$4)",
+        _invite_hash(code), owner_id, hours, role)
     return code
 
 
@@ -77,11 +101,12 @@ async def redeem_admin_invite(connection: Any, telegram_user_id: int, code: str)
     async with connection.transaction():
         invite = await connection.fetchrow(
             """UPDATE admin_invites SET used_by=$2,used_at=now() WHERE code_hash=$1 AND used_at IS NULL
-               AND expires_at>now() RETURNING id""", _invite_hash(code), telegram_user_id)
+               AND expires_at>now() RETURNING id,role""", _invite_hash(code), telegram_user_id)
         if not invite:
             return False
         result = await connection.execute(
-            'UPDATE telegram_users SET is_admin=true,updated_at=now() WHERE telegram_user_id=$1 AND NOT is_blocked', telegram_user_id)
+            'UPDATE telegram_users SET is_admin=true,admin_role=$2,updated_at=now() WHERE telegram_user_id=$1 AND NOT is_blocked',
+            telegram_user_id, invite['role'])
         if result != 'UPDATE 1':
             raise UserError('forbidden')
     return True
@@ -90,7 +115,7 @@ async def redeem_admin_invite(connection: Any, telegram_user_id: int, code: str)
 async def list_admins(connection: Any) -> list[Any]:
     """Владелец и администраторы с именем и платформой."""
     return await connection.fetch(
-        """SELECT telegram_user_id,platform,username,first_name,is_owner FROM telegram_users
+        """SELECT telegram_user_id,platform,username,first_name,is_owner,admin_role FROM telegram_users
            WHERE (is_owner OR is_admin) AND NOT is_blocked ORDER BY is_owner DESC,telegram_user_id""")
 
 

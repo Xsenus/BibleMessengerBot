@@ -11,7 +11,7 @@ from typing import Any
 from aiogram.types import InlineKeyboardMarkup
 
 from app.bot.common import button
-from app.services import accounts
+from app.services import accounts, audit
 from app.services.errors import UserError
 from app.services.formatting import escape
 
@@ -46,19 +46,24 @@ async def admins(connection: Any, actor_id: int, chat: Any, argument: str = '') 
     rows = []
     for item in await accounts.list_admins(connection):
         name = escape(item['first_name'] or item['username'] or str(item['telegram_user_id']))
-        lines.append(f"{'👑' if item['is_owner'] else '•'} {name} · {item['platform']} · <code>{item['telegram_user_id']}</code>")
+        lines.append(f"{'👑' if item['is_owner'] else '•'} {name} · {'owner' if item['is_owner'] else item['admin_role']} · {item['platform']} · <code>{item['telegram_user_id']}</code>")
         if owner and not item['is_owner']:
             rows.append([button(('Снять: ' if ru else 'Remove: ') + (item['first_name'] or str(item['telegram_user_id']))[:20],
                                 'adm', cid, f"rm{item['telegram_user_id']}")])
     if owner:
-        rows.append([button('➕ Пригласить' if ru else '➕ Invite', 'adm', cid, 'invite')])
+        rows.append([button('➕ Администратор' if ru else '➕ Admin', 'adm', cid, 'invite:admin'),
+                     button('✏ Редактор' if ru else '✏ Editor', 'adm', cid, 'invite:editor'),
+                     button('👁 Наблюдатель' if ru else '👁 Viewer', 'adm', cid, 'invite:viewer')])
     rows.append(back_row(chat))
     return '\n'.join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def invite(connection: Any, actor_id: int, chat: Any, argument: str = '') -> tuple[str, InlineKeyboardMarkup]:
-    """Создать одноразовый код приглашения (владелец). Новый администратор отправляет боту `/claim КОД` на любой платформе."""
-    code = await accounts.create_admin_invite(connection, actor_id)
+    """Создать одноразовый код приглашения (владелец). Роль: viewer (просмотр), editor (изменения), admin (всё, кроме управления списком).
+    Новый администратор отправляет боту `/claim КОД` на любой платформе."""
+    role = argument if argument in {'viewer', 'editor', 'admin'} else 'admin'
+    code = await accounts.create_admin_invite(connection, actor_id, role=role)
+    await audit.record(connection, actor_id, 'bot', 'admin.invite', role)
     ru = _ru(chat)
     text = (f'Код приглашения (действует 24 часа, одноразовый):\n<code>{code}</code>\n\n'
             'Новый администратор отправляет боту в личном чате (Telegram, MAX или ВКонтакте):\n'
@@ -71,6 +76,7 @@ async def invite(connection: Any, actor_id: int, chat: Any, argument: str = '') 
 async def remove(connection: Any, actor_id: int, chat: Any, argument: str = '') -> tuple[str, InlineKeyboardMarkup]:
     """Снять права администратора по внутреннему идентификатору (только владелец)."""
     done = await accounts.remove_admin(connection, actor_id, int(argument))
+    await audit.record(connection, actor_id, 'bot', 'admin.remove', argument)
     text = ('Права администратора сняты.' if _ru(chat) else 'Administrator rights removed.') if done else (
         'Не найден.' if _ru(chat) else 'Not found.')
     return text, InlineKeyboardMarkup(inline_keyboard=[back_row(chat)])
@@ -118,6 +124,11 @@ async def callback(connection: Any, actor_id: int, chat: Any, value: str) -> tup
     """Обработать нажатие кнопки меню администратора (`adm:раздел[:аргумент]`); права проверяются заново."""
     if not await accounts.is_admin(connection, actor_id):
         raise UserError('forbidden')
+    if value.startswith('invite:'):
+        return await invite(connection, actor_id, chat, value[7:])
+    if value[:2] in {'ap', 'ar', 'an', 'ad', 'sx', 'sm', 'vt', 'vn'} and value[2:].isdigit():
+        await accounts.require_role(connection, actor_id, 'editor')
+        await audit.record(connection, actor_id, 'bot', f'menu.{value[:2]}', value[2:])
     if value.startswith('rm') and value[2:].isdigit():
         return await remove(connection, actor_id, chat, value[2:])
     if value[:2] in {'ap', 'ar', 'an', 'ad'} and value[2:].isdigit():
@@ -141,7 +152,7 @@ async def command(connection: Any, actor_id: int, chat: Any, args: list[str]) ->
     if not args:
         return await home(connection, actor_id, chat)
     if args[0] == 'invite':
-        return await invite(connection, actor_id, chat)
+        return await invite(connection, actor_id, chat, args[1] if len(args) > 1 else 'admin')
     if args[0] == 'list':
         return await admins(connection, actor_id, chat)
     if args[0] == 'remove' and len(args) == 2 and args[1].lstrip('-').isdigit():

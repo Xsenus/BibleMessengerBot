@@ -322,11 +322,30 @@ async def next_for_user(connection: Any, telegram_user_id: int, translation: Any
 
 
 async def search_verses(connection: Any, translation_id: int, query: str, limit: int = 10) -> list[Any]:
-    """Поиск подстроки в тексте издания (2–200 символов; спецсимволы SQL не имеют особого смысла), до 20 результатов по порядку строк."""
+    """Поиск в тексте издания (2–200 символов): сначала точная подстрока, затем — по словам с учётом форм слов
+    (все слова, а если таких нет — любые из них, лучшие совпадения первыми). До 20 результатов."""
     query = query.strip()
     if not 2 <= len(query) <= 200:
         return []
+    limit = min(max(limit,1),20)
     escaped_query = query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
-    return await connection.fetch("""SELECT book_code,chapter,verse,verse_end,text FROM verses
+    rows = await connection.fetch("""SELECT book_code,chapter,verse,verse_end,text FROM verses
         WHERE translation_id=$1 AND text<>'' AND search_text LIKE lower($2) ESCAPE '\\'
-        ORDER BY source_line LIMIT $3""",translation_id,'%'+escaped_query+'%',min(max(limit,1),20))
+        ORDER BY source_line LIMIT $3""",translation_id,'%'+escaped_query+'%',limit)
+    if rows or len(query.split())<2 and len(query)<4:
+        return rows
+    return await words_search(connection,translation_id,query,limit)
+
+
+async def words_search(connection: Any, translation_id: int, query: str, limit: int) -> list[Any]:
+    """Полнотекстовый поиск PostgreSQL по словам (морфология русского или английского языка издания); сначала стихи со всеми словами, потом с любыми."""
+    config = 'russian' if (await connection.fetchval('SELECT l.code FROM translations t JOIN languages l ON l.id=t.language_id WHERE t.id=$1',translation_id) or 'ru')=='ru' else 'english'
+    sql = """SELECT book_code,chapter,verse,verse_end,text,ts_rank(to_tsvector($4::regconfig,search_text),q) AS rank
+        FROM verses,(SELECT {query} AS q) AS s
+        WHERE translation_id=$1 AND text<>'' AND to_tsvector($4::regconfig,search_text) @@ q
+        ORDER BY rank DESC,source_line LIMIT $3"""
+    for form in ("websearch_to_tsquery($4::regconfig,$2)","replace(plainto_tsquery($4::regconfig,$2)::text,' & ',' | ')::tsquery"):
+        rows = await connection.fetch(sql.format(query=form),translation_id,query,limit,config)
+        if rows:
+            return rows
+    return []

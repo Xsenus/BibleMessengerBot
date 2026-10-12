@@ -336,9 +336,8 @@ async def command(connection: Any, actor_id: int, chat: Any, raw: str) -> tuple[
     """
     from aiogram.types import InlineKeyboardMarkup
 
-    from app.services.accounts import is_admin
-    if not await is_admin(connection, actor_id):
-        raise UserError('forbidden')
+    from app.services.accounts import require_role
+    await require_role(connection, actor_id, 'editor')
     if chat['chat_type'] != 'private':
         raise UserError('private_only')
     ru = chat['ui_language'] == 'ru'

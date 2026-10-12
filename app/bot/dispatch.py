@@ -10,6 +10,7 @@ from app.bot.ui import main_keyboard,welcome_text,menu_hint,search_prompt
 from app.services import bible, broadcast
 from app.services.platforms import is_bridged
 from app.services import passage,illustrations,readings
+from app.services import audit
 from app.services.accounts import claim_owner,redeem_admin_invite
 from app.services.destinations import configure_chat,ensure_resolved,cancel_queued
 from app.services.errors import UserError
@@ -110,6 +111,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         ok = len(args)==1 and await claim_owner(connection,telegram_user_id=user.id,supplied_code=args[0],expected_code=settings.owner_claim_code)
         if not ok and len(args)==1 and await redeem_admin_invite(connection,user.id,args[0]):
             # Код-приглашение от владельца: пользователь (на любой платформе) становится администратором.
+            await audit.record(connection,user.id,'bot','admin.claim_invite')
             return ('✅ Вы назначены администратором. Меню: /admin' if locale=='ru' else '✅ You are now an administrator. Menu: /admin'),None
         return tr(locale,'owner_ok' if ok else 'owner_fail'),None
     # /announce — объявления и расписания (текст берётся из исходного сообщения, чтобы сохранить переводы строк)
@@ -117,15 +119,44 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         from app.services import announcements
         raw = (message.text or '').split(None,1)
         text,markup = await announcements.command(connection,user.id,chat,raw[1] if len(raw)>1 else '')
+        words = (raw[1] if len(raw)>1 else '').split(None,1)
+        if words and words[0] != 'list':
+            await audit.record(connection,user.id,'bot','announce.'+words[0][:20],'',{'text':raw[1][:120]})
         return text,(markup if markup.inline_keyboard else None)
     # /post ID | /post ignore ID — копия поста источника всем / пропустить
     if name=='post':
         from app.services import chat_sources
-        return await chat_sources.command(connection,user.id,args,locale=='ru'),None
+        result = await chat_sources.command(connection,user.id,args,locale=='ru')
+        await audit.record(connection,user.id,'bot','post.'+(args[0] if args and not args[0].isdigit() else 'publish'),args[-1] if args else '')
+        return result,None
     # /video [add платформа канал [notify] | on|off|notify|silent|del ID] — слежение за видеоканалами
     if name=='video':
         from app.services import video_watch
-        return await video_watch.command(connection,user.id,chat,args)
+        result = await video_watch.command(connection,user.id,chat,args)
+        if args and args[0] != 'list':
+            await audit.record(connection,user.id,'bot','video.'+args[0][:20],' '.join(args[1:])[:100])
+        return result
+    # Закладки и серия чтения
+    if name in {'bookmark','bookmarks','unbookmark','done','streak'}:
+        from app.services import reader
+        ru = locale=='ru'
+        edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
+        if not edition:
+            raise UserError('not_ready')
+        today = datetime.now(ZoneInfo(chat['timezone'])).date()
+        if name=='bookmark':
+            if not args:
+                return ('Укажите адрес: <code>/bookmark Ин 3:16 заметка</code>' if ru else 'Give a reference: <code>/bookmark John 3:16 note</code>'),None
+            identifier,title = await reader.add_bookmark(connection,chat['telegram_chat_id'],edition,' '.join(args))
+            return (f'🔖 Закладка №{identifier}: {title}' if ru else f'🔖 Bookmark #{identifier}: {title}'),None
+        if name=='bookmarks':
+            return await reader.listing(connection,chat['telegram_chat_id'],edition,ru),None
+        if name=='unbookmark':
+            done = len(args)==1 and args[0].isdigit() and await reader.remove_bookmark(connection,chat['telegram_chat_id'],int(args[0]))
+            return (('Закладка удалена.' if ru else 'Bookmark removed.') if done else tr(locale,'no_result')),None
+        if name=='done':
+            await reader.mark_read(connection,chat['telegram_chat_id'],today)
+        return reader.streak_text(*await reader.streak(connection,chat['telegram_chat_id'],today),ru),None
     # /admin — меню администратора (доступно администраторам и владельцу)
     if name=='admin':
         from app.bot import admin
@@ -251,12 +282,17 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         return bible.license_details(edition,locale),None
     # /next — следующая глава (отправляет воркер)
     if name=='next':
+        from app.services import reader
+        await reader.mark_read(connection,chat['telegram_chat_id'],datetime.now(ZoneInfo(chat['timezone'])).date())
         await enqueue_next(connection,chat,edition,f'{message.chat.id}:{message.message_id}',settings.max_message_length)
         # The delivery worker sends the reading; no separate queue receipt is needed.
         return None,None
     # Команды выбора стиха: /today, /random, /topic, /search, /read
     local_date = datetime.now(ZoneInfo(chat['timezone'])).date()
     row = None
+    if name in {'today','read'}:
+        from app.services import reader
+        await reader.mark_read(connection,chat['telegram_chat_id'],local_date)
     if name=='today':
         row = await readings.daily(connection,edition,str(chat['telegram_chat_id']),local_date)
     elif name=='random':

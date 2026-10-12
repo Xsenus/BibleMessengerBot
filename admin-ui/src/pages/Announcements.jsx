@@ -10,6 +10,8 @@ const EMPTY = { title: '', body: '', kind: 'weekly', time: '10:00', timezone: 'E
 
 function Form({ onCreated }) {
   const [f, setF] = useState(EMPTY);
+  const [preview, setPreview] = useState(null);
+  const templates = useData('/announcement-templates');
   const { run, message, busy } = useAction(onCreated);
   const set = (patch) => setF((old) => ({ ...old, ...patch }));
   const toggle = (list, value) => (list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
@@ -51,6 +53,14 @@ function Form({ onCreated }) {
       <div className="row"><span className="muted">Кому (пусто — всем):</span>{PLATFORMS.map(([id, label]) => (
         <label key={id}><input type="checkbox" checked={f.platforms.includes(id)} onChange={() => set({ platforms: toggle(f.platforms, id) })} /> {label}</label>))}</div>
       <div className="row"><label>Картинка: <input type="file" accept="image/png,image/jpeg,image/webp" onChange={upload} /></label>{f.assetId && <span>✔ #{f.assetId}</span>}</div>
+      <div className="row">
+        <select value="" onChange={(e) => { const t = (templates.data || []).find((x) => String(x.id) === e.target.value); if (t) set({ title: t.title, body: t.body }); }}>
+          <option value="">Шаблон…</option>{(templates.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+        <button type="button" className="small" disabled={!f.body.trim()} onClick={() => { const name = prompt('Название шаблона'); if (name) run(async () => { await api('/announcement-templates', { method: 'POST', body: { name, title: f.title, body: f.body } }); await templates.reload(); }, 'Шаблон сохранён'); }}>Сохранить как шаблон</button>
+        <button type="button" className="small" disabled={!f.body.trim()} onClick={() => run(async () => setPreview(await api('/announcements/preview', { method: 'POST', body: { title: f.title, body: f.body, audience: { platforms: f.platforms }, asset_id: f.assetId } })), 'Предпросмотр готов')}>Предпросмотр</button>
+      </div>
+      {preview && <div className="card"><b>Получателей: {preview.total}</b>{Object.entries(preview.platforms).map(([name, p]) => (
+        <div key={name}><b>{name}</b> — {p.recipients}{p.parts.map((part, i) => <pre key={i} style={{ whiteSpace: 'pre-wrap' }}>{part}</pre>)}</div>))}</div>}
       <button disabled={busy || !f.body.trim()}>Создать</button> {message && <span className="muted">{message}</span>}
     </form>
   );
@@ -77,6 +87,7 @@ export default function Announcements() {
   return (
     <section>
       <h2>Объявления</h2>
+      <p className="muted">Импорт расписания: <input type="file" accept="application/json" disabled={busy} onChange={(e) => { const file = e.target.files[0]; if (file) run(async () => { const items = JSON.parse(await file.text()); const r = await api('/announcements/import', { method: 'POST', body: items }); return r; }, 'Импортировано'); e.target.value = ''; }} /> (JSON — список объявлений в том же формате, что у API; принимается всё или ничего)</p>
       <Help title="Как пользоваться">
         <ol>
           <li>Выберите <b>когда</b> отправлять: «Один раз» (пусто — сразу), «Каждый день», «По дням недели» (например, суббота 10:00), «Раз в месяц» или «Через интервал» (не реже 5 минут).</li>
