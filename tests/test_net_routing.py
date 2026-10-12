@@ -228,3 +228,65 @@ async def test_telegram_switches_route_only_when_message_surely_not_sent():
         await session.make_request(None, FakeMethod('sendMessage'))
     assert fakes['proxy:1'].calls == 0                                       # таймаут отправки: дубль недопустим
     assert await session.make_request(None, FakeMethod('getUpdates')) == 'sent'     # чтение безопасно повторить
+
+
+# ----- настоящие сокеты: локальный HTTP-прокси и сервер ---------------------------------------------------------------
+
+import asyncio  # noqa: E402
+
+
+async def start_server(handler):
+    server = await asyncio.start_server(handler, '127.0.0.1', 0)
+    return server, server.sockets[0].getsockname()[1]
+
+
+async def http_reply(writer, body: bytes):
+    writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n' % len(body) + body)
+    await writer.drain()
+    writer.close()
+
+
+@pytest.mark.asyncio
+async def test_real_sockets_request_goes_through_proxy_and_falls_back_when_proxy_dies(monkeypatch):
+    for name in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv('NO_PROXY', '')
+    seen = {'proxy': [], 'origin': []}
+
+    async def origin(reader, writer):
+        seen['origin'].append((await reader.readuntil(b'\r\n\r\n')).split(b'\r\n')[0])
+        await http_reply(writer, b'origin-direct')
+
+    async def proxy(reader, writer):
+        head = await reader.readuntil(b'\r\n\r\n')
+        seen['proxy'].append(head.split(b'\r\n')[0])
+        await http_reply(writer, b'via-proxy')
+
+    origin_server, origin_port = await start_server(origin)
+    proxy_server, proxy_port = await start_server(proxy)
+    r = Router()
+    live = Route('proxy:1', 'live', f'http://127.0.0.1:{proxy_port}')
+    dead = Route('proxy:2', 'dead', 'http://127.0.0.1:1')
+    r.set_policies({'sources': Policy('failover', 3, [dead, live, DIRECT])})
+    transport = SmartTransport('sources', router=r)
+    url = f'http://127.0.0.1:{origin_port}/hello'
+    try:
+        async with httpx.AsyncClient(transport=transport) as client:
+            assert (await client.get(url)).text == 'via-proxy'                   # первый путь мёртв — сработал второй (прокси)
+            assert seen['proxy'] and seen['proxy'][0].startswith(b'GET http://127.0.0.1')
+            proxy_server.close()
+            await proxy_server.wait_closed()                                      # теперь «живой» прокси тоже упал
+            for _ in range(3):
+                assert (await client.get(url)).text == 'origin-direct'            # запрос всё равно доходит напрямую
+        assert r.state('sources', dead).failures >= 1 and r.state('sources', DIRECT).successes >= 1
+    finally:
+        origin_server.close()
+        await origin_server.wait_closed()
+
+
+def test_socks_and_http_proxies_can_be_constructed():
+    from aiogram.client.session.aiohttp import AiohttpSession
+    httpx.AsyncHTTPTransport(proxy=httpx.Proxy('socks5://user:pw@127.0.0.1:1080'))
+    httpx.AsyncHTTPTransport(proxy=httpx.Proxy('http://127.0.0.1:3128'))
+    AiohttpSession(proxy='socks5://127.0.0.1:1080')
+    AiohttpSession(proxy='http://127.0.0.1:3128')

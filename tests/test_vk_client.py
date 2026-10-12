@@ -164,3 +164,16 @@ async def test_reply_uses_forward_with_conversation_message_id():
 @pytest.mark.parametrize('code', [900, 912])
 def test_blocked_user_codes_are_forbidden(code):
     assert VkAPIError(code).send_error().kind == 'forbidden'
+
+
+@pytest.mark.asyncio
+async def test_to_voice_produces_ogg_opus_when_ffmpeg_is_available():
+    import shutil
+    import subprocess
+    if not shutil.which('ffmpeg'):
+        pytest.skip('ffmpeg is not installed')
+    mp3 = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-f', 'mp3', 'pipe:1'],
+                         capture_output=True, check=True).stdout
+    from app.vkbot.transport import to_voice
+    ogg = await to_voice(mp3)
+    assert ogg[:4] == b'OggS' and b'OpusHead' in ogg[:200]

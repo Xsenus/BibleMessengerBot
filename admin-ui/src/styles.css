@@ -35,4 +35,4 @@ code { background: var(--line); padding: 1px 5px; border-radius: 4px; }
 .help summary { cursor: pointer; font-weight: 600; }
 .helpbody { margin-top: 8px; }
 .helpbody ol, .helpbody ul { margin: 6px 0 6px 18px; padding: 0; }
-.check { display: flex; gap: 8px; align-items: baseline; margin: 4px 0; }
+.check { margin: 6px 0; line-height: 1.6; }

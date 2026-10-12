@@ -21,6 +21,6 @@ def test_markdown_links_resolve():
 
 
 def test_every_docs_folder_has_an_index():
-    for folder in ("getting-started", "user-guide", "admin", "platforms", "features", "operations", "reference"):
+    for folder in ("getting-started", "user-guide", "admin", "platforms", "features", "operations", "reference", "development"):
         assert (ROOT / "docs" / folder / "README.md").is_file(), folder
     assert (ROOT / "docs" / "README.md").is_file()

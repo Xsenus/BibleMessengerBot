@@ -10,6 +10,8 @@
 
 Миграция 024 добавляет частичные индексы `delivery_log`, `operator_events`, `max_inbox` и `prayer_occurrences(delivery_id)` для метрик и удаления старых строк без полных просмотров.
 
+Миграции 034–035: `net_proxies`, `net_policies`, `net_routes`, `net_health` (сетевые маршруты); `vk_keyboard_pages` (страницы клавиатур VK), попытки и статус `failed` у `announcement_runs`, вид `voice` у `vk_media`.
+
 Миграция 033: область иллюстраций `range` и колонка `verse_illustrations.verse_end` (последний стих диапазона).
 
 Миграции 026–032 (032 — `image_custom_providers`: генераторы картинок из панели, ключи в зашифрованном виде; резерв бесплатных попыток 0 USD):
