@@ -17,7 +17,8 @@ from app.services.chat_sources import ingest_post
 from app.services.errors import UserError
 from app.services.i18n import tr
 from app.services.locks import chat_lock
-from app.vkbot.bridge import CONVERSATION_BASE, ReplyContext, VkBotBridge
+from app.platforms.bridge import ReplyContext
+from app.vkbot.bridge import CONVERSATION_BASE, VkBotBridge
 from app.vkbot.client import VkAPIError
 from app.vkbot.identities import lookup, register
 from app.worker.delivery import insert_payload

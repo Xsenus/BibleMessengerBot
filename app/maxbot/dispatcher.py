@@ -11,7 +11,8 @@ from aiogram.types import CallbackQuery, Chat, Message
 
 from app.bot import handlers
 from app.bot.commands import MANAGEMENT, parse_command
-from app.maxbot.bridge import ReplyContext, user_model
+from app.maxbot.bridge import user_model
+from app.platforms.bridge import ReplyContext
 from app.maxbot.identities import lookup, register, remember_message
 from app.services import bible, passage
 from app.services.features import support_enabled

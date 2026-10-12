@@ -10,6 +10,7 @@ from dataclasses import replace
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
 from app.logging import configure_logging
+from app.net import store as net_store
 from app.services import artwork, cloud_backup, image_router
 from app.services.locks import lock_key
 
@@ -50,6 +51,7 @@ async def worker():
     pool = await create_pool(settings)
     beat = None
     copies = None
+    netloop = None
     try:
         async with pool.acquire() as owner:
             await acquire_runtime_guard(owner)
@@ -61,6 +63,7 @@ async def worker():
             await image_router.configure(owner, art)
             beat = asyncio.create_task(heartbeat(pool))
             copies = asyncio.create_task(mirror(pool, cloud))
+            netloop = asyncio.create_task(net_store.refresh_loop(pool))
             while True:
                 async with pool.acquire() as c:
                     await artwork.upgrade_queued_prompts(c)
@@ -75,7 +78,7 @@ async def worker():
                             await artwork.dispatch_requests(c)
                 await asyncio.sleep(10)
     finally:
-        for task in (beat, copies):
+        for task in (beat, copies, netloop):
             if task:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

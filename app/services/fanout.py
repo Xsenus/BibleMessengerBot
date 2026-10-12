@@ -10,11 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.services.formatting import plain_text, split_message, split_wire_message, utf16_length
+from app.services.formatting import plain_text, split_message, utf16_length
 from app.services.locks import chat_lock
+from app.services.platforms import ALL
 
 LOGGER = logging.getLogger(__name__)
-PLATFORMS = ('telegram', 'max', 'vk')
+PLATFORMS = ALL
 CHAT_TYPES = ('private', 'group', 'supergroup', 'channel')
 
 
@@ -59,11 +60,11 @@ async def count_recipients(connection: Any, audience: dict | None = None) -> int
 
 
 def platform_parts(platform: str, text: str, max_length: int = 3900) -> list:
-    """Части текста для платформы: Telegram и ВКонтакте — строки, MAX — части `max_text` (лимит сырого HTML)."""
-    if platform == 'max':
-        return [dict(kind='max_text', text=part) for part in split_wire_message(text, min(max_length, 3600))]
-    if platform == 'vk':
-        return split_message(text, 4000)
+    """Части текста для платформы: Telegram — строки; мостовые платформы режут текст по правилам своего описания (`PlatformSpec.split`)."""
+    from app.platforms import REGISTRY
+    spec = REGISTRY.get(platform)
+    if spec is not None and spec.split is not None:
+        return spec.split(text, max_length)
     return split_message(text, max_length)
 
 

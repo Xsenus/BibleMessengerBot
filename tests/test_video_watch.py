@@ -13,7 +13,7 @@ CHANNEL = 'UC' + 'a' * 22
 
 
 def atom(*ids):
-    entries = ''.join(f'<entry><yt:videoId>{i}</yt:videoId><title>T {i}</title><published>2026-01-0{n + 1}T10:00:00+00:00</published></entry>'
+    entries = ''.join(f'<entry><yt:videoId>{i}</yt:videoId><title>T {i}</title><published>2099-01-0{n + 1}T10:00:00+00:00</published></entry>'
                       for n, i in enumerate(ids))
     return (f'<feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015">{entries}</feed>').encode()
 

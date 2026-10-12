@@ -10,12 +10,13 @@ import ImageProviders from './pages/ImageProviders.jsx';
 import Chats from './pages/Chats.jsx';
 import Deliveries from './pages/Deliveries.jsx';
 import Settings from './pages/Settings.jsx';
+import Network from './pages/Network.jsx';
 
 const PAGES = [
   ['overview', 'Состояние', Overview], ['announcements', 'Объявления', Announcements],
   ['sources', 'Источники', Sources], ['videos', 'Видео', Videos], ['images', 'Генераторы картинок', ImageProviders],
   ['chats', 'Чаты и пользователи', Chats], ['deliveries', 'Доставки', Deliveries], ['admins', 'Администраторы', Admins],
-  ['settings', 'Настройки', Settings],
+  ['network', 'Сеть и прокси', Network], ['settings', 'Настройки', Settings],
 ];
 
 function Login({ onDone }) {

@@ -58,6 +58,7 @@ def require_key(x_admin_key: Annotated[str | None,Header()] = None) -> None:
 
 
 from app.web.api import build_router  # noqa: E402
+from app.web.api_net import build_router as build_net_router  # noqa: E402
 from app.web.api_system import build_router as build_system_router  # noqa: E402  (нужны require_key и settings, определённые выше)
 
 @app.exception_handler(UserError)
@@ -68,6 +69,7 @@ async def user_error(_request: Request, error: UserError) -> JSONResponse:
 
 app.include_router(build_router(require_key, lambda: create_pool(settings)))
 app.include_router(build_system_router(require_key, lambda: create_pool(settings)))
+app.include_router(build_net_router(require_key, lambda: create_pool(settings)))
 
 
 PANEL_DIR = Path(__file__).parent / 'static' / 'panel'

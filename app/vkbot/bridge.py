@@ -5,11 +5,9 @@ DTO aiogram — лишь внутренняя форма команд и наж�
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from contextvars import ContextVar
-from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
@@ -17,35 +15,26 @@ from aiogram.methods import AnswerCallbackQuery
 from aiogram.types import Chat
 
 from app.maxbot.bridge import user_model  # noqa: F401  (общая модель пользователя aiogram)
-from app.services import bible, illustrations, message_languages
+from app.platforms.bridge import BridgeBase
+from app.platforms.builtin import VK
 from app.services.errors import UserError
-from app.services.formatting import split_message
 from app.vkbot.client import VkAPIError, VkClient
 from app.vkbot.identities import external, lookup
 from app.vkbot.transport import VkSender
 from app.vkbot.ui import keyboard_pages, persistent
-from app.worker.delivery import insert_payload
 
 LOGGER = logging.getLogger(__name__)
 CONVERSATION_BASE = 2_000_000_000
 
 
-@dataclass(slots=True)
-class ReplyContext:
-    key: str
-    position: int = 0
-
-
-class VkBotBridge:
+class VkBotBridge(BridgeBase):
     """Объект, притворяющийся ботом aiogram для общих обработчиков: отвечает на `get_me`, `get_chat`,
     `get_chat_member`, подтверждает нажатия и ставит ответы в очередь доставки."""
-    platform = 'vk'
+    spec = VK
 
     def __init__(self, client: VkClient, pool: Any, info: dict) -> None:
-        self.client, self.pool = client, pool
+        super().__init__(client, pool, dict(info, username=info.get('screen_name')))
         self.id = int(info['id'])                      # номер сообщества
-        self.info = dict(info, username=info.get('screen_name'))
-        self.reply_context: ContextVar[ReplyContext | None] = ContextVar('vk_reply_context', default=None)
         self.event_context: ContextVar[dict | None] = ContextVar('vk_event_context', default=None)
 
     def sender(self, connection: Any) -> VkSender:
@@ -104,50 +93,17 @@ class VkBotBridge:
                 LOGGER.warning('VK callback acknowledgement deferred: %s', error.code)
         return True
 
-    def _key(self) -> str:
-        """Выдать следующий ключ идемпотентности ответа текущего события; вне контекста события — ошибка."""
-        context = self.reply_context.get()
-        if context is None:
-            raise RuntimeError('VK response requires a durable event context')
-        key = f'vk-event:{context.key}:reply:{context.position}'
-        context.position += 1
-        return key
+    def attach_keyboard(self, chunk: dict, markup: Any, chat: Any) -> None:
+        """Добавить в часть очереди клавиатуру VK: первая страница и (если кнопок много) остальные страницы."""
+        pages = keyboard_pages(markup, locale=chat['ui_language'])
+        if pages:
+            chunk['vk_keyboard'] = pages[0]
+            if len(pages) > 1:
+                chunk['vk_pages'] = pages[1:]
 
-    async def queue_response(self, connection: Any, settings: Any, chat_id: int, text: Any, markup: Any = None,
-                             *, frozen_chunks: list | None = None) -> int:
-        """Сохранить готовый ответ интерфейса в очередь до того, как событие будет помечено обработанным."""
-        key = self._key()
-        chat = await connection.fetchrow("SELECT * FROM telegram_chats WHERE telegram_chat_id=$1 AND platform='vk'", chat_id)
-        if not chat:
-            raise UserError('forbidden')
-        if frozen_chunks is None:
-            chunks = illustrations.chunks(text, getattr(text, 'image_id', None), min(3600, settings.max_message_length))
-            chunks = await message_languages.prepare(connection, text, chunks, chat, source_key=key)
-            prepared: list = []
-            for chunk in chunks:
-                if isinstance(chunk, dict) and chunk.get('card_id'):
-                    prepared.append(chunk)
-                elif isinstance(chunk, str):
-                    prepared.extend(dict(kind='vk_text', text=part) for part in split_message(chunk, 3600))
-                else:
-                    prepared.append(chunk)
-            frozen_chunks = prepared
-            if markup is not None and frozen_chunks and not frozen_chunks[-1].get('card_id'):
-                pages = keyboard_pages(markup, locale=chat['ui_language'])
-                if pages:
-                    frozen_chunks[-1]['vk_keyboard'] = pages[0]
-                    if len(pages) > 1:
-                        frozen_chunks[-1]['vk_pages'] = pages[1:]
-        translation = await bible.chat_translation(connection, chat_id)
-        return await insert_payload(connection, chat, translation or {'id': None}, str(text), key,
-                                    'vk_ui', {'kind': 'vk_ui'}, frozen_chunks=frozen_chunks)
-
-    async def queue_welcome(self, connection: Any, settings: Any, chat_id: int, text: Any, markup: Any) -> int:
-        """Поставить в очередь приветствие с картинкой и постоянной клавиатурой."""
-        from app.bot.ui import WELCOME_PATH
-        digest = hashlib.sha256(WELCOME_PATH.read_bytes()).hexdigest()
-        return await self.queue_response(connection, settings, chat_id, text, markup, frozen_chunks=[
-            dict(kind='vk_welcome', text=str(text), asset_sha256=digest, vk_keyboard=persistent(markup))])
+    def welcome_chunk(self, text: Any, digest: str, markup: Any) -> dict:
+        """Часть приветствия VK: картинка и постоянная клавиатура."""
+        return dict(kind='vk_welcome', text=str(text), asset_sha256=digest, vk_keyboard=persistent(markup))
 
 
 def event_json(event: dict) -> str:

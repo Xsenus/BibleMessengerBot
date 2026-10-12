@@ -7,6 +7,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from app.net.transport import SmartTransport
+
 from app.maxbot.config import MaxSettings
 from app.services.errors import SendError
 
@@ -80,14 +82,16 @@ class MaxClient:
     def __init__(self, config: MaxSettings, *, transport: httpx.AsyncBaseTransport | None = None):
         """Создать два HTTP-клиента: основной с авторизацией и отдельный для загрузки файлов (чтобы токен API не ушёл на сторонние хосты); редиректы запрещены."""
         self.config = config
+        verify = config.tls_context()
+        # Без внедрённого транспорта запросы идут через маршруты сервиса `max` (напрямую или через прокси — по настройкам панели).
         self.http = httpx.AsyncClient(
             base_url=config.api_url, headers={'Authorization': config.token},
-            timeout=httpx.Timeout(25, connect=10), verify=config.tls_context(),
-            follow_redirects=False, transport=transport,
+            timeout=httpx.Timeout(25, connect=10), verify=verify,
+            follow_redirects=False, transport=transport or SmartTransport('max', verify=verify),
         )
         # Separate client prevents API Authorization from leaking to upload hosts.
-        self.upload_http = httpx.AsyncClient(timeout=120, verify=config.tls_context(),
-                                             follow_redirects=False, transport=transport)
+        self.upload_http = httpx.AsyncClient(timeout=120, verify=verify, follow_redirects=False,
+                                             transport=transport or SmartTransport('max', verify=verify))
 
     async def close(self) -> None:
         """Закрыть оба HTTP-клиента."""

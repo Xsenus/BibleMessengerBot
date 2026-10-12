@@ -9,6 +9,7 @@ from app.maxbot.client import MaxAPIError, MaxClient
 from app.maxbot.config import MaxSettings
 from app.maxbot.transport import MaxSender
 from app.services.errors import SendError
+from app.services.platforms import BRIDGED
 from app.vkbot.client import VkClient
 from app.vkbot.config import VkSettings
 from app.vkbot.transport import VkSender
@@ -81,10 +82,10 @@ class DestinationSender:
         platform = await self.connection.fetchval('SELECT platform FROM telegram_chats WHERE telegram_chat_id=$1', chat_id)
         if platform == 'telegram':
             sender = TelegramSender(self.transports.telegram_bot, self.connection, self.transports.settings)
-        elif platform == 'max':
-            sender = await self.transports.max_sender(self.connection)
-        elif platform == 'vk':
-            sender = await self.transports.vk_sender(self.connection)
         else:
-            raise SendError('rejected')
+            # Мостовые платформы: отправитель создаётся методом `<платформа>_sender` набора транспортов (см. docs/development/new-platform.md).
+            builder = getattr(self.transports, f'{platform}_sender', None) if platform in BRIDGED else None
+            if builder is None:
+                raise SendError('rejected')
+            sender = await builder(self.connection)
         return await sender.send(chat_id, text, thread_id, reply_markup=reply_markup)

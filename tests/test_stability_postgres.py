@@ -74,7 +74,7 @@ async def test_parallel_video_pollers_notify_once(db):
     state = {'ids': ['aaaaaaaaaaa']}
 
     def handler(request):
-        entries = ''.join(f'<entry><yt:videoId>{i}</yt:videoId><title>t</title><published>2026-01-01T00:00:00+00:00</published></entry>' for i in state['ids'])
+        entries = ''.join(f'<entry><yt:videoId>{i}</yt:videoId><title>t</title><published>2099-01-01T00:00:00+00:00</published></entry>' for i in state['ids'])
         return httpx.Response(200, content=(f'<feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015">{entries}</feed>').encode())
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     await vw.run_due(c, http)                                              # первый опрос: baseline

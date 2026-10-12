@@ -13,8 +13,10 @@ from app.bot.handlers import router
 from app.bot.donations import router as donations_router
 from app.bot.native_payments import router as native_payments_router
 from app.config import Settings
+from app.net.telegram import RoutedSession
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
 from app.logging import configure_logging
+from app.net import store as net_store
 from app.services import features
 from app.services.locks import lock_key
 from app.services.donation_reconciliation import reconciliation_loop
@@ -33,7 +35,7 @@ async def main() -> None:
     settings = Settings.from_env()
     await wait_for_database(settings)
     pool = await create_pool(settings)
-    bot = Bot(settings.bot_token,default=DefaultBotProperties(parse_mode='HTML'))
+    bot = Bot(settings.bot_token,session=RoutedSession('telegram'),default=DefaultBotProperties(parse_mode='HTML'))
     dispatcher = Dispatcher()
     dispatcher.include_router(donations_router)
     dispatcher.include_router(native_payments_router)
@@ -49,7 +51,7 @@ async def main() -> None:
             if webhook.url:
                 raise RuntimeError('This bot has an active webhook; deliberately remove it before switching to polling')
             tasks = [asyncio.create_task(heartbeat(owner)),asyncio.create_task(branding_loop(bot,pool)),
-                asyncio.create_task(features.refresh_loop(pool)),
+                asyncio.create_task(features.refresh_loop(pool)),asyncio.create_task(net_store.refresh_loop(pool)),
                 asyncio.create_task(reconciliation_loop(bot,pool)),
                 asyncio.create_task(dispatcher.start_polling(
                 bot,allowed_updates=dispatcher.resolve_used_update_types(),close_bot_session=False,

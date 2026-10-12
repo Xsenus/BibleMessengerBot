@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 
+from app.net.transport import SmartTransport
 from app.services.errors import SendError
 from app.vkbot.config import VkSettings
 
@@ -49,11 +50,13 @@ class VkClient:
     def __init__(self, settings: VkSettings, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.settings = settings
         self.http = httpx.AsyncClient(base_url=settings.api_url, timeout=httpx.Timeout(30, connect=10),
-                                      follow_redirects=False, transport=transport)
+                                      follow_redirects=False,
+                                      transport=transport or SmartTransport('vk'))
         # Отдельный клиент для загрузки файлов и Long Poll: токен API на сторонние хосты не уходит.
         self._pace_lock = asyncio.Lock()
         self._last_call = 0.0
-        self.raw = httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10), follow_redirects=False, transport=transport)
+        self.raw = httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10), follow_redirects=False,
+                                     transport=transport or SmartTransport('vk'))
 
     async def close(self) -> None:
         """Закрыть HTTP-клиенты."""

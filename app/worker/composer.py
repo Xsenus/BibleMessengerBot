@@ -5,6 +5,7 @@ import logging
 
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
+from app.net import store as net_store
 from app.services import announcements, prayers
 from app.services.locks import lock_key
 
@@ -34,12 +35,14 @@ async def worker():
     await wait_for_database(settings)
     pool=await create_pool(settings)
     beat=None
+    netloop=None
     try:
         async with pool.acquire() as owner:
             await acquire_runtime_guard(owner)
             if not await owner.fetchval('SELECT pg_try_advisory_lock($1)',lock_key('singleton-composer',1)):
                 raise RuntimeError('Another prayer composer is running')
             beat=asyncio.create_task(heartbeat(pool))
+            netloop=asyncio.create_task(net_store.refresh_loop(pool))
             while True:
                 async with pool.acquire() as connection:
                     # Каждый шаг изолирован: сбой объявлений не останавливает молитвы и наоборот.
@@ -52,10 +55,11 @@ async def worker():
                             LOGGER.error('Composer step %s failed (%s)', getattr(step, '__name__', 'step'), type(error).__name__)
                 await asyncio.sleep(10)
     finally:
-        if beat:
-            beat.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await beat
+        for task in (beat, netloop):
+            if task:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
         await close_pool()
 
 

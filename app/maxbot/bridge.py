@@ -1,10 +1,7 @@
 """Мост MAX: права и модели MAX за тем же интерфейсом, что использует общий обработчик команд. DTO aiogram — лишь внутренняя форма команд; API Telegram для MAX не вызывается, а вся публикация идёт через общую очередь и отправитель MAX."""
 from __future__ import annotations
 
-import hashlib
 import logging
-from contextvars import ContextVar
-from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
@@ -15,31 +12,21 @@ from app.maxbot.client import MaxAPIError, MaxClient
 from app.maxbot.identities import external, lookup
 from app.maxbot.transport import MaxSender
 from app.maxbot.ui import keyboard_attachment
-from app.services import bible, illustrations, message_languages
+from app.platforms.bridge import BridgeBase
+from app.platforms.builtin import MAX
 from app.services.errors import UserError
-from app.services.formatting import split_wire_message
-from app.worker.delivery import insert_payload
 
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(slots=True)
-class ReplyContext:
-    """Контекст ответов на одно событие: ключ события и счётчик ответов (для стабильных ключей идемпотентности)."""
-    key: str
-    position: int = 0
-
-
-class MaxBotBridge:
+class MaxBotBridge(BridgeBase):
     """Объект, который притворяется ботом aiogram для общих обработчиков: отвечает на `get_me`, `get_chat`, `get_chat_member`, подтверждает нажатия и ставит ответы в очередь."""
-    platform = 'max'
+    spec = MAX
 
     def __init__(self, client: MaxClient, pool: Any, info: dict):
         """Запомнить клиент MAX, пул БД и сведения о боте (его user_id)."""
-        self.client, self.pool = client, pool
+        super().__init__(client, pool, info)
         self.id = info['user_id']
-        self.info = info
-        self.reply_context: ContextVar[ReplyContext | None] = ContextVar('max_reply_context', default=None)
 
     def sender(self, connection):
         """Создать отправителя MAX для указанного соединения."""
@@ -110,49 +97,13 @@ class MaxBotBridge:
             LOGGER.warning('MAX callback acknowledgement deferred: %s', error.code)
         return True
 
-    def _key(self):
-        """Выдать следующий ключ идемпотентности ответа для текущего события; вне контекста события — ошибка."""
-        context = self.reply_context.get()
-        if context is None:
-            raise RuntimeError('MAX response requires a durable event context')
-        key = f'max-event:{context.key}:reply:{context.position}'
-        context.position += 1
-        return key
+    def attach_keyboard(self, chunk, markup, chat):
+        """Добавить в часть очереди клавиатуру MAX."""
+        chunk['max_keyboard'] = keyboard_attachment(markup)
 
-    async def queue_response(self, connection, settings, chat_id, text, markup=None,
-                             *, frozen_chunks=None):
-        """Сохранить готовый ответ интерфейса в очередь доставки до того, как событие вебхука будет помечено обработанным: текст режется на части MAX, добавляются карточки языков и клавиатура."""
-        key = self._key()
-        chat = await connection.fetchrow("SELECT * FROM telegram_chats WHERE telegram_chat_id=$1 AND platform='max'", chat_id)
-        if not chat:
-            raise UserError('forbidden')
-        if frozen_chunks is None:
-            chunks = illustrations.chunks(text, getattr(text, 'image_id', None), min(3600, settings.max_message_length))
-            chunks = await message_languages.prepare(connection, text, chunks, chat, source_key=key)
-            prepared = []
-            for chunk in chunks:
-                if isinstance(chunk, dict) and chunk.get('card_id'):
-                    prepared.append(chunk)
-                    continue
-                if isinstance(chunk, str):
-                    prepared.extend(dict(kind='max_text', text=part) for part in split_wire_message(chunk))
-                else:
-                    prepared.append(chunk)
-            frozen_chunks = prepared
-            if markup is not None and frozen_chunks and not frozen_chunks[-1].get('card_id'):
-                frozen_chunks[-1]['max_keyboard'] = keyboard_attachment(markup)
-        translation = await bible.chat_translation(connection, chat_id)
-        return await insert_payload(connection, chat, translation or {'id': None}, str(text), key,
-                                    'max_ui', {'kind': 'max_ui'}, frozen_chunks=frozen_chunks)
-
-    async def queue_welcome(self, connection, settings, chat_id, text, markup):
-        """Поставить в очередь приветствие с картинкой и клавиатурой (хеш изображения защищает от подмены)."""
-        from app.bot.ui import WELCOME_PATH
-        digest = hashlib.sha256(WELCOME_PATH.read_bytes()).hexdigest()
-        await self.queue_response(connection, settings, chat_id, text, markup, frozen_chunks=[
-            dict(kind='max_welcome', text=str(text), asset_sha256=digest,
-                 max_keyboard=keyboard_attachment(markup)),
-        ])
+    def welcome_chunk(self, text, digest, markup):
+        """Часть приветствия MAX: картинка и клавиатура."""
+        return dict(kind='max_welcome', text=str(text), asset_sha256=digest, max_keyboard=keyboard_attachment(markup))
 
 
 def user_model(user: dict, internal_id: int, locale: str) -> User:

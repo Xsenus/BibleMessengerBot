@@ -7,6 +7,8 @@ import signal
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 
+from app.net.telegram import RoutedSession
+from app.net import store as net_store
 from app.services.platform_sender import PlatformTransports
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
@@ -28,7 +30,7 @@ async def worker() -> None:
     settings = Settings.from_env()
     await wait_for_database(settings)
     pool = await create_pool(settings)
-    bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode='HTML'))
+    bot = Bot(settings.bot_token, session=RoutedSession('telegram'), default=DefaultBotProperties(parse_mode='HTML'))
     transports = PlatformTransports(bot, settings)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -48,7 +50,8 @@ async def worker() -> None:
             await recover_ambiguous(owner)
             sender = asyncio.create_task(send_loop(pool, transports.sender, stop))
             shutdown = asyncio.create_task(stop.wait())
-            tasks = [asyncio.create_task(heartbeat(owner)), asyncio.create_task(prepare_loop(pool, settings)), sender, shutdown]
+            tasks = [asyncio.create_task(heartbeat(owner)), asyncio.create_task(prepare_loop(pool, settings)), sender, shutdown,
+                     asyncio.create_task(net_store.refresh_loop(pool))]
             try:
                 done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
