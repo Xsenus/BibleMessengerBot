@@ -17,7 +17,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE = ROOT / 'runtime-evidence' / 'offline'
-EXCLUDED = {'.git','__pycache__','.pytest_cache','.ruff_cache','.venv','venv','backups','cache','runtime-evidence','work','.serena'}
+EXCLUDED = {'.git','__pycache__','.pytest_cache','.ruff_cache','.venv','venv','backups','cache','runtime-evidence','work','.serena','node_modules'}
 TOKEN = re.compile(r'\b\d{6,14}:[A-Za-z0-9_-]{30,}\b')
 
 
