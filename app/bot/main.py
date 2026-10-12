@@ -15,6 +15,7 @@ from app.bot.native_payments import router as native_payments_router
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
 from app.logging import configure_logging
+from app.services import features
 from app.services.locks import lock_key
 from app.services.donation_reconciliation import reconciliation_loop
 
@@ -48,6 +49,7 @@ async def main() -> None:
             if webhook.url:
                 raise RuntimeError('This bot has an active webhook; deliberately remove it before switching to polling')
             tasks = [asyncio.create_task(heartbeat(owner)),asyncio.create_task(branding_loop(bot,pool)),
+                asyncio.create_task(features.refresh_loop(pool)),
                 asyncio.create_task(reconciliation_loop(bot,pool)),
                 asyncio.create_task(dispatcher.start_polling(
                 bot,allowed_updates=dispatcher.resolve_used_update_types(),close_bot_session=False,

@@ -8,6 +8,7 @@ import signal
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
 from app.logging import configure_logging
+from app.services import features
 from app.services.locks import lock_key
 from app.vkbot.bridge import VkBotBridge
 from app.vkbot.client import VkAPIError, VkClient
@@ -97,7 +98,7 @@ async def main() -> None:
             await recover(owner)
             dispatcher = VkDispatcher(bridge, pool, settings)
             consumer = asyncio.create_task(consumer_loop(pool, dispatcher, stop))
-            tasks = [asyncio.create_task(heartbeat(owner)), consumer, asyncio.create_task(poll_loop(client, pool, stop)),
+            tasks = [asyncio.create_task(heartbeat(owner)), consumer, asyncio.create_task(features.refresh_loop(pool)), asyncio.create_task(poll_loop(client, pool, stop)),
                      asyncio.create_task(stop.wait())]
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in done:

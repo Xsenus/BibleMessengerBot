@@ -17,6 +17,7 @@ from app.maxbot.events import UPDATE_TYPES
 from app.maxbot.inbox import consumer_loop, recover
 from app.payments.reconcile import loop as payment_loop
 from app.maxbot.payment_menus import loop as payment_menu_loop
+from app.services import features
 from app.services.locks import lock_key
 
 
@@ -70,7 +71,7 @@ async def main():
             await recover(owner)
             dispatcher = MaxDispatcher(bridge,pool,settings)
             consumer = asyncio.create_task(consumer_loop(pool,dispatcher,stop))
-            tasks = [asyncio.create_task(heartbeat(owner)),consumer,asyncio.create_task(payment_loop(pool,stop)),
+            tasks = [asyncio.create_task(heartbeat(owner)),consumer,asyncio.create_task(features.refresh_loop(pool)),asyncio.create_task(payment_loop(pool,stop)),
                      asyncio.create_task(payment_menu_loop(pool,client,info['user_id'],stop)),asyncio.create_task(stop.wait())]
             done,_ = await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
             for task in done:

@@ -69,6 +69,15 @@ class FeedPatch(BaseModel):
     audience: AudienceIn | None = None
 
 
+class AnnouncementPatch(BaseModel):
+    """Изменяемые поля объявления (расписание не меняется: создайте новое объявление)."""
+    title: str | None = Field(None, max_length=200)
+    body: str | None = Field(None, min_length=1, max_length=3500)
+    audience: AudienceIn | None = None
+    asset_id: int | None = None
+    clear_asset: bool = False
+
+
 class StatusIn(BaseModel):
     """Смена состояния объявления."""
     status: Literal['active', 'paused', 'cancelled']
@@ -145,6 +154,24 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
         row = await announcements.create(conn, await owner_id(conn), payload.title, payload.body, schedule,
                                          audience=payload.audience.model_dump(), asset_id=payload.asset_id)
         return rows([row])[0]
+
+    @router.patch('/announcements/{announcement_id}')
+    async def patch_announcement(announcement_id: int, payload: AnnouncementPatch, conn: Any = Conn) -> dict:
+        """Изменить текст, заголовок, аудиторию или картинку объявления; уже созданные запуски не меняются."""
+        values = payload.model_dump(exclude_none=True, exclude={'clear_asset'})
+        if 'audience' in values:
+            values['audience'] = json.dumps(fanout.normalize_audience(values['audience']))
+        if payload.clear_asset:
+            values['asset_id'] = None
+        if not values:
+            raise HTTPException(422, 'nothing_to_change')
+        names = list(values)                                                  # имена столбцов приходят только из модели выше
+        sets = ','.join(f'{n}=${i + 2}' + ('::jsonb' if n == 'audience' else '') for i, n in enumerate(names))
+        done = await conn.execute(f"UPDATE announcements SET {sets},updated_at=now() WHERE id=$1 AND status IN ('active','paused')",  # noqa: S608
+                                  announcement_id, *values.values())
+        if done != 'UPDATE 1':
+            raise HTTPException(404, 'not_found')
+        return {'ok': True}
 
     @router.post('/announcements/{announcement_id}/status')
     async def announcement_status(announcement_id: int, payload: StatusIn, conn: Any = Conn) -> dict:
