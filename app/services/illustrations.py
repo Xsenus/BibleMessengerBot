@@ -37,14 +37,22 @@ class ReadingText(str):
         return instance
 
 
-class ChapterText(ReadingText):
-    """Глава целиком: первая редактируемая карточка и продолжения без потерь."""
+class MultipartText(ReadingText):
+    """Длинный текст с картинкой: первая редактируемая карточка и продолжения без потерь."""
 
     def __new__(cls, text, first, continuations):
-        """Создать главу из текста, первой карточки и списка продолжений."""
+        """Создать текст из полного текста, первой карточки и списка продолжений."""
         instance = super().__new__(cls, text, first.image_id, first.request_id)
         instance.first, instance.continuations = first, continuations
         return instance
+
+
+class ChapterText(MultipartText):
+    """Глава целиком."""
+
+
+class RangeText(MultipartText):
+    """Диапазон стихов с картинкой, закреплённой за этой последовательностью."""
 
 
 def chapter_source(rows):
@@ -56,10 +64,34 @@ def chapter_source(rows):
                 text='\n'.join(f"[{r['verse']}-{r.get('verse_end') or r['verse']}] {r['text']}" for r in visible))
 
 
+def range_source(rows):
+    """Собрать «источник» иллюстрации диапазона стихов (для запроса и хеша); меньше двух видимых стихов — None.
+
+    Первый стих хранится в `verse`, последний — в `range_end`; текст содержит номера, поэтому разные диапазоны
+    (6:1–10, 6:1–9, 6:1–5) дают разные хеши и разные картинки."""
+    visible = [dict(r) for r in rows if r['text'] and not r.get('is_range_continuation')]
+    if len(visible) < 2:
+        return None
+    last = visible[-1].get('verse_end') or visible[-1]['verse']
+    return dict(visible[0], artwork_scope='range', range_end=last, reading_rows=visible,
+                text='\n'.join(f"[{r['verse']}-{r.get('verse_end') or r['verse']}] {r['text']}" for r in visible))
+
+
 async def source_row(connection, image):
-    """Восстановить точный источник картинки: стих или вся глава из БД; изменившийся или пропавший — None."""
+    """Восстановить точный источник картинки: стих, диапазон или вся глава из БД; изменившийся или пропавший — None."""
     from app.services import bible
 
+    if image.get('artwork_scope', 'verse') == 'range':
+        from app.services import passage
+        from app.services.errors import UserError
+        if not image.get('verse_end'):
+            return None
+        try:
+            rows = await passage.fetch_rows(connection, {'id': image['translation_id']}, image['book_code'], image['chapter'],
+                                            image['verse'], image['verse_end'])
+        except UserError:
+            return None
+        return range_source(rows)
     if image.get('artwork_scope', 'verse') == 'chapter':
         return chapter_source(await bible.chapter_rows(connection, image['translation_id'], image['book_code'], image['chapter']))
     return await connection.fetchrow(
@@ -111,6 +143,22 @@ async def decorate_chapter(connection, text, translation, book_code, chapter, *,
                    locale=chat.get('ui_language', 'ru'))
 
 
+async def decorate_range(connection, text, translation, rows, *, chat,
+                         request_key, thread_id=None, max_length=3900):
+    """Подготовить диапазон стихов с иллюстрацией, закреплённой за этой точной последовательностью (даже если она совпала со всей главой: картинка главы запрашивается только адресом целой главы). Длинный текст делится как у главы; при сбое возвращается обычный текст."""
+    row = range_source(rows)
+    if not row:
+        return text
+    fits = len(text.encode('utf-8')) <= 24000 and (max_length >= 3900 or utf16_length(plain_text(text)) <= max_length)
+    parts = [str(text)] if fits else split_message(text, min(max_length, 3900))
+    card = await decorate(connection, parts[0], row, translation, chat=chat, request_key=request_key, thread_id=thread_id)
+    if not isinstance(card, ReadingText):
+        return text
+    from app.services.message_languages import inherit
+    return inherit(RangeText(text, card, parts[1:]), text, row=row, edition=translation,
+                   locale=chat.get('ui_language', 'ru'))
+
+
 async def bind_message(connection, chat_id, request_id, message_id):
     """Связать запрос ожидания с ID подтверждённо отправленного сообщения — только после этого фоновая правка получает цель."""
     if request_id is not None:
@@ -131,7 +179,7 @@ def identity(row, translation):
         row["book_code"],
         row["chapter"],
         row["verse"],
-        hashlib.sha256((('chapter\0' if row.get('artwork_scope') == 'chapter' else '') + row["text"]).encode("utf-8")).hexdigest(),
+        hashlib.sha256(({'chapter': 'chapter\0', 'range': 'range\0'}.get(row.get('artwork_scope'), '') + row["text"]).encode("utf-8")).hexdigest(),
     )
 
 
@@ -150,8 +198,8 @@ async def pending(connection, row, translation):
     """Единственная открытая (ожидающая) версия картинки для точного текста; параллельные вызовы получают ту же запись."""
     key = identity(row, translation)
     await connection.execute(
-        """INSERT INTO verse_illustrations(translation_id,book_code,chapter,verse,text_sha256,artwork_scope)
-        VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(translation_id,book_code,chapter,verse,text_sha256)
+        """INSERT INTO verse_illustrations(translation_id,book_code,chapter,verse,text_sha256,artwork_scope,verse_end)
+        VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(translation_id,book_code,chapter,verse,text_sha256)
         WHERE status='pending' DO NOTHING""",
         key[0],
         key[1],
@@ -159,6 +207,7 @@ async def pending(connection, row, translation):
         key[3],
         key[4],
         row.get('artwork_scope', 'verse'),
+        row.get('range_end') if row.get('artwork_scope') == 'range' else None,
     )
     return await connection.fetchrow(
         """SELECT * FROM verse_illustrations WHERE translation_id=$1 AND book_code=$2
@@ -268,7 +317,7 @@ async def decorate(
 
 def chunks(text: str, image_id: int | None, max_length: int = 3900) -> list:
     """Превратить текст в части для отправки: карточки чтения (одно «богатое» сообщение), фото с подписью до 1024 символов либо фото и текст раздельно; длинный текст режется."""
-    if isinstance(text, ChapterText):
+    if isinstance(text, MultipartText):
         return [*chunks(text.first, text.image_id, max_length), *text.continuations]
     if isinstance(text, ReadingText):
         image_id = text.image_id if image_id is None else image_id
@@ -346,7 +395,7 @@ async def store(
             image_id,
             data,
             mime,
-            prompt if row.get('artwork_scope') == 'chapter' else prompt[:10000],
+            prompt if row.get('artwork_scope') in {'chapter', 'range'} else prompt[:10000],
             prompt_version,
         )
         if identifier is None:

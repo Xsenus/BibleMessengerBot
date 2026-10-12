@@ -10,6 +10,8 @@
 
 Миграция 024 добавляет частичные индексы `delivery_log`, `operator_events`, `max_inbox` и `prayer_occurrences(delivery_id)` для метрик и удаления старых строк без полных просмотров.
 
+Миграция 033: область иллюстраций `range` и колонка `verse_illustrations.verse_end` (последний стих диапазона).
+
 Миграции 026–032 (032 — `image_custom_providers`: генераторы картинок из панели, ключи в зашифрованном виде; резерв бесплатных попыток 0 USD):
 
 Миграции 026–031: `admin_invites`, `broadcasts` и поля картинки (026–027), `media_assets`, `announcements`, `announcement_runs` (028),

@@ -275,6 +275,11 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             elif len(result[2])==1:
                 text = await illustrations.decorate(connection,text,result[2][0],edition,chat=chat,
                     request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id)
+            else:
+                # Диапазон стихов (например, Гал 6:1–10): картинка закрепляется за точной последовательностью.
+                text = await illustrations.decorate_range(connection,text,edition,result[2],chat=chat,
+                    request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id,
+                    max_length=settings.max_message_length)
             # Владельцу бота предлагается разослать найденный отрывок всем (кнопка появится под результатом).
             await broadcast.offer(connection,user.id,broadcast.refs_from_reference(result[0],result[1]),edition['id'],await broadcast.image_of(connection,text))
             return text,None

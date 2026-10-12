@@ -242,7 +242,7 @@ async def process_job(connection, job_id, settings, *, generator=None):
     """Обработать одно задание картинки: проверить, что текст стиха не изменился, при необходимости получить описание сцены у локальной модели (для Stability), зарезервировать провайдера или продолжить опрос принятой задачи, сгенерировать, проверить OCR-фильтром на надписи и сохранить картинку; при любом неясном сбое сохранения платный запрос не повторяется. Возвращает короткий код результата."""
     await load_custom(connection)
     job = await connection.fetchrow(
-        """SELECT j.*,i.translation_id,i.book_code,i.chapter,i.verse,
+        """SELECT j.*,i.translation_id,i.book_code,i.chapter,i.verse,i.verse_end,
         i.text_sha256,i.artwork_scope,i.status AS image_status FROM image_generation_jobs j
         JOIN verse_illustrations i ON i.id=j.image_id WHERE j.id=$1""",
         job_id,

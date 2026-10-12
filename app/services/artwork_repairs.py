@@ -8,7 +8,7 @@ import re
 from app.services import bible, illustrations, image_quality
 from app.services.locks import chat_lock
 
-IDENTITY = ("translation_id", "book_code", "chapter", "verse", "text_sha256", "artwork_scope")
+IDENTITY = ("translation_id", "book_code", "chapter", "verse", "verse_end", "text_sha256", "artwork_scope")
 
 
 def decoded(value):

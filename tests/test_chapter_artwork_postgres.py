@@ -98,6 +98,8 @@ async def test_only_whole_chapter_addresses_use_chapter_artwork(db,monkeypatch,c
     whole=':' not in command
     assert isinstance(text,illustrations.ChapterText)==whole
     assert await c.fetchval("SELECT count(*) FROM verse_illustrations WHERE artwork_scope='chapter'")==int(whole)
+    # Явный диапазон получает собственную картинку-диапазон, но не картинку главы.
+    assert await c.fetchval("SELECT count(*) FROM verse_illustrations WHERE artwork_scope='range'")==int(not whole and command.endswith('1:1–2'))
 
 
 async def test_sequential_subscription_queues_chapter_and_advances_only_after_ack(db,monkeypatch):
