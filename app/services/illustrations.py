@@ -449,13 +449,13 @@ async def request_variant(connection: Any, image_id: int) -> int | None:
         await connection.execute('SELECT pg_advisory_xact_lock($1)', lock_key('illustration-verse', key))
         total = await connection.fetchval(
             """SELECT count(*) FROM verse_illustrations WHERE translation_id=$1 AND book_code=$2 AND chapter=$3
-               AND verse=$4 AND text_sha256=$5""", *key)
+               AND verse=$4 AND text_sha256=$5""", key[0], key[1], key[2], key[3], key[4])
         if total >= MAX_VARIANTS:
             return None
         pending_id = await connection.fetchval(
             """INSERT INTO verse_illustrations(translation_id,book_code,chapter,verse,text_sha256,artwork_scope,verse_end)
                VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(translation_id,book_code,chapter,verse,text_sha256) WHERE status='pending'
-               DO UPDATE SET updated_at=now() RETURNING id""", *key, row['artwork_scope'], row['verse_end'])
+               DO UPDATE SET updated_at=now() RETURNING id""", key[0], key[1], key[2], key[3], key[4], row['artwork_scope'], row['verse_end'])
         prompt = job['prompt'] if 'Alternative composition' in job['prompt'] else job['prompt'] + '\n\nAlternative composition: choose a different viewpoint and arrangement from earlier versions.'
         await connection.execute(
             """INSERT INTO image_generation_jobs(image_id,prompt,prompt_variant,model,prompt_version)
