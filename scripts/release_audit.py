@@ -83,8 +83,8 @@ def main() -> int:
     checks.append({'name':'BASIC_SECRET_AND_PATH_SCAN','status':'failed' if unsafe else 'passed',
                    'matches':unsafe,'limitation':'A basic pattern scan, not a full security audit.'})
     required=['README.md','VERSION','Dockerfile','docker-compose.yml','.env.example','install.sh',
-              'sql/schema.sql','sql/migrations/002_hardening.sql','sql/migrations/003_multisource.sql','fill_database.sh','app/catalog/multisource/cli.py','docs/MULTISOURCE_IMPORT_RU.md','app/bootstrap.py','app/bot/main.py',
-              'app/worker/main.py','app/web/main.py','docs/LIMITATIONS.md','docs/LANGUAGE-MATRIX.md',
+              'sql/schema.sql','sql/migrations/002_hardening.sql','sql/migrations/003_multisource.sql','fill_database.sh','app/catalog/multisource/cli.py','docs/reference/multisource-import.md','app/bootstrap.py','app/bot/main.py',
+              'app/worker/main.py','app/web/main.py','docs/reference/limitations.md','docs/reference/language-matrix.md',
               'tests/test_postgres_integration.py','tests/test_aiogram_contracts.py']
     missing=[p for p in required if not (ROOT/p).is_file()]
     checks.append({'name':'REQUIRED_FILES','status':'failed' if missing else 'passed','missing':missing})

@@ -14,7 +14,7 @@ Default: download all approved editions from biblenlp,getbible,helloao, then imp
   --editions biblenlp:russyn,helloao:BSB Exact edition filter
   --profile all-open|core|extended|none
   --refresh                           Refresh cached text files too
-Read docs/MULTISOURCE_IMPORT_RU.md. Existing installations must retain their .env.
+Read docs/reference/multisource-import.md. Existing installations must retain their .env.
 HELP
   exit 0
 fi

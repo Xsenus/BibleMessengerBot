@@ -324,7 +324,9 @@ async def process_job(connection, job_id, settings, *, generator=None):
             )
         elif provider.custom is not None:
             from app.services import free_image_providers
-            data, usage, request_id = await free_image_providers.generate(provider.custom, scene or job["prompt"][:1500])
+            if not scene:                                   # текст стиха во внешние бесплатные сервисы не отправляется
+                raise api.GenerationError("scene_unavailable", retry=True, retry_after=60)
+            data, usage, request_id = await free_image_providers.generate(provider.custom, scene)
         else:
             data, usage, request_id = await api.generate(
                 provider, scene if needs_scene(provider) and scene else job["prompt"], accepted=accepted, resume=resume

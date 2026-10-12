@@ -14,7 +14,7 @@
 
 ## Издания проверенного начального корпуса
 
-В проверенном импорте 2026-09-22 использованы `getbible:synodal` (русский Синодальный перевод) и `getbible:web` (World English Bible). Поле `distribution_license` их записей в [каталоге getBible](https://api.getbible.net/v2/translations.json) указывает Public Domain. Отдельная [страница прав World English Bible](https://ebible.org/engwebp/copyright.htm) описывает условия использования этого текста и названия. Это не утверждение, что getBible-файл совпадает байт в байт с любой текущей публикацией eBible; точные исходные хеши указаны в [VALIDATION.md](docs/VALIDATION.md).
+В проверенном импорте 2026-09-22 использованы `getbible:synodal` (русский Синодальный перевод) и `getbible:web` (World English Bible). Поле `distribution_license` их записей в [каталоге getBible](https://api.getbible.net/v2/translations.json) указывает Public Domain. Отдельная [страница прав World English Bible](https://ebible.org/engwebp/copyright.htm) описывает условия использования этого текста и названия. Это не утверждение, что getBible-файл совпадает байт в байт с любой текущей публикацией eBible; точные исходные хеши указаны в [validation.md](docs/operations/validation.md).
 
 Состав и нумерация конкретного файла сохраняются. Название перевода само по себе не доказывает совпадение редакции с другой библиотекой или печатным изданием. Проверенное соответствие дополнительных книг getBible основано на [конфигурации издателя](https://github.com/getbible/v2_builder/blob/master/conf/bookNumbers.json) и [справочнике кодов USFM](https://ubsicap.github.io/usfm/identification/books.html).
 
