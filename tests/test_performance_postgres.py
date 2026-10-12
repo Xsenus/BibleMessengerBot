@@ -74,7 +74,7 @@ async def test_loops_record_duration_and_errors_and_survive_failures(db):
     task = asyncio.create_task(loops.run_forever(pool, 'demo', step, 0.01))
     for _ in range(300):
         await asyncio.sleep(0.02)
-        if calls['n'] >= 1 and await c.fetchval("SELECT runs FROM loop_stats WHERE name='demo'") >= 2:
+        if calls['n'] >= 3:          # к началу третьего прохода первые два уже записаны; общее соединение во время цикла не трогаем
             break
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
