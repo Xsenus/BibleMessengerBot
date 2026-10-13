@@ -49,16 +49,11 @@ async def run(args):
             configured = image_router.providers(settings)
             health = {(r['provider'], r['key_fingerprint']): dict(r) for r in await c.fetch(
                 'SELECT provider,key_fingerprint,failures,blocked_until,error_code FROM image_provider_health')}
-            usage = await c.fetch("""SELECT provider,COALESCE(sum(reserved_usd),0) AS monthly,
-                count(*) FILTER(WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
-                FROM image_generation_attempts
-                WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
-                GROUP BY provider""")
-            daily = {r['provider']: r['daily'] for r in usage}
-            credential_usage = {(r['provider'], r['key_fingerprint']): r['daily'] for r in await c.fetch(
-                """SELECT provider,key_fingerprint,count(*) AS daily FROM image_generation_attempts
-                WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
-                GROUP BY provider,key_fingerprint""")}
+            usage = await image_router.budget_usage(c)
+            daily: dict[str, int] = {}
+            for record in usage:
+                daily[record['provider']] = daily.get(record['provider'], 0) + record['daily']
+            credential_usage = {(r['provider'], r['key_fingerprint']): r['daily'] for r in usage}
             provider_status = []
             for name in settings.provider_order:
                 keys = [p for p in configured if p.name == name]

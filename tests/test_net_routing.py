@@ -290,3 +290,49 @@ def test_socks_and_http_proxies_can_be_constructed():
     httpx.AsyncHTTPTransport(proxy=httpx.Proxy('http://127.0.0.1:3128'))
     AiohttpSession(proxy='socks5://127.0.0.1:1080')
     AiohttpSession(proxy='http://127.0.0.1:3128')
+
+
+@pytest.mark.asyncio
+async def test_telegram_socks5h_uses_remote_dns():
+    session = RoutedSession()
+    route = Route('proxy:1', 'SOCKS with remote DNS', 'socks5h://user:pw@127.0.0.1:1080')
+    try:
+        child = session._child(route)
+        assert child.proxy == 'socks5://user:pw@127.0.0.1:1080'
+        assert child._connector_init['rdns'] is True
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('scheme', ['https', 'ftp'])
+async def test_telegram_bad_constructor_uses_next_route_before_sending(scheme):
+    bad = Route('proxy:1', 'Unsupported', f'{scheme}://127.0.0.1:1080')
+    r, _ = router(routes=(bad, DIRECT))
+    session = RoutedSession(router=r)
+    actual_child = session._child
+    fallback = FakeSession(lambda method: 'sent once')
+    session._child = lambda route: fallback if route == DIRECT else actual_child(route)
+    try:
+        assert await session.make_request(None, FakeMethod('sendMessage')) == 'sent once'
+        assert fallback.calls == 1
+        assert r.state('telegram', bad).failures == 1
+        assert r.state('telegram', DIRECT).successes == 1
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+async def test_telegram_payload_error_is_not_replayed():
+    r, _ = router()
+
+    def invalid(method):
+        raise ValueError('invalid payload')
+
+    session, fakes = telegram_session(r, {'direct': invalid, 'proxy:1': lambda method: 'duplicate'})
+    try:
+        with pytest.raises(ValueError, match='invalid payload'):
+            await session.make_request(None, FakeMethod('sendMessage'))
+        assert fakes['proxy:1'].calls == 0
+    finally:
+        await session.close()

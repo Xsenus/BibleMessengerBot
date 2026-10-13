@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramNetworkError
@@ -19,6 +20,18 @@ except ImportError:  # pragma: no cover
 READ_ONLY = {'getUpdates', 'getMe', 'getFile', 'getChat', 'getChatMember', 'getWebhookInfo', 'getMyCommands'}
 
 
+def proxy_url(url: str | None) -> str | None:
+    """aiogram uses remote DNS for SOCKS5; HTTPS proxy connectors are unsupported."""
+    if url is None:
+        return None
+    parts = urlsplit(url)
+    if parts.scheme == 'socks5h':
+        return urlunsplit(parts._replace(scheme='socks5'))
+    if parts.scheme not in {'http', 'socks5'}:
+        raise ValueError('unsupported_telegram_proxy_scheme')
+    return url
+
+
 class RoutedSession(AiohttpSession):
     """Сессия Bot API: каждому маршруту соответствует собственная дочерняя сессия (со своим прокси)."""
 
@@ -26,12 +39,15 @@ class RoutedSession(AiohttpSession):
         super().__init__(**kwargs)
         self.service, self.router = service, router
         self._children: dict[str, tuple[str | None, AiohttpSession]] = {}
+        self._retired: list[AiohttpSession] = []
 
     def _child(self, route: Route) -> AiohttpSession:
         """Дочерняя сессия маршрута; пересоздаётся при смене адреса прокси."""
         cached = self._children.get(route.key)
         if cached is None or cached[0] != route.proxy_url:
-            session = AiohttpSession(proxy=route.proxy_url, timeout=self.timeout)
+            session = AiohttpSession(proxy=proxy_url(route.proxy_url), timeout=self.timeout)
+            if cached is not None:
+                self._retired.append(cached[1])
             self._children[route.key] = (route.proxy_url, session)
             return session
         return cached[1]
@@ -42,7 +58,14 @@ class RoutedSession(AiohttpSession):
         for route in self.router.plan(self.service) or [DIRECT]:
             started = time.monotonic()
             try:
-                result = await self._child(route).make_request(bot, method, timeout)
+                child = self._child(route)
+            except (ValueError, RuntimeError, ImportError) as error:
+                # Construction failed before any request: even a mutation can safely use another route.
+                self.router.record_failure(self.service, route, type(error).__name__)
+                last = error
+                continue
+            try:
+                result = await child.make_request(bot, method, timeout)
             except TelegramNetworkError as error:
                 self.router.record_failure(self.service, route, type(error.__cause__ or error).__name__)
                 last = error
@@ -80,4 +103,7 @@ class RoutedSession(AiohttpSession):
         for _, session in self._children.values():
             await session.close()
         self._children.clear()
+        for session in self._retired:
+            await session.close()
+        self._retired.clear()
         await super().close()

@@ -20,7 +20,7 @@ jobs:
       - run: ruff check .
       - run: mypy
       - name: Shell syntax
-        run: for f in *.sh; do bash -n "$f"; done
+        run: find . -path ./admin-ui/node_modules -prune -o -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
       - run: python -m compileall -q app tests scripts
 
   audit:
@@ -31,8 +31,24 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install pip-audit
-      - run: pip-audit -r requirements.txt --disable-pip
-        continue-on-error: ${{ github.event_name == 'pull_request' }}
+      - name: Audit pinned runtime and neural dependencies
+        run: |
+          # Advisory databases identify the CPU wheel by its upstream torch version.
+          sed 's/+cpu$//' constraints-neural-linux.txt > /tmp/neural-audit.txt
+          pip-audit --no-deps --disable-pip --strict -r constraints-linux.txt -r /tmp/neural-audit.txt
+
+  panel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: admin-ui/package-lock.json
+      - run: npm ci --prefix admin-ui
+      - run: npm audit --prefix admin-ui --audit-level=moderate
+      - run: npm run build --prefix admin-ui
 
   test:
     runs-on: ubuntu-latest
@@ -60,7 +76,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-      - run: python -m pip install 'torch==2.10.0+cpu' --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install 'torch==2.13.0+cpu' --index-url https://download.pytorch.org/whl/cpu
       - run: python -m pip install -r requirements-neural.txt
       - run: python -m pip install -c constraints-linux.txt -r requirements.txt -r requirements-test.txt
       - run: python -m pip check
@@ -82,8 +98,7 @@ jobs:
             coverage.xml
 
   image:
-    needs: [lint, test]
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, test, audit, panel]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -91,6 +106,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      - name: Validate every Compose profile
+        run: |
+          cp .env.example .env
+          docker compose --profile '*' config --quiet
       - name: Build (and scan) image
         uses: docker/build-push-action@v6
         with:

@@ -55,8 +55,8 @@ async def collect(connection: Any, monthly_budget_usd: Decimal | float = 10) -> 
         out.add('bible_service_heartbeat_age_seconds', 'Seconds since a service last reported', row['age'], {'service': row['service']})
     out.add('bible_chats_active', 'Active destinations', await connection.fetchval('SELECT count(*) FROM telegram_chats WHERE is_active'))
     out.add('bible_subscriptions_enabled', 'Enabled subscriptions', await connection.fetchval('SELECT count(*) FROM subscriptions WHERE is_enabled'))
-    spent = await connection.fetchval("""SELECT COALESCE(sum(reserved_usd),0) FROM image_generation_attempts
-        WHERE state IN ('reserved','succeeded','uncertain') AND created_at>=date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'""")
+    from app.services.image_router import budget_usage
+    spent = sum(row['monthly'] for row in await budget_usage(connection))
     out.add('bible_image_budget_spent_usd', 'Image budget reserved/spent this UTC month', spent or 0)
     out.add('bible_image_budget_limit_usd', 'Configured monthly image budget', Decimal(str(monthly_budget_usd)))
     for state, n in [(r['state'], r['n']) for r in await connection.fetch('SELECT state,count(*) AS n FROM image_generation_jobs GROUP BY state')]:

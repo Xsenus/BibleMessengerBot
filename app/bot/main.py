@@ -46,6 +46,7 @@ async def main() -> None:
             await acquire_runtime_guard(owner)
             if not await owner.fetchval('SELECT pg_try_advisory_lock($1)',lock_key('singleton-poller',1)):
                 raise RuntimeError('Another polling bot uses this database')
+            await net_store.refresh(owner)
             # Never delete an existing webhook silently: the token may belong to another deployment.
             webhook = await bot.get_webhook_info()
             if webhook.url:

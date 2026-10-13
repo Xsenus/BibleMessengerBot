@@ -59,6 +59,7 @@ async def main():
             await acquire_runtime_guard(owner)
             if not await owner.fetchval('SELECT pg_try_advisory_lock($1)',lock_key('singleton-maxbot',1)):
                 raise RuntimeError('Another MAX consumer is running')
+            await net_store.refresh(owner)
             info = await client.get_me()
             if type(info.get('user_id')) is not int or info['user_id']<=0 or not info.get('is_bot'):
                 raise RuntimeError('MAX token does not identify a bot')

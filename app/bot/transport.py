@@ -51,6 +51,9 @@ class TelegramSender:
         )
         try:
             if isinstance(text, dict):
+                if text.get('kind') == 'photo':
+                    from app.services.illustrations import without_quarantined_image
+                    text = await without_quarantined_image(self.connection, text)
                 if text.get("kind") in {"rich", "rich_edit"}:
                     message = await self._rich(chat_id, text, thread_id, reply_markup)
                 elif text.get("kind") == "asset_photo":
@@ -85,6 +88,8 @@ class TelegramSender:
         if chunk.get('card_id') is not None:
             from app.services.message_languages import outgoing
             chunk,markup = await outgoing(self.connection,chat_id,chunk)
+        from app.services.illustrations import without_quarantined_image
+        chunk = await without_quarantined_image(self.connection, chunk)
         text, identifier = chunk.get("text"), chunk.get("image_id")
         editing = chunk["kind"] == "rich_edit"
         target = chunk.get("message_id")
@@ -113,7 +118,7 @@ class TelegramSender:
         image = cached = None
         if identifier is not None:
             image = await self.connection.fetchrow(
-                "SELECT mime_type,telegram_file_id,telegram_bot_id,image_data FROM verse_illustrations WHERE id=$1 AND status='ready'",
+                "SELECT mime_type,telegram_file_id,telegram_bot_id,image_data FROM verse_illustrations WHERE id=$1 AND status='ready' AND quarantined_at IS NULL",
                 identifier,
             )
             if not image:
@@ -226,7 +231,7 @@ class TelegramSender:
         image = await self.connection.fetchrow(
             """SELECT mime_type,telegram_file_id,telegram_bot_id,
             CASE WHEN telegram_bot_id=$2 AND telegram_file_id IS NOT NULL THEN NULL ELSE image_data END AS image_data
-            FROM verse_illustrations WHERE id=$1 AND status='ready' """,
+            FROM verse_illustrations WHERE id=$1 AND status='ready' AND quarantined_at IS NULL """,
             identifier,
             self.bot.id,
         )
@@ -251,8 +256,10 @@ class TelegramSender:
             if not cached:
                 raise
             data = await self.connection.fetchval(
-                "SELECT image_data FROM verse_illustrations WHERE id=$1", identifier
+                "SELECT image_data FROM verse_illustrations WHERE id=$1 AND status='ready' AND quarantined_at IS NULL", identifier
             )
+            if data is None:
+                raise SendError('rejected') from None
             sent = await self.bot.send_photo(
                 photo=BufferedInputFile(bytes(data), filename=f"verse-{identifier}.{suffix}"),
                 **kwargs,

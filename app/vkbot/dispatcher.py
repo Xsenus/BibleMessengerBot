@@ -5,12 +5,13 @@ import json
 import re
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from aiogram.types import CallbackQuery, Chat, Message
 
 from app.bot import handlers
 from app.bot.commands import MANAGEMENT, parse_command
+from app.bot.ui import BUTTONS
 from app.maxbot.bridge import user_model
 from app.services import bible
 from app.services.chat_sources import ingest_post
@@ -23,7 +24,7 @@ from app.vkbot.client import VkAPIError
 from app.vkbot.identities import lookup, register
 from app.worker.delivery import insert_payload
 
-NAVIGATION = {'/next', '/today', '/random', '/search', '/settings', '/help', '/daily', '/start', '/menu', '/donate'}
+NAVIGATION = {'/' + name for name, _emoji in BUTTONS} | {'/start', '/menu'}
 MENTION = re.compile(r'^\s*\[club\d+\|[^\]]*\]\s*,?\s*')
 START_WORDS = {'начать', 'старт', 'start', 'привет'}
 PROFILE_TTL = 6 * 3600
@@ -86,7 +87,8 @@ class VkDispatcher:
             await self.bridge.queue_response(connection, self.settings, chat.id, text, None)
 
     def _message(self, chat: Chat, actor: Any, cmid: int, text: str | None) -> Message:
-        return Message(message_id=cmid, date=datetime.now(UTC), chat=chat, from_user=actor, text=text).as_(self.bridge)
+        # aiogram annotates this adapter as Bot; the bridge implements its runtime contract.
+        return Message(message_id=cmid, date=datetime.now(UTC), chat=chat, from_user=actor, text=text).as_(cast(Any, self.bridge))
 
     async def _command(self, message: Message) -> None:
         """Выполнить команду из сообщения; `/help` и `/thread` обрабатываются здесь, остальное — общим `command_handler`."""
@@ -168,11 +170,11 @@ class VkDispatcher:
             return                                                   # собственные сообщения сообщества
         if action.get('type') == 'chat_kick_user' and action.get('member_id') == -self.bridge.id:
             async with self.pool.acquire() as connection:
-                chat = await lookup(connection, 'chat', peer)
-                if chat is not None:
-                    async with chat_lock(connection, chat), connection.transaction():
-                        await connection.execute("UPDATE telegram_chats SET is_active=false WHERE telegram_chat_id=$1 AND platform='vk'", chat)
-                        await connection.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE telegram_chat_id=$1', chat)
+                chat_id = await lookup(connection, 'chat', peer)
+                if chat_id is not None:
+                    async with chat_lock(connection, chat_id), connection.transaction():
+                        await connection.execute("UPDATE telegram_chats SET is_active=false WHERE telegram_chat_id=$1 AND platform='vk'", chat_id)
+                        await connection.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE telegram_chat_id=$1', chat_id)
             return
         actor, chat = await self._context(sender, peer)
         chat_holder.append(chat)
@@ -214,7 +216,7 @@ class VkDispatcher:
             chat_holder.append(chat)
             bot_user = user_model({'user_id': self.bridge.id, 'is_bot': True, 'first_name': 'Bot'}, self.bridge.id, 'ru')
             original = self._message(chat, bot_user, cmid, None)
-            callback = CallbackQuery(id=str(event_id), from_user=actor, message=original, chat_instance=str(peer), data=data).as_(self.bridge)
+            callback = CallbackQuery(id=str(event_id), from_user=actor, message=original, chat_instance=str(peer), data=data).as_(cast(Any, self.bridge))
             if data.startswith('vkcmd:'):
                 command = data[6:]
                 if command not in NAVIGATION:

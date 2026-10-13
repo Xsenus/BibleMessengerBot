@@ -93,6 +93,7 @@ async def main() -> None:
             await acquire_runtime_guard(owner)
             if not await owner.fetchval('SELECT pg_try_advisory_lock($1)', lock_key('singleton-vkbot', 1)):
                 raise RuntimeError('Another VK consumer is running')
+            await net_store.refresh(owner)
             info = await client.get_me()
             await client.configure_long_poll()
             bridge = VkBotBridge(client, pool, info)

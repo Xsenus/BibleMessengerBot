@@ -27,6 +27,13 @@ async def run_video_watch(connection):
     await video_watch.run_due(connection)
 
 
+async def recover_delivery(connection):
+    """Recover committed publication/broadcast intent independently of new schedules."""
+    from app.services import broadcast, chat_sources
+    await broadcast.recover(connection)
+    await chat_sources.retry_publications(connection)
+
+
 async def worker():
     """Запустить службу: взять блокировки (единственный экземпляр), запустить сигнал жизни и каждые 10 секунд готовить приглашения на молитву, срок которых близок."""
     settings=Settings.from_env(require_bot_token=False)
@@ -37,6 +44,7 @@ async def worker():
     try:
         async with pool.acquire() as owner:
             await acquire_runtime_guard(owner)
+            await net_store.refresh(owner)
             if not await owner.fetchval('SELECT pg_try_advisory_lock($1)',lock_key('singleton-composer',1)):
                 raise RuntimeError('Another prayer composer is running')
             beat=asyncio.create_task(heartbeat(pool))
@@ -44,7 +52,7 @@ async def worker():
             # Независимые циклы: медленный опрос видео не задерживает объявления и молитвы; итоги проходов пишутся в loop_stats.
             loops = [asyncio.create_task(loops_module.run_forever(pool, name, step, interval))
                      for name, step, interval in (('prayers', prayers.prepare_due, 10), ('announcements', announcements.run_due, 10),
-                                                  ('videos', run_video_watch, 30))]
+                                                  ('videos', run_video_watch, 30), ('delivery_recovery', recover_delivery, 10))]
             try:
                 await asyncio.gather(*loops)
             finally:

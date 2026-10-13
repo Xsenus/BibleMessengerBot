@@ -7,7 +7,8 @@ const ADAPTERS = {
   horde: 'AI Horde', openai_compatible: 'OpenAI-совместимый API',
 };
 const EMPTY = { slug: '', label: '', adapter: 'openai_compatible', base_url: '', model: '', api_key: '', account_id: '',
-  width: 1216, height: 832, steps: '', priority: 500, daily_limit: 20, is_enabled: true };
+  width: 1216, height: 832, steps: '', priority: 500, daily_limit: 20, is_enabled: true,
+  billing_mode: 'unknown', reservation_usd: '0' };
 
 function AddForm({ templates, onCreated, secretsReady }) {
   const [templateId, setTemplateId] = useState('');
@@ -20,7 +21,8 @@ function AddForm({ templates, onCreated, secretsReady }) {
     const t = templates.find((x) => x.id === id);
     if (!t) { setF(EMPTY); return; }
     setF({ ...EMPTY, slug: t.id.slice(0, 29), label: t.label, adapter: t.adapter, base_url: t.base_url || '', model: t.model || '',
-      width: t.width, height: t.height, steps: t.steps || '' });
+      width: t.width, height: t.height, steps: t.steps || '',
+      billing_mode: ['horde', 'pollinations'].includes(t.adapter) ? 'free_only' : 'unknown' });
   };
   const submit = async (event) => {
     event.preventDefault();
@@ -58,6 +60,15 @@ function AddForm({ templates, onCreated, secretsReady }) {
             placeholder={['pollinations', 'horde'].includes(f.adapter) ? 'Ключ (необязательно)' : 'Ключ API'} />
           {!secretsReady && f.api_key && <p className="error">Для хранения ключей задайте SECRETS_KEY или ADMIN_API_KEY (24+ символа) и перезапустите панель.</p>}
           <div className="row">
+            <label>Оплата <select value={f.billing_mode} onChange={(e) => set({ billing_mode: e.target.value })}>
+              <option value="unknown">Цена неизвестна — запуск запрещён</option>
+              <option value="metered">Платный API / бесплатные кредиты аккаунта</option>
+              <option value="free_only">Анонимный Horde / Pollinations без ключа</option>
+            </select></label>
+            {f.billing_mode === 'metered' && <label>Максимальная стоимость запроса, USD <input type="number" min="0.10" max="1000" step="0.0001" value={f.reservation_usd} onChange={(e) => set({ reservation_usd: e.target.value })} required /></label>}
+          </div>
+          <p className="muted">Укажите верхнюю границу цены для выбранной модели и размеров. Каждый запрос, включая проверку и таймаут, резервируется в общем месячном бюджете. Бесплатный кредит платного аккаунта не гарантирует нулевую стоимость.</p>
+          <div className="row">
             <label>Ширина <input type="number" value={f.width} min="256" max="2048" onChange={(e) => set({ width: e.target.value })} /></label>
             <label>Высота <input type="number" value={f.height} min="256" max="2048" onChange={(e) => set({ height: e.target.value })} /></label>
             <label>Шагов <input type="number" value={f.steps} min="1" max="100" onChange={(e) => set({ steps: e.target.value })} /></label>
@@ -92,7 +103,7 @@ function Custom({ item, reload }) {
     if (await patch(body)) { setEdit(false); setDraft({}); }
   };
   const field = (name, label, type = 'text') => (
-    <label>{label} <input type={type} value={draft[name] ?? item[name] ?? ''} onChange={(e) => setDraft({ ...draft, [name]: e.target.value })} /></label>
+    <label>{label} <input type={type} step={name === 'reservation_usd' ? '0.0001' : undefined} value={draft[name] ?? item[name] ?? ''} onChange={(e) => setDraft({ ...draft, [name]: e.target.value })} /></label>
   );
   return (
     <div className="card">
@@ -103,10 +114,11 @@ function Custom({ item, reload }) {
       </div>
       <div className="row">
         <small>приоритет {item.priority} · сегодня {item.daily_used}/{item.daily_limit}</small>
+        <small className={item.pricing_ready ? '' : 'error'}>{item.pricing_ready ? `резерв $${item.reservation_usd} за запрос` : 'Цена неизвестна — генерация и проверка запрещены'}</small>
         {item.last_test_at && <small className={item.last_test_ok ? '' : 'error'}>проверка {when(item.last_test_at)}: {item.last_test_ok ? 'успешно' : item.last_test_error}</small>}
       </div>
       <div className="actions">
-        <button className="small" disabled={busy} onClick={test}>Проверить</button>
+        <button className="small" disabled={busy || !item.pricing_ready} onClick={test}>Проверить</button>
         <button className="small" disabled={busy} onClick={() => patch({ is_enabled: !item.is_enabled })}>{item.is_enabled ? 'Выключить' : 'Включить'}</button>
         <button className="small" onClick={() => setEdit(!edit)}>Настроить</button>
         <button className="small danger" disabled={busy} onClick={() => confirm('Удалить генератор?') && run(() => api(`/image-providers/${item.id}`, { method: 'DELETE' }))}>Удалить</button>
@@ -117,6 +129,12 @@ function Custom({ item, reload }) {
           {item.adapter === 'cloudflare' && field('account_id', 'Account ID')}
           {field('width', 'Ширина', 'number')}{field('height', 'Высота', 'number')}{field('steps', 'Шагов', 'number')}
           {field('priority', 'Приоритет', 'number')}{field('daily_limit', 'В сутки', 'number')}
+          <label>Оплата <select value={draft.billing_mode ?? item.billing_mode} onChange={(e) => setDraft({ ...draft, billing_mode: e.target.value })}>
+            <option value="unknown">Цена неизвестна — запуск запрещён</option>
+            <option value="metered">Платный API / кредиты аккаунта</option>
+            <option value="free_only">Анонимный Horde / Pollinations без ключа</option>
+          </select></label>
+          {field('reservation_usd', 'Максимальная стоимость запроса, USD', 'number')}
           <label>Новый ключ <input type="password" autoComplete="new-password" placeholder="оставьте пустым, чтобы не менять" value={draft.api_key ?? ''} onChange={(e) => setDraft({ ...draft, api_key: e.target.value })} /></label>
           {item.has_key && <button className="small danger" disabled={busy} onClick={() => patch({ clear_key: true })}>Удалить ключ</button>}
           <button disabled={busy} onClick={save}>Сохранить</button>
@@ -134,8 +152,9 @@ export default function ImageProviders() {
   return (
     <section>
       <h2>Генераторы картинок</h2>
-      <p className="muted">Бот перебирает генераторы по приоритету: сначала добавленные здесь (бесплатные), затем платные из настроек сервера. Если один недоступен или исчерпал дневной лимит, берётся следующий. Изменения подхватываются без перезапуска.</p>
+      <p className="muted">Бот выбирает генераторы по приоритету или общей статистике. Если один недоступен или исчерпал лимит, берётся следующий. Всем платным запросам, включая проверки, нужен резерв в общем месячном бюджете. При неизвестной цене запуск запрещён.</p>
       <Help title="Как это работает и что нужно для запуска">
+        <p>У бесплатных уровней аккаунтов возможны платные превышения квоты: для таких сервисов задайте максимальную цену запроса с запасом и ограничение расходов в кабинете провайдера. Нулевой резерв разрешён только анонимным Horde/Pollinations на стандартном адресе без ключа. При смене модели или размера обновите верхнюю границу стоимости.</p>
         <p>Каждой картинке нужен генератор. Бот пробует их по очереди: сначала добавленные здесь (по приоритету — меньшее число раньше), потом платные из <code>.env</code>. Если генератор вернул ошибку или исчерпал дневной лимит, берётся следующий.</p>
         <ol>
           <li><b>Подготовьте сервер</b> (один раз): задайте <code>SECRETS_KEY</code> или <code>ADMIN_API_KEY</code> (24+ символа) — ими шифруются ключи; запустите локальную нейросеть описания сцен: <code>docker compose --profile prayers up -d</code>. Это не даёт тексту стиха уйти во внешний сервис: наружу идёт только описание картинки.</li>

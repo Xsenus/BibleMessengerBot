@@ -27,6 +27,7 @@ function ProxyForm({ onCreated, secretsReady }) {
         <input value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder="Название (например, NL-1)" required />
       </div>
       <p className="muted">Введите готовый адрес или заполните поля ниже.</p>
+      <p className="muted">Для Telegram выберите HTTP или SOCKS5. HTTPS-прокси доступны для остальных сервисов. SOCKS5h разрешает имена через прокси.</p>
       <input value={f.url} onChange={(e) => set({ url: e.target.value })} placeholder="socks5://логин:пароль@host:1080" />
       {!f.url && (
         <div className="row">

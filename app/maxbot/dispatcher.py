@@ -11,6 +11,7 @@ from aiogram.types import CallbackQuery, Chat, Message
 
 from app.bot import handlers
 from app.bot.commands import MANAGEMENT, parse_command
+from app.bot.ui import BUTTONS
 from app.maxbot.bridge import user_model
 from app.platforms.bridge import ReplyContext
 from app.maxbot.identities import lookup, register, remember_message
@@ -21,7 +22,7 @@ from app.services.i18n import initial_ui, tr
 from app.services.locks import chat_lock
 from app.worker.delivery import insert_payload
 
-NAVIGATION = {'/next','/today','/random','/search','/settings','/help','/daily','/donate','/start','/menu'}
+NAVIGATION = {'/' + name for name, _emoji in BUTTONS} | {'/start', '/menu'}
 
 
 class MaxDispatcher:

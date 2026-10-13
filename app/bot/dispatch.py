@@ -159,7 +159,9 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             identifier,title = await reader.add_bookmark(connection,chat['telegram_chat_id'],edition,' '.join(args))
             return (f'🔖 Закладка №{identifier}: {title}' if ru else f'🔖 Bookmark #{identifier}: {title}'),None
         if name=='bookmarks':
-            return await reader.listing(connection,chat['telegram_chat_id'],edition,ru),None
+            if len(args)>1 or (args and (not args[0].isascii() or not args[0].isdigit() or len(args[0])>3 or int(args[0])<1)):
+                raise UserError('invalid')
+            return await reader.listing(connection,chat['telegram_chat_id'],edition,ru,page=int(args[0]) if args else 1),None
         if name=='unbookmark':
             done = len(args)==1 and args[0].isdigit() and await reader.remove_bookmark(connection,chat['telegram_chat_id'],int(args[0]))
             return (('Закладка удалена.' if ru else 'Bookmark removed.') if done else tr(locale,'no_result')),None
@@ -292,16 +294,13 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
     # /next — следующая глава (отправляет воркер)
     if name=='next':
         from app.services import reader
-        await reader.mark_read(connection,chat['telegram_chat_id'],datetime.now(ZoneInfo(chat['timezone'])).date())
         await enqueue_next(connection,chat,edition,f'{message.chat.id}:{message.message_id}',settings.max_message_length)
+        await reader.mark_read(connection,chat['telegram_chat_id'],datetime.now(ZoneInfo(chat['timezone'])).date())
         # The delivery worker sends the reading; no separate queue receipt is needed.
         return None,None
     # Команды выбора стиха: /today, /random, /topic, /search, /read
     local_date = datetime.now(ZoneInfo(chat['timezone'])).date()
     row = None
-    if name in {'today','read'}:
-        from app.services import reader
-        await reader.mark_read(connection,chat['telegram_chat_id'],local_date)
     if name=='today':
         row = await readings.daily(connection,edition,str(chat['telegram_chat_id']),local_date)
     elif name=='random':
@@ -327,6 +326,9 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
                     max_length=settings.max_message_length)
             # Владельцу бота предлагается разослать найденный отрывок всем (кнопка появится под результатом).
             await broadcast.offer(connection,user.id,broadcast.refs_from_reference(result[0],result[1]),edition['id'],await broadcast.image_of(connection,text))
+            if name=='read':
+                from app.services import reader
+                await reader.mark_read(connection,chat['telegram_chat_id'],local_date)
             return text,None
         if name=='read':
             return search_prompt(locale),None
@@ -344,6 +346,9 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         await broadcast.offer(connection,user.id,[dict(book=row['book_code'],chapter=row['chapter'],
             first=shown[0]['verse'],last=shown[-1].get('verse_end') or shown[-1]['verse'])],edition['id'],
             await broadcast.image_of(connection,decorated))
+        if name=='today':
+            from app.services import reader
+            await reader.mark_read(connection,chat['telegram_chat_id'],local_date)
         return decorated,None
     return tr(locale,'no_result'),None
 

@@ -104,7 +104,7 @@ async def valid_request_source(connection, request, *, image=None, edition=None)
     from app.services import bible
 
     image = image or await connection.fetchrow('SELECT * FROM verse_illustrations WHERE id=$1',request['image_id'])
-    if not image or image['status']!='ready':
+    if not image or image['status']!='ready' or image.get('quarantined_at'):
         return False
     edition = edition or await bible.find_translation(connection,image['translation_id'])
     if not edition:
@@ -434,6 +434,24 @@ async def set_quarantine(connection: Any, image_id: int, quarantined: bool) -> b
     return result.endswith('1')
 
 
+async def without_quarantined_image(connection: Any, chunk: dict) -> dict:
+    """Keep reading text deliverable if its prepared illustration was moderated.
+
+    Unknown/missing IDs retain normal transport validation; only known quarantine
+    removes the illustration. Real API errors remain delivery errors.
+    """
+    identifier = chunk.get('image_id')
+    caption = chunk.get('caption')
+    captioned_photo = chunk.get('kind') == 'photo' and isinstance(caption, str) and bool(caption.strip())
+    if (chunk.get('kind') in {'rich', 'rich_edit'} or captioned_photo) and type(identifier) is int and identifier > 0:
+        row = await connection.fetchrow('SELECT quarantined_at FROM verse_illustrations WHERE id=$1', identifier)
+        if row and row.get('quarantined_at') is not None:
+            if captioned_photo:
+                return dict(chunk, kind='rich', text=caption, image_id=None)
+            return dict(chunk, image_id=None)
+    return chunk
+
+
 MAX_VARIANTS = 5
 
 
@@ -458,7 +476,7 @@ async def request_variant(connection: Any, image_id: int) -> int | None:
                DO UPDATE SET updated_at=now() RETURNING id""", key[0], key[1], key[2], key[3], key[4], row['artwork_scope'], row['verse_end'])
         prompt = job['prompt'] if 'Alternative composition' in job['prompt'] else job['prompt'] + '\n\nAlternative composition: choose a different viewpoint and arrangement from earlier versions.'
         await connection.execute(
-            """INSERT INTO image_generation_jobs(image_id,prompt,prompt_variant,model,prompt_version)
-               VALUES($1,$2,$3,$4,$5) ON CONFLICT(image_id) DO NOTHING""",
+            """INSERT INTO image_generation_jobs(image_id,prompt,prompt_variant,model,prompt_version,admin_requested)
+               VALUES($1,$2,$3,$4,$5,true) ON CONFLICT(image_id) DO UPDATE SET admin_requested=true""",
             pending_id, prompt, job['prompt_variant'], job['model'], job['prompt_version'])
         return pending_id

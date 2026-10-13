@@ -12,6 +12,7 @@ import base64
 import json
 import re
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -67,6 +68,39 @@ def safe_base(url: str) -> str:
     return url.rstrip('/')
 
 
+def reservation_for(spec: dict) -> Decimal | None:
+    """Declared upper-bound cost, or None when pricing is unknown/unsafe.
+
+    Zero is permitted only for anonymous canonical services with no billable
+    credential. A credit/free tier on a paid account does not establish zero cost.
+    """
+    mode = spec.get('billing_mode', 'unknown')
+    if mode == 'free_only':
+        adapter = str(spec.get('adapter') or '')
+        base = (spec.get('base_url') or DEFAULT_URLS.get(adapter, '')).rstrip('/')
+        key = spec.get('api_key') or spec.get('api_key_enc') or ''
+        extra = spec.get('extra') or {}
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except ValueError:
+                return None
+        if not key and not extra and (
+            adapter == 'horde' and base == DEFAULT_URLS['horde'] and not spec.get('model')
+            or adapter == 'pollinations' and base == DEFAULT_URLS['pollinations'] and spec.get('model', '') in {'', 'flux'}
+        ):
+            return Decimal(0)
+        return None
+    if mode == 'metered':
+        try:
+            amount = Decimal(str(spec.get('reservation_usd', 0)))
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+        if amount.is_finite() and Decimal('0.10') <= amount <= Decimal('1000'):
+            return amount
+    return None
+
+
 def validate_spec(spec: dict) -> None:
     """Проверить настройки провайдера перед сохранением (ValueError с кратким кодом)."""
     adapter = spec.get('adapter')
@@ -85,12 +119,15 @@ def validate_spec(spec: dict) -> None:
         raise ValueError('model')
     if adapter == 'cloudflare' and not re.fullmatch(r'[0-9a-f]{32}', str(spec.get('account_id', ''))):
         raise ValueError('account_id')
+    mode = spec.get('billing_mode', 'unknown')
+    if mode not in {'unknown', 'metered', 'free_only'}:
+        raise ValueError('billing_mode')
+    if mode != 'unknown' and reservation_for(spec) is None:
+        raise ValueError('pricing')
 
 
 def _error_for(response: httpx.Response) -> None:
     """Общий разбор HTTP-ответа бесплатных сервисов: 429 — повтор позже, 401/403 — ключ, 5xx — временный сбой."""
-    if response.status_code == 503:
-        raise GenerationError('server_busy', retry=True, retry_after=60)
     check_status(response)
 
 
@@ -140,6 +177,8 @@ async def _fetch_url(client: httpx.AsyncClient, url: str) -> bytes:
 async def _cloudflare(spec: dict, prompt: str, client: httpx.AsyncClient) -> bytes:
     """Workers AI: `POST /accounts/{id}/ai/run/{model}` с Bearer-токеном; промпт не длиннее 2048 символов."""
     base = safe_base(spec.get('base_url') or DEFAULT_URLS['cloudflare'])
+    if not await public_host(base):
+        raise GenerationError('response_invalid')
     body: dict[str, Any] = {'prompt': prompt[:2048]}
     if spec.get('steps'):
         body['steps'] = spec['steps']
@@ -154,6 +193,8 @@ async def _cloudflare(spec: dict, prompt: str, client: httpx.AsyncClient) -> byt
 async def _huggingface(spec: dict, prompt: str, client: httpx.AsyncClient) -> bytes:
     """Hugging Face Inference: `POST {base}/{model}` с `{"inputs": prompt}`; ответ — картинка."""
     base = safe_base(spec.get('base_url') or DEFAULT_URLS['huggingface'])
+    if not await public_host(base):
+        raise GenerationError('response_invalid')
     body: dict[str, Any] = {'inputs': prompt[:4000], 'parameters': {'width': spec['width'], 'height': spec['height']}}
     if spec.get('steps'):
         body['parameters']['num_inference_steps'] = spec['steps']
@@ -165,6 +206,8 @@ async def _huggingface(spec: dict, prompt: str, client: httpx.AsyncClient) -> by
 async def _pollinations(spec: dict, prompt: str, client: httpx.AsyncClient) -> bytes:
     """Pollinations: `GET {base}/prompt/{prompt}?width&height&model`; ключ необязателен (Bearer повышает лимиты)."""
     base = safe_base(spec.get('base_url') or DEFAULT_URLS['pollinations'])
+    if not await public_host(base):
+        raise GenerationError('response_invalid')
     headers = {'Authorization': 'Bearer ' + spec['api_key']} if spec.get('api_key') else {}
     params = {'width': spec['width'], 'height': spec['height'], 'model': spec.get('model') or 'flux', 'nologo': 'true'}
     response = await client.get(f"{base}/prompt/{quote(prompt[:1500], safe='')}", params=params, headers=headers)
@@ -175,6 +218,8 @@ async def _pollinations(spec: dict, prompt: str, client: httpx.AsyncClient) -> b
 async def _horde(spec: dict, prompt: str, client: httpx.AsyncClient) -> bytes:
     """AI Horde: поставить задачу, опрашивать готовность до таймаута (по умолчанию 200 с), забрать результат; при таймауте задача отменяется."""
     base = safe_base(spec.get('base_url') or DEFAULT_URLS['horde'])
+    if not await public_host(base):
+        raise GenerationError('response_invalid')
     headers = {'apikey': spec.get('api_key') or ANON_HORDE_KEY, 'Client-Agent': 'BibleMessengerBot:1.0:admin'}
     params: dict[str, Any] = {'width': spec['width'], 'height': spec['height'], 'n': 1, 'steps': spec.get('steps') or 25}
     body: dict[str, Any] = {'prompt': prompt[:1000], 'params': params, 'nsfw': False, 'censor_nsfw': True, 'r2': True}
@@ -195,6 +240,8 @@ async def _horde(spec: dict, prompt: str, client: httpx.AsyncClient) -> bytes:
     deadline = time.monotonic() + min(600.0, max(10.0, limit))
     while time.monotonic() < deadline:
         await asyncio.sleep(4)
+        if not await public_host(base):
+            raise GenerationError('response_invalid', uncertain=True)
         check = await client.get(f'{base}/generate/check/{task}', headers=headers)
         if check.status_code != 200:
             continue
@@ -202,6 +249,8 @@ async def _horde(spec: dict, prompt: str, client: httpx.AsyncClient) -> bytes:
         if state.get('faulted'):
             raise GenerationError('remote_failed', retry=True)
         if state.get('done'):
+            if not await public_host(base):
+                raise GenerationError('response_invalid', uncertain=True)
             status = await client.get(f'{base}/generate/status/{task}', headers=headers)
             _error_for(status)
             generations = status.json().get('generations') or []
@@ -212,6 +261,8 @@ async def _horde(spec: dict, prompt: str, client: httpx.AsyncClient) -> bytes:
             image = str(generations[0]['img'])
             return await _fetch_url(client, image) if image.startswith('http') else base64.b64decode(image)
     try:
+        if not await public_host(base):
+            raise GenerationError('response_invalid', uncertain=True)
         await client.delete(f'{base}/generate/status/{task}', headers=headers)
     except httpx.HTTPError:
         pass
@@ -246,7 +297,7 @@ _RUNNERS = {'cloudflare': _cloudflare, 'huggingface': _huggingface, 'pollination
 async def generate(spec: dict, prompt: str, *, client: httpx.AsyncClient | None = None) -> tuple[bytes, dict, str | None]:
     """Получить картинку у настроенного сервиса. Возвращает (картинка, сведения, идентификатор запроса).
 
-    Любые сбои превращаются в `GenerationError`; платной отправки здесь нет, поэтому «неопределённых» исходов нет."""
+    После отправки стоимость может быть неизвестна: таймауты сохраняют резерв."""
     if NEEDS_KEY.get(spec['adapter']) and not spec.get('api_key'):
         raise GenerationError('missing_key')
     owned = client is None
@@ -256,7 +307,7 @@ async def generate(spec: dict, prompt: str, *, client: httpx.AsyncClient | None 
             data = await _RUNNERS[spec['adapter']](spec, prompt, client)
             data = normalize_download(data)
         except httpx.TransportError as error:
-            raise GenerationError('transport_error', retry=True, retry_after=60) from error
+            raise GenerationError('transport_error', uncertain=True, retry=True, retry_after=60) from error
         except (ValueError, KeyError, TypeError) as error:
             raise GenerationError('response_invalid') from error
         return data, {'adapter': spec['adapter'], 'model': spec.get('model', '')}, None

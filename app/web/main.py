@@ -93,7 +93,7 @@ async def panel_headers(request: Request, call_next):
     if request.url.path.startswith(('/panel', '/api/admin')):
         response.headers.setdefault('X-Content-Type-Options', 'nosniff')
         response.headers.setdefault('Content-Security-Policy',
-            "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+            "default-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         if request.url.path.startswith('/api/admin'):
             response.headers['Cache-Control'] = 'no-store'
     return response

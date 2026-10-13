@@ -52,6 +52,7 @@ async def replace(connection, old_id, new_id, reason):
         or not new
         or old_id == new_id
         or new["status"] != "ready"
+        or new['quarantined_at'] is not None
         or any(old[k] != new[k] for k in IDENTITY)
     ):
         raise ValueError("Replacement must have the same immutable Bible source")
@@ -202,7 +203,7 @@ async def clean_sent_prayers(connection):
                         image,
                     )
                     if not await connection.fetchval(
-                        "SELECT EXISTS(SELECT 1 FROM verse_illustrations WHERE id=$1 AND status='ready')",
+                        "SELECT EXISTS(SELECT 1 FROM verse_illustrations WHERE id=$1 AND status='ready' AND quarantined_at IS NULL)",
                         image,
                     ):
                         continue

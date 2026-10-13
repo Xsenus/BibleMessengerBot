@@ -442,7 +442,7 @@ async def artwork_for_send(connection, delivery):
     """К моменту отправки подставить в приглашение готовую картинку (без новых платных запросов и ожидания) и актуальный текст молитвы."""
     progress=json.loads(delivery['progress']) if isinstance(delivery['progress'],str) else delivery['progress']
     image=await connection.fetchval("""SELECT i.id FROM prayer_occurrences p JOIN verse_illustrations i ON i.id=p.image_id
-        WHERE p.id=$1 AND i.status='ready'""",progress.get('occurrence_id'))
+        WHERE p.id=$1 AND i.status='ready' AND i.quarantined_at IS NULL""",progress.get('occurrence_id'))
     parts=json.loads(delivery['chunks']) if isinstance(delivery['chunks'],str) else delivery['chunks']
     prepared=await connection.fetchrow('''SELECT b.*,c.ui_language FROM prayer_occurrences p
         JOIN subscriptions s ON s.id=p.subscription_id JOIN telegram_chats c ON c.telegram_chat_id=s.telegram_chat_id

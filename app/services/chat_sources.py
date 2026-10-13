@@ -109,8 +109,20 @@ async def download_image(url: str, client: httpx.AsyncClient | None = None) -> b
             await client.aclose()
 
 
+async def source_chat_id(connection: Any, platform: str, external_id: int) -> int | None:
+    """Resolve the registered destination without treating a bridge's external ID as Telegram's ID."""
+    if platform == 'telegram':
+        return await connection.fetchval(
+            "SELECT telegram_chat_id FROM telegram_chats WHERE platform='telegram' AND telegram_chat_id=$1", external_id)
+    return await connection.fetchval(
+        "SELECT internal_id FROM platform_identities WHERE platform=$1 AND kind='chat' AND external_id=$2",
+        platform, external_id)
+
+
 async def ensure_source(connection: Any, platform: str, external_id: int, title: str = '', chat_id: int | None = None) -> Any:
     """Найти источник или зарегистрировать его выключенным (администратор включает его в панели)."""
+    if chat_id is None:
+        chat_id = await source_chat_id(connection, platform, external_id)
     row = await connection.fetchrow('SELECT * FROM content_sources WHERE platform=$1 AND external_id=$2', platform, external_id)
     if row and (not title or title[:200] == row['title']) and (chat_id is None or row['chat_id'] == chat_id):
         return row                                         # частый путь: без записи в БД на каждое сообщение
@@ -177,24 +189,72 @@ async def notify_admins(connection: Any, source: Any, post_id: int, body: str) -
 
 async def publish(connection: Any, post_id: int, audience: dict | None = None) -> dict[str, int]:
     """Отправить копию поста аудитории источника (или заданной): исходный чат исключается, повтор не дублирует."""
-    post = await connection.fetchrow('''SELECT p.*,s.audience AS source_audience,s.chat_id,s.prefix,s.title
-        FROM source_posts p JOIN content_sources s ON s.id=p.source_id WHERE p.id=$1''', post_id)
-    if not post:
-        raise UserError('no_result')
-    claimed = await connection.fetchval("UPDATE source_posts SET status='published',published_at=now() WHERE id=$1 AND status='new' RETURNING id", post_id)
-    if claimed is None:
-        raise UserError('invalid')
-    if audience is None:
-        audience = post['source_audience']
-        audience = json.loads(audience) if isinstance(audience, str) else audience
+    # Commit intent separately from enqueue. A process stopped at either boundary can be
+    # resumed by composer; ordinary captured/awaiting-approval posts have no such intent.
+    async with connection.transaction():
+        post = await connection.fetchrow('''SELECT p.*,s.audience AS source_audience
+            FROM source_posts p JOIN content_sources s ON s.id=p.source_id WHERE p.id=$1 FOR UPDATE OF p''', post_id)
+        if not post:
+            raise UserError('no_result')
+        if post['status'] != 'new':
+            raise UserError('invalid')
+        if post['publication_requested_at'] is None:
+            chosen = audience if audience is not None else post['source_audience']
+            chosen = json.loads(chosen) if isinstance(chosen, str) else chosen
+            await connection.execute('''UPDATE source_posts SET publication_requested_at=now(),publication_audience=$2::jsonb,
+                publication_attempts=0,publication_retry_at=now(),publication_error='' WHERE id=$1''',
+                post_id, json.dumps(fanout.normalize_audience(chosen)))
+        elif post['publication_attempts'] >= 5:
+            # A deliberate manual retry restarts a bounded retry cycle, preserving the
+            # confirmed audience and the unique keys of already enqueued destinations.
+            await connection.execute('''UPDATE source_posts SET publication_attempts=0,publication_retry_at=now(),
+                publication_error='' WHERE id=$1''', post_id)
+    return await deliver_post(connection, post_id)
+
+
+async def deliver_post(connection: Any, post_id: int) -> dict[str, int]:
+    """Complete a previously authorized publication; concurrent callers serialize on the post."""
     try:
-        return await fanout.enqueue(connection, key=f'source-post:{post_id}', text=render_post(post, post['body']), mode='source_post',
-                                    audience=audience, asset_id=post['asset_id'], progress={'post_id': post_id},
-                                    exclude=(post['chat_id'],) if post['chat_id'] else ())
-    except Exception:
-        # Рассылка не поставлена в очередь: вернуть пост в «новые», чтобы его можно было отправить повторно (ключ доставки идемпотентен).
-        await connection.execute("UPDATE source_posts SET status='new',published_at=NULL WHERE id=$1 AND status='published'", post_id)
+        async with connection.transaction():
+            post = await connection.fetchrow('''SELECT p.*,s.chat_id,s.prefix,s.title,s.platform,s.external_id AS source_external_id
+                FROM source_posts p JOIN content_sources s ON s.id=p.source_id WHERE p.id=$1 FOR UPDATE OF p''', post_id)
+            if not post or post['status'] != 'new' or post['publication_requested_at'] is None:
+                raise UserError('invalid')
+            audience = post['publication_audience']
+            audience = json.loads(audience) if isinstance(audience, str) else audience
+            origin = post['chat_id'] or await source_chat_id(connection, post['platform'], post['source_external_id'])
+            counts = await fanout.enqueue(connection, key=f'source-post:{post_id}', text=render_post(post, post['body']),
+                                          mode='source_post', audience=audience, asset_id=post['asset_id'], progress={'post_id': post_id},
+                                          exclude=(origin,) if origin is not None else ())
+            await connection.execute('''UPDATE source_posts SET status=$2,published_at=CASE WHEN $2='published' THEN now() END,
+                publication_attempts=publication_attempts+1,publication_retry_at=CASE WHEN $3 AND publication_attempts<4
+                THEN now()+interval '1 minute' END,publication_error=$4,recipients=$5,queued=$6,skipped=$7 WHERE id=$1''',
+                post_id, 'new' if counts['failed'] else 'published', bool(counts['failed']),
+                'Destinations awaiting enqueue' if counts['failed'] else '', counts['recipients'], counts['queued'], counts['skipped'])
+            return counts
+    except UserError:
         raise
+    except Exception as error:
+        await connection.execute('''UPDATE source_posts SET publication_attempts=publication_attempts+1,
+            publication_retry_at=CASE WHEN publication_attempts<4 THEN now()+interval '1 minute' END,
+            publication_error=$2 WHERE id=$1 AND status='new' ''', post_id, type(error).__name__)
+        raise
+
+
+async def retry_publications(connection: Any, limit: int = 5) -> int:
+    """Retry only publications with committed approval, with a one-minute delay and a five-attempt ceiling."""
+    rows = await connection.fetch('''SELECT id FROM source_posts WHERE status='new' AND publication_requested_at IS NOT NULL
+        AND publication_attempts<5 AND publication_retry_at<=now() ORDER BY publication_retry_at,id LIMIT $1''', limit)
+    done = 0
+    for row in rows:
+        try:
+            counts = await deliver_post(connection, row['id'])
+            done += not counts['failed']
+        except UserError:
+            pass  # Another recovery worker completed this publication.
+        except Exception as error:
+            LOGGER.warning('Post %s publication retry failed (%s)', row['id'], type(error).__name__)
+    return done
 
 
 async def ignore(connection: Any, post_id: int) -> bool:

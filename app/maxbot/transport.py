@@ -59,7 +59,7 @@ class MaxSender:
             raise SendError('rejected')
         # Check asset approval on every reuse: a cached token cannot revive quarantine.
         if kind == 'image':
-            asset = await self.connection.fetchrow("SELECT image_data,mime_type FROM verse_illustrations WHERE id=$1 AND status='ready'", identifier)
+            asset = await self.connection.fetchrow("SELECT image_data,mime_type FROM verse_illustrations WHERE id=$1 AND status='ready' AND quarantined_at IS NULL", identifier)
         elif kind == 'asset':
             asset = await self.connection.fetchrow("SELECT data AS image_data,mime_type FROM media_assets WHERE id=$1", identifier)
         else:
@@ -124,6 +124,9 @@ class MaxSender:
                 if kind in {'rich', 'rich_edit'} and chunk.get('card_id'):
                     from app.services.message_languages import outgoing
                     chunk, reply_markup = await outgoing(self.connection, chat_id, chunk)
+                from app.services.illustrations import without_quarantined_image
+                chunk = await without_quarantined_image(self.connection, chunk)
+                kind = chunk.get('kind')
                 if kind == 'max_audio':
                     # Authorization of the card/message happens again at send time.
                     card = await self.connection.fetchrow('''SELECT * FROM reading_cards

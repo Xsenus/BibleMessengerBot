@@ -97,7 +97,7 @@ async def test_horde_flow_and_timeout_cancels(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('status,code', [(401, 'auth'), (402, 'quota'), (429, 'rate_limited'), (503, 'server_busy'), (400, 'rejected')])
+@pytest.mark.parametrize('status,code', [(401, 'auth'), (402, 'quota'), (429, 'rate_limited'), (503, 'server_uncertain'), (400, 'rejected')])
 async def test_error_mapping(status, code):
     async with client(lambda r: httpx.Response(status, json={'error': 'x'})) as http:
         with pytest.raises(GenerationError) as info:
@@ -153,8 +153,8 @@ db_required = pytest.mark.skipif(os.getenv('RUN_DB_TESTS') != '1', reason='Real 
 
 
 async def add_provider(c, slug, priority=500, daily=20, enabled=True):
-    await c.execute('''INSERT INTO image_custom_providers(slug,adapter,model,api_key_enc,priority,daily_limit,is_enabled)
-        VALUES($1,'pollinations','flux','',$2,$3,$4)''', slug, priority, daily, enabled)
+    await c.execute('''INSERT INTO image_custom_providers(slug,adapter,model,api_key_enc,priority,daily_limit,is_enabled,billing_mode)
+        VALUES($1,'pollinations','flux','',$2,$3,$4,'free_only')''', slug, priority, daily, enabled)
 
 
 @db_required

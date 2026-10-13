@@ -6,6 +6,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 from io import BytesIO
+from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -13,7 +14,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from app.services import artwork, features, illustrations, free_image_providers, image_router, secrets_box
-from app.services.image_providers import MODELS, GenerationError
+from app.services.image_providers import MODELS, GenerationError, Provider
 from app.worker.delivery import resolve_uncertain
 
 TEST_PROMPT = 'A quiet shepherd with sheep on a green hill at sunrise, soft watercolor, warm light, no text'
@@ -34,6 +35,8 @@ class ProviderIn(BaseModel):
     priority: int = Field(500, ge=0, le=100000)
     daily_limit: int = Field(20, ge=1, le=10000)
     is_enabled: bool = True
+    billing_mode: Literal['unknown', 'metered', 'free_only'] = 'unknown'
+    reservation_usd: Decimal = Field(Decimal('0'), ge=0, le=1000, max_digits=12, decimal_places=4)
     extra: dict = {}
 
 
@@ -51,6 +54,8 @@ class ProviderPatch(BaseModel):
     priority: int | None = Field(None, ge=0, le=100000)
     daily_limit: int | None = Field(None, ge=1, le=10000)
     is_enabled: bool | None = None
+    billing_mode: Literal['unknown', 'metered', 'free_only'] | None = None
+    reservation_usd: Decimal | None = Field(None, ge=0, le=1000, max_digits=12, decimal_places=4)
     extra: dict | None = None
 
 
@@ -74,6 +79,8 @@ def public(row: Any) -> dict:
     data = {k: v for k, v in dict(row).items() if k != 'api_key_enc'}
     data['has_key'] = bool(row['api_key_enc'])
     data['needs_key'] = free_image_providers.NEEDS_KEY.get(row['adapter'], True)
+    data['reservation_usd'] = str(row['reservation_usd'])
+    data['pricing_ready'] = free_image_providers.reservation_for(dict(row)) is not None
     for key in ('last_test_at', 'created_at', 'updated_at'):
         data[key] = data[key].isoformat() if data.get(key) else None
     return data
@@ -113,9 +120,9 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             art = artwork.ArtSettings.from_env()
         except ValueError:
             raise HTTPException(500, 'invalid_image_settings') from None
-        usage = {r['provider']: r['daily'] for r in await conn.fetch(
-            """SELECT provider,count(*) AS daily FROM image_generation_attempts
-               WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') GROUP BY provider""")}
+        usage: dict[str, int] = {}
+        for record in await image_router.budget_usage(conn):
+            usage[record['provider']] = usage.get(record['provider'], 0) + record['daily']
         health = {r['provider']: r for r in await conn.fetch(
             'SELECT provider,max(blocked_until) AS blocked_until,max(error_code) AS error_code FROM image_provider_health GROUP BY provider')}
         keys = {'openai': art.key, **art.extra_keys}
@@ -232,10 +239,11 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             raise HTTPException(409, 'slug_taken')
         import json
         row = await conn.fetchrow('''INSERT INTO image_custom_providers(slug,label,adapter,base_url,model,api_key_enc,account_id,width,height,
-            steps,priority,daily_limit,is_enabled,extra) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb) RETURNING *''',
+            steps,priority,daily_limit,is_enabled,extra,billing_mode,reservation_usd)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16) RETURNING *''',
             payload.slug, payload.label, payload.adapter, payload.base_url.rstrip('/'), payload.model, secrets_box.encrypt(payload.api_key),
             payload.account_id, payload.width, payload.height, payload.steps, payload.priority, payload.daily_limit, payload.is_enabled,
-            json.dumps(payload.extra))
+            json.dumps(payload.extra), payload.billing_mode, payload.reservation_usd)
         return public(row)
 
     @router.patch('/image-providers/{provider_id}')
@@ -247,6 +255,10 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             raise HTTPException(404, 'not_found')
         values = payload.model_dump(exclude_none=True, exclude={'api_key', 'clear_key'})
         spec = dict(row, **values)
+        if payload.api_key:
+            spec['api_key'] = payload.api_key
+        elif payload.clear_key:
+            spec['api_key_enc'] = ''
         try:
             free_image_providers.validate_spec(spec)
         except ValueError as error:
@@ -277,7 +289,7 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
 
     @router.post('/image-providers/{provider_id}/test')
     async def test_image_provider(provider_id: int, conn: Any = Conn) -> dict:
-        """Проверочная генерация (не учитывается в лимитах заданий); возвращает уменьшенный просмотр и результат."""
+        """Проверочная генерация с общими суточным и месячным лимитами."""
         row = await conn.fetchrow('SELECT * FROM image_custom_providers WHERE id=$1', provider_id)
         if not row:
             raise HTTPException(404, 'not_found')
@@ -287,8 +299,15 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             raise HTTPException(409, 'secret_unreadable') from None
         import json
         spec = dict(row, api_key=key, extra=json.loads(row['extra']) if isinstance(row['extra'], str) else row['extra'])
+        try:
+            settings = artwork.ArtSettings.from_env()
+        except ValueError:
+            raise HTTPException(500, 'invalid_image_settings') from None
+        attempt, reason = await image_router.reserve_test(conn, Provider('x-' + row['slug'], key or 'keyless:' + row['slug'], custom=spec), settings)
+        if not attempt:
+            return dict(ok=False, error=reason, bytes=0, seconds=0, preview=None)
         started = time.monotonic()
-        error_code, preview, size = '', None, 0
+        error_code, preview, size, uncertain = '', None, 0, False
         try:
             data, _, _ = await free_image_providers.generate(spec, TEST_PROMPT)
             size = len(data)
@@ -299,8 +318,12 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             preview = base64.b64encode(out.getvalue()).decode()
         except GenerationError as error:
             error_code = error.code
+            uncertain = error.uncertain
         except Exception as error:
             error_code = type(error).__name__
+            uncertain = True
+        await conn.execute("UPDATE image_provider_test_attempts SET state=$2,error_code=$3 WHERE id=$1",
+                           attempt, 'uncertain' if uncertain else 'failed' if error_code else 'succeeded', error_code or None)
         await conn.execute('UPDATE image_custom_providers SET last_test_at=now(),last_test_ok=$2,last_test_error=$3 WHERE id=$1',
                            provider_id, not error_code, error_code)
         return dict(ok=not error_code, error=error_code, bytes=size, seconds=round(time.monotonic() - started, 1), preview=preview)

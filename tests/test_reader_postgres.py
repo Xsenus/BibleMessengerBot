@@ -1,10 +1,13 @@
 """Закладки, серия чтения и поиск по словам."""
+import asyncio
 import os
 from datetime import date, timedelta
 
 import pytest
+import asyncpg
 
 from app.services import bible, reader
+from app.services.errors import UserError
 from tests.test_image_versions_postgres import setup
 from tests.test_postgres_integration import db as db  # noqa: F401
 
@@ -41,6 +44,52 @@ async def test_bookmarks_add_replace_list_remove(db):
     assert not await reader.remove_bookmark(c, 202, identifier)                 # чужая закладка недоступна
     assert await reader.remove_bookmark(c, 101, identifier)
     assert 'нет' in await reader.listing(c, 101, edition, True)
+
+
+@pytest.mark.asyncio
+async def test_all_200_bookmarks_remain_accessible_and_existing_note_can_be_updated_at_limit(db):
+    c, settings, edition, _, _ = await setup(db)
+    rows = await c.fetch('''SELECT book_code,chapter,verse FROM verses
+        WHERE translation_id=$1 ORDER BY source_line LIMIT 201''', edition['id'])
+    identifiers = []
+    for index, row in enumerate(rows[:200], 1):
+        identifier, _ = await reader.add_bookmark(c, 101, edition,
+            f"{row['book_code']} {row['chapter']}:{row['verse']} unique_note_{index:03}")
+        identifiers.append(identifier)
+    rendered = []
+    for page in range(1, 21):
+        text = await reader.listing(c, 101, edition, page=page)
+        assert f'Страница {page}/20' in text
+        assert ('/bookmarks ' + str(page + 1) in text) == (page < 20)
+        assert ('/bookmarks ' + str(page - 1) in text) == (page > 1)
+        rendered.append(text)
+    combined = '\n'.join(rendered)
+    for index in range(1, 201):
+        assert combined.count(f'unique_note_{index:03}') == 1
+    with pytest.raises(UserError, match='invalid'):
+        await reader.listing(c, 101, edition, page=21)
+    first = rows[0]
+    again, _ = await reader.add_bookmark(c, 101, edition,
+        f"{first['book_code']} {first['chapter']}:{first['verse']} updated at limit")
+    assert again == identifiers[0]
+    assert 'updated at limit' in await reader.listing(c, 101, edition, page=20)
+    row = rows[200]
+    with pytest.raises(UserError, match='limit'):
+        await reader.add_bookmark(c, 101, edition, f"{row['book_code']} {row['chapter']}:{row['verse']} overflow")
+    assert await c.fetchval('SELECT count(*) FROM bookmarks WHERE telegram_chat_id=101') == 200
+    # Two clients competing for the last slot cannot exceed the per-chat limit.
+    await reader.remove_bookmark(c, 101, identifiers[-1])
+    connections = [await asyncpg.connect(settings.database_url) for _ in range(2)]
+    try:
+        additions = await asyncio.gather(*(reader.add_bookmark(connection, 101, edition,
+            f"{row['book_code']} {row['chapter']}:{row['verse']} concurrent")
+            for connection, row in zip(connections, rows[199:201], strict=True)), return_exceptions=True)
+        assert sum(isinstance(result, tuple) for result in additions) == 1
+        errors = [result for result in additions if isinstance(result, Exception)]
+        assert len(errors) == 1 and isinstance(errors[0], UserError) and errors[0].key == 'limit'
+        assert await c.fetchval('SELECT count(*) FROM bookmarks WHERE telegram_chat_id=101') == 200
+    finally:
+        await asyncio.gather(*(connection.close() for connection in connections))
 
 
 @pytest.mark.asyncio

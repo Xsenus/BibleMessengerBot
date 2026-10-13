@@ -7,6 +7,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from app.bot.handlers import command_target_suffix
 from app.bot.ui import main_keyboard
 from app.maxbot.ui import keyboard_attachment, payment_controls
+from app.maxbot.dispatcher import NAVIGATION
 
 
 @pytest.mark.parametrize('enabled',[False,True])
@@ -18,6 +19,7 @@ def test_main_navigation_matches_merchant_availability_in_both_languages(monkeyp
         expected = {'maxcmd:/next', 'maxcmd:/today', 'maxcmd:/random', 'maxcmd:/search',
                     'maxcmd:/settings', 'maxcmd:/help', 'maxcmd:/daily', 'maxcmd:/prayerbook'}
         assert payloads == expected | ({'maxcmd:/donate'} if enabled else set())
+        assert {value.removeprefix('maxcmd:') for value in payloads} <= NAVIGATION
 
 
 def test_stale_navigation_can_remove_and_restore_payment_without_losing_other_buttons(monkeypatch):

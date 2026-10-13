@@ -80,12 +80,12 @@ def has_custom():
 
 def rank(settings, provider):
     """Порядок выбора: провайдеры из панели по своему приоритету, встроенные — после PAID_RANK_BASE в заданном порядке."""
-    if provider.custom is not None:
-        if RANKING['mode'] == 'auto':
-            # Лучшая статистика — раньше; у провайдера без истории оценка 0.5; приоритет разрешает ничьи.
-            return 500 - RANKING['scores'].get(provider.name, 0.5) * 400 + provider.custom['priority'] / 1_000_000
-        return provider.custom['priority']
-    return PAID_RANK_BASE + settings.provider_order.index(provider.name)
+    priority = (provider.custom['priority'] if provider.custom is not None
+                else PAID_RANK_BASE + settings.provider_order.index(provider.name))
+    if RANKING['mode'] == 'auto':
+        # Apply the same reliability score to every service; priority breaks ties.
+        return 500 - RANKING['scores'].get(provider.name, 0.5) * 400 + priority / 1_000_000
+    return priority
 
 
 def providers(settings):
@@ -128,6 +128,37 @@ async def configure(connection, settings):
             AND attempts<$1""", attempt_limit(settings))
 
 
+async def budget_usage(connection):
+    """Generation jobs and panel probes consume the same UTC limits."""
+    return await connection.fetch("""WITH submissions AS (
+        SELECT provider,key_fingerprint,reserved_usd,created_at FROM image_generation_attempts
+        UNION ALL
+        SELECT provider,key_fingerprint,reserved_usd,created_at FROM image_provider_test_attempts)
+        SELECT provider,key_fingerprint,COALESCE(sum(reserved_usd),0) AS monthly,
+        count(*) FILTER(WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
+        FROM submissions
+        WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+        GROUP BY provider,key_fingerprint""")
+
+
+async def reserve_test(connection, provider, settings):
+    """Reserve a panel probe before submission; unknown prices are rejected."""
+    amount = provider.reservation_usd
+    if amount is None:
+        return None, 'pricing_unknown'
+    async with connection.transaction():
+        await connection.execute("SELECT pg_advisory_xact_lock($1)", lock_key('image-budget', 1))
+        usage = await budget_usage(connection)
+        if sum(row['monthly'] for row in usage) + amount > settings.monthly_usd:
+            return None, 'monthly_budget'
+        if sum(row['daily'] for row in usage if row['provider'] == provider.name) >= provider.custom['daily_limit']:
+            return None, 'daily_limit'
+        identifier = await connection.fetchval("""INSERT INTO image_provider_test_attempts
+            (provider,key_fingerprint,reserved_usd) VALUES($1,$2,$3) RETURNING id""",
+            provider.name, fingerprint(provider), amount)
+        return identifier, None
+
+
 async def reserve(connection, job_id, settings):
     """Атомарно выбрать провайдера и зарезервировать бюджет: учитываются уже использованные для задания, суточные лимиты, блокировки по ошибкам и месячный бюджет. Возвращает (попытка, провайдер, причина отказа); при отсутствии кандидатов задание откладывается или помечается исчерпанным."""
     async with connection.transaction():
@@ -145,11 +176,7 @@ async def reserve(connection, job_id, settings):
         health = {
             (r["provider"], r["key_fingerprint"]): r for r in await connection.fetch("SELECT * FROM image_provider_health")
         }
-        usage = await connection.fetch("""SELECT provider,key_fingerprint,COALESCE(sum(reserved_usd),0) AS monthly,
-            count(*) FILTER(WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
-            FROM image_generation_attempts
-            WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
-            GROUP BY provider,key_fingerprint""")
+        usage = await budget_usage(connection)
         monthly_reserved = sum(r["monthly"] for r in usage)
         daily_used = {}
         credential_used = {}
@@ -160,6 +187,9 @@ async def reserve(connection, job_id, settings):
         blocked = False
         daily_exhausted = False
         for provider in providers(settings):
+            if provider.reservation_usd is None:
+                blocked = True
+                continue
             if any(
                 r["provider"] == provider.name
                 and r["key_fingerprint"] in {None, fingerprint(provider)}

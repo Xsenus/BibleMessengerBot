@@ -10,6 +10,8 @@ from app.services.metrics import Exposition, collect
 
 class FakeConnection:
     async def fetch(self, sql, *args):
+        if 'WITH submissions AS' in sql:
+            return [{'provider': 'openai', 'key_fingerprint': 'fixture', 'monthly': Decimal('9.1'), 'daily': 1}]
         if 'usage_events' in sql:
             return []
         if 'FROM delivery_log GROUP BY status' in sql:
@@ -25,8 +27,6 @@ class FakeConnection:
         return []
 
     async def fetchval(self, sql, *args):
-        if 'image_generation_attempts' in sql:
-            return Decimal('9.1')
         if 'min(scheduled_for)' in sql:
             return 4000
         if any(name in sql for name in ('announcements', 'video_feeds', 'vk_inbox', 'source_posts')):

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from app.net import store
 from app.net.router import STRATEGIES
 from app.net.services import SERVICES
+from app.net.telegram import proxy_url as telegram_proxy_url
 from app.services import secrets_box
 
 
@@ -84,6 +85,8 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
         target = SERVICES[service][1]
         started = time.monotonic()
         try:
+            if service == 'telegram':
+                url = telegram_proxy_url(url)
             transport = httpx.AsyncHTTPTransport(proxy=httpx.Proxy(url)) if url else httpx.AsyncHTTPTransport()
             async with httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(10, connect=8), follow_redirects=False) as client:
                 response = await client.get(target)
@@ -166,6 +169,8 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
                 scheme, host = store.parse_proxy_url(payload.url)
             except ValueError as error:
                 raise HTTPException(422, 'invalid_' + str(error)) from None
+            if scheme == 'https' and await conn.fetchval("SELECT count(*) FROM net_routes WHERE proxy_id=$1 AND service='telegram' AND is_enabled", proxy_id):
+                raise HTTPException(422, 'unsupported_telegram_proxy_scheme')
             values.update(scheme=scheme, host=host, url_enc=secrets_box.encrypt(payload.url))
         if not values:
             raise HTTPException(422, 'nothing_to_change')
@@ -209,6 +214,9 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
         real = [i for i in ids if i is not None]
         if real and await conn.fetchval('SELECT count(*) FROM net_proxies WHERE id=ANY($1::bigint[])', real) != len(real):
             raise HTTPException(422, 'invalid_proxy')
+        active = [r.proxy_id for r in payload.routes if r.enabled and r.proxy_id is not None]
+        if service == 'telegram' and active and await conn.fetchval("SELECT count(*) FROM net_proxies WHERE id=ANY($1::bigint[]) AND scheme='https'", active):
+            raise HTTPException(422, 'unsupported_telegram_proxy_scheme')
         async with conn.transaction():
             await conn.execute('''INSERT INTO net_policies(service,strategy,attempts) VALUES($1,$2,$3)
                 ON CONFLICT(service) DO UPDATE SET strategy=EXCLUDED.strategy,attempts=EXCLUDED.attempts,updated_at=now()''',

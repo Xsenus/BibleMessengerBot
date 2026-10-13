@@ -139,7 +139,7 @@ def render(feed: Any, item: dict | Any, ru: bool = True) -> str:
 
 
 async def poll_feed(connection: Any, feed: Any, client: httpx.AsyncClient, vk_call: Any = None) -> int:
-    """Опросить один канал и вернуть число поставленных в очередь уведомлений. Любые сбои фиксируются, а не пробрасываются."""
+    """Poll one feed and enqueue new notifications, retaining failures even after a video leaves the feed."""
     try:
         items = await fetch(feed, client, vk_call)
     except Exception as error:
@@ -150,24 +150,50 @@ async def poll_feed(connection: Any, feed: Any, client: httpx.AsyncClient, vk_ca
     async with connection.transaction():
         fresh = []
         for item in items:
-            older = item['published'] is not None and item['published'] < feed['created_at']   # старое видео вернулось в окно ленты
+            older = item['published'] is not None and item['published'] < feed['created_at']
             status = 'skipped' if (not feed['baselined'] or older) else 'new'
-            row = await connection.fetchrow('''INSERT INTO video_items(feed_id,external_id,title,url,published_at,status)
-                VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(feed_id,external_id) DO NOTHING RETURNING id,status''',
+            row = await connection.fetchrow("""INSERT INTO video_items(feed_id,external_id,title,url,published_at,status)
+                VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(feed_id,external_id) DO NOTHING RETURNING id,status""",
                 feed['id'], item['id'], item['title'], item['url'], item['published'], status)
             if row and status == 'new':
-                fresh.append((row['id'], item))
-        await connection.execute('''UPDATE video_feeds SET baselined=true,error_count=0,last_error='',last_checked_at=now(),
-            next_check_at=now()+make_interval(mins=>interval_minutes) WHERE id=$1''', feed['id'])
-        for position, (item_id, item) in enumerate(fresh):
+                fresh.append(row['id'])
+        await connection.execute("""UPDATE video_feeds SET baselined=true,error_count=0,last_error='',last_checked_at=now(),
+            next_check_at=now()+make_interval(mins=>interval_minutes) WHERE id=$1""", feed['id'])
+        for position, item_id in enumerate(fresh):
             if not feed['notify'] or position < len(fresh) - MAX_NOTIFY_PER_POLL:
                 await connection.execute("UPDATE video_items SET status='skipped' WHERE id=$1", item_id)
+        # Do not restrict retries to INSERT RETURNING: previously stored 'new' items
+        # must also be retried, including videos no longer present in the RSS window.
+        pending = await connection.fetch("""SELECT * FROM video_items WHERE feed_id=$1 AND status='new'
+            AND notification_attempts<5 ORDER BY id FOR UPDATE SKIP LOCKED""", feed['id'])
+        audience = feed['audience']
+        audience = json.loads(audience) if isinstance(audience, str) else audience
+        for item in pending:
+            if not feed['notify']:
+                await connection.execute("UPDATE video_items SET status='skipped' WHERE id=$1", item['id'])
                 continue
-            audience = feed['audience']
-            audience = json.loads(audience) if isinstance(audience, str) else audience
-            await fanout.enqueue(connection, key=f'video:{item_id}', text=render(feed, item), mode='video_notice', audience=audience or {})
-            await connection.execute("UPDATE video_items SET status='notified' WHERE id=$1", item_id)
-            queued += 1
+            problem = ''
+            try:
+                async with connection.transaction():
+                    counts = await fanout.enqueue(connection, key=f"video:{item['id']}", text=render(feed, item),
+                                                  mode='video_notice', audience=audience or {})
+            except Exception as error:
+                # Save the new item even when rendering/enqueue is malformed. Otherwise
+                # a rollback loses it and defeats the per-item retry ceiling.
+                problem = type(error).__name__
+                counts = {'failed': 1}
+            await connection.execute("""UPDATE video_items SET status=$2,notification_attempts=notification_attempts+1,
+                notification_error=$3 WHERE id=$1""", item['id'], 'new' if counts['failed'] else 'notified',
+                problem or ('Destinations awaiting enqueue' if counts['failed'] else ''))
+            if counts['failed']:
+                await connection.execute("""UPDATE video_feeds SET last_error='Destinations awaiting enqueue',
+                    next_check_at=LEAST(next_check_at,now()+interval '1 minute') WHERE id=$1""", feed['id'])
+            else:
+                queued += 1
+        if await connection.fetchval("SELECT EXISTS(SELECT 1 FROM video_items WHERE feed_id=$1 AND status='new' AND notification_attempts>=5)",
+                                     feed['id']):
+            await connection.execute("""UPDATE video_feeds SET last_error='Notification enqueue failed after five attempts',
+                error_count=GREATEST(error_count,1) WHERE id=$1""", feed['id'])
     return queued
 
 
@@ -247,7 +273,7 @@ async def command(connection: Any, actor_id: int, chat: Any, args: list[str]) ->
         feed = await add(connection, args[1], args[2], notify=len(args) == 4 and args[3] == 'notify')
         message = f"✅ Канал #{feed['id']} добавлен." if ru else f"✅ Feed #{feed['id']} added."
         return message, None
-    if action in {'on', 'off', 'notify', 'silent', 'del'} and len(args) == 2 and args[1].isdigit():
+    if action in {'on', 'off', 'notify', 'silent', 'del', 'retry'} and len(args) == 2 and args[1].isdigit():
         await _change(connection, action, int(args[1]))
         return ('Готово.' if ru else 'Done.'), None
     raise UserError('invalid')
@@ -257,6 +283,12 @@ async def _change(connection: Any, action: str, feed_id: int) -> None:
     """Применить действие к каналу."""
     if action == 'del':
         await connection.execute('DELETE FROM video_feeds WHERE id=$1', feed_id)
+        return
+    if action == 'retry':
+        async with connection.transaction():
+            await connection.execute('''UPDATE video_items SET notification_attempts=0,notification_error=''
+                WHERE feed_id=$1 AND status='new' ''', feed_id)
+            await connection.execute("UPDATE video_feeds SET next_check_at=now(),last_error='' WHERE id=$1", feed_id)
         return
     column, value = {'on': ('is_enabled', True), 'off': ('is_enabled', False),
                      'notify': ('notify', True), 'silent': ('notify', False)}[action]

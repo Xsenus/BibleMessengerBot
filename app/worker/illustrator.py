@@ -59,6 +59,7 @@ async def worker():
                 "SELECT pg_try_advisory_lock($1)", lock_key("singleton-illustrator", 1)
             ):
                 raise RuntimeError("Another illustrator is running")
+            await net_store.refresh(owner)
             await image_router.recover(owner)
             await image_router.configure(owner, art)
             beat = asyncio.create_task(heartbeat(pool))

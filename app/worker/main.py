@@ -47,6 +47,7 @@ async def worker() -> None:
             await acquire_runtime_guard(owner)
             if not await owner.fetchval('SELECT pg_try_advisory_lock($1)', lock_key('singleton-worker', 1)):
                 raise RuntimeError('Another delivery worker is already running for this database')
+            await net_store.refresh(owner)
             await recover_ambiguous(owner)
             sender = asyncio.create_task(send_loop(pool, transports.sender, stop))
             shutdown = asyncio.create_task(stop.wait())

@@ -255,7 +255,7 @@ async def request_image(connection, row, edition, chat, caption, request_key, th
         image_id = await enqueue(connection, row, edition, slot="on_demand", variant="symbolic")
         # Generation may have completed while waiting for the verse lock.
         if await connection.fetchval(
-            "SELECT status='ready' FROM verse_illustrations WHERE id=$1", image_id
+            "SELECT status='ready' AND quarantined_at IS NULL FROM verse_illustrations WHERE id=$1", image_id
         ):
             return False
         await connection.execute(
@@ -288,7 +288,7 @@ async def dispatch_requests(connection, maximum=100):
 
     await connection.execute(
         """UPDATE image_generation_jobs j SET state='ready',updated_at=now()
-        FROM verse_illustrations i WHERE i.id=j.image_id AND i.status='ready'
+        FROM verse_illustrations i WHERE i.id=j.image_id AND i.status='ready' AND i.quarantined_at IS NULL
         AND j.state IN ('queued','retry')"""
     )
     rows = await connection.fetch(
@@ -299,7 +299,7 @@ async def dispatch_requests(connection, maximum=100):
             WHERE i.translation_id=original.translation_id AND i.book_code=original.book_code
             AND i.chapter=original.chapter AND i.verse=original.verse
             AND i.text_sha256=original.text_sha256 AND i.artwork_scope=original.artwork_scope
-            AND i.status='ready' AND (i.id=original.id OR i.generated_at>=original.created_at)
+            AND i.status='ready' AND i.quarantined_at IS NULL AND (i.id=original.id OR i.generated_at>=original.created_at)
             ORDER BY (i.id=original.id) DESC,i.generated_at DESC,i.id DESC LIMIT 1) ready ON true
         WHERE r.state='waiting' AND r.telegram_message_id IS NOT NULL
         ORDER BY r.id LIMIT $1""",
@@ -321,8 +321,10 @@ async def dispatch_requests(connection, maximum=100):
             if not chat["is_active"]:
                 continue
             image = await connection.fetchrow(
-                "SELECT * FROM verse_illustrations WHERE id=$1", hint["ready_image_id"]
+                "SELECT * FROM verse_illustrations WHERE id=$1 AND status='ready' AND quarantined_at IS NULL", hint["ready_image_id"]
             )
+            if not image:
+                continue
             edition = await bible.find_translation(connection, image["translation_id"])
             if not edition:
                 await connection.execute(
@@ -470,12 +472,11 @@ async def reserve(connection, job_id, settings: ArtSettings):
             or (job["retry_at"] and job["retry_at"] > datetime.now(UTC))
         ):
             return None
-        totals = await connection.fetchrow("""SELECT COALESCE(sum(reserved_usd),0) AS monthly,
-            count(*) FILTER(WHERE provider='openai' AND created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
-            FROM image_generation_attempts WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')""")
+        from app.services.image_router import budget_usage
+        usage = await budget_usage(connection)
         if (
-            totals["monthly"] + settings.reservation_usd > settings.monthly_usd
-            or totals["daily"] >= settings.daily_requests
+            sum(item['monthly'] for item in usage) + settings.reservation_usd > settings.monthly_usd
+            or sum(item['daily'] for item in usage if item['provider'] == 'openai') >= settings.daily_requests
         ):
             return None
         identifier = await connection.fetchval(
@@ -510,7 +511,9 @@ async def due_jobs(connection, maximum=6, *, max_attempts=3):
         JOIN illustration_requests r ON r.image_id=j.image_id
         JOIN telegram_chats c ON c.telegram_chat_id=r.telegram_chat_id
         WHERE r.state='waiting' AND r.telegram_message_id IS NOT NULL AND c.is_active
-        GROUP BY j.id)
+        GROUP BY j.id
+        UNION ALL
+        SELECT j.id,j.created_at,2 FROM image_generation_jobs j WHERE j.admin_requested)
         SELECT j.id FROM eligible e JOIN image_generation_jobs j ON j.id=e.id
         WHERE j.state IN ('queued','retry') AND (j.attempts<$2 OR EXISTS
         (SELECT 1 FROM image_generation_attempts a WHERE a.job_id=j.id AND a.state='reserved' AND a.polling_url IS NOT NULL))

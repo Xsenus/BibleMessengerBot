@@ -51,7 +51,7 @@ class VkSender:
         if type(identifier) is not int or identifier <= 0:
             raise SendError('rejected')
         if kind == 'image':
-            asset = await self.connection.fetchrow("SELECT image_data,mime_type FROM verse_illustrations WHERE id=$1 AND status='ready'", identifier)
+            asset = await self.connection.fetchrow("SELECT image_data,mime_type FROM verse_illustrations WHERE id=$1 AND status='ready' AND quarantined_at IS NULL", identifier)
         elif kind == 'asset':
             asset = await self.connection.fetchrow('SELECT data AS image_data,mime_type FROM media_assets WHERE id=$1', identifier)
         else:
@@ -140,6 +140,9 @@ class VkSender:
                 if kind in {'rich', 'rich_edit'} and chunk.get('card_id'):
                     from app.services.message_languages import outgoing
                     chunk, reply_markup = await outgoing(self.connection, chat_id, chunk)
+                from app.services.illustrations import without_quarantined_image
+                chunk = await without_quarantined_image(self.connection, chunk)
+                kind = chunk.get('kind')
                 if kind == 'vk_audio':
                     card = await self.connection.fetchrow('''SELECT * FROM reading_cards WHERE id=$1 AND telegram_chat_id=$2
                         AND audio_id=$3 AND telegram_message_id IS NOT NULL''', chunk.get('card_id'), chat_id, chunk.get('audio_id'))
@@ -169,7 +172,7 @@ class VkSender:
             await wait_send_slot(self.connection, chat_id)
             if editing:
                 assert chunk is not None
-                await self.client.edit(peer_id, chunk['message_id'], message=body, attachment=','.join(attachments) or None,
+                await self.client.edit(peer_id, chunk['message_id'], message=body, attachment=','.join(attachments),
                                        keyboard=keyboard_json)
                 if audio:
                     await self.connection.execute('UPDATE reading_cards SET audio_offered_id=$2 WHERE id=$1', audio[0], audio[1])

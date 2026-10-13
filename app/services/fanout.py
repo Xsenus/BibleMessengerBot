@@ -108,7 +108,8 @@ async def enqueue(connection: Any, *, key: str, text: str, mode: str, audience: 
     targets = await recipients(connection, audience, exclude)
     progress_json = json.dumps(dict(progress or {}, kind=mode))
     parts: dict[str, str] = {}                                    # платформа → JSON частей (одинаковый для всех её чатов)
-    queued = skipped = failed = 0
+    skipped_targets: set[int] = set()
+    failed_targets: set[int] = set()
     for start in range(0, len(targets), BATCH):
         batch = targets[start:start + BATCH]
         for target in batch:
@@ -125,17 +126,22 @@ async def enqueue(connection: Any, *, key: str, text: str, mode: str, audience: 
                     [t['telegram_chat_id'] for t in batch], mode, key, text[:1000], progress_json,
                     [parts[t['platform']] for t in batch], [t['revision'] for t in batch], [t['ui_language'] for t in batch],
                     [t['message_thread_id'] for t in batch])
-            queued += len(batch)
         except Exception as error:
             LOGGER.warning('Fan-out %s batch failed (%s); falling back to one-by-one', key, type(error).__name__)
             for target in batch:
                 try:
-                    if await _enqueue_one(connection, target, text, key, mode, progress or {}, asset_id, max_length):
-                        queued += 1
-                    else:
-                        skipped += 1
+                    if not await _enqueue_one(connection, target, text, key, mode, progress or {}, asset_id, max_length):
+                        skipped_targets.add(target['telegram_chat_id'])
                 except Exception as inner:
-                    skipped += 1
-                    failed += 1
-                    LOGGER.warning('Fan-out %s skipped one destination (%s)', key, type(inner).__name__)
+                    failed_targets.add(target['telegram_chat_id'])
+                    LOGGER.warning('Fan-out %s could not enqueue one destination (%s)', key, type(inner).__name__)
+    # Count durable jobs, including jobs from an interrupted earlier attempt. An INSERT with
+    # ON CONFLICT may insert fewer rows than the batch size; attempts are not deliveries.
+    existing = await connection.fetch(
+        'SELECT telegram_chat_id FROM delivery_log WHERE payload_key=$1 AND telegram_chat_id=ANY($2::bigint[])',
+        key, [target['telegram_chat_id'] for target in targets])
+    queued_targets = {row['telegram_chat_id'] for row in existing}
+    queued = len(queued_targets)
+    skipped = len(skipped_targets - queued_targets)
+    failed = len(failed_targets - queued_targets)
     return {'recipients': len(targets), 'queued': queued, 'skipped': skipped, 'failed': failed}

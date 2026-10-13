@@ -246,6 +246,21 @@ async def test_unknown_or_forged_callbacks_are_answered_not_executed(vk):
     assert await c.fetchval("SELECT count(*) FROM delivery_log WHERE mode='broadcast'") == 0
 
 
+async def test_visible_prayerbook_callback_opens_prayer_menu(vk):
+    _c, dispatcher, transports, sent = vk
+    event = message('/start', 71)
+    await dispatcher.dispatch(event, parse_event(event)[0])
+    await drain(_c, transports)
+    callback = {'type': 'message_event', 'event_id': 'prayerbook', 'object': {
+        'user_id': 101, 'peer_id': 101, 'event_id': 'prayerbook', 'conversation_message_id': 1,
+        'payload': {'d': 'vkcmd:/prayerbook'}}}
+    await dispatcher.dispatch(callback, parse_event(callback)[0])
+    await drain(_c, transports)
+    assert 'Молитвослов' in sent[-1]['message']
+    markup = json.loads(sent[-1]['keyboard'])
+    assert any(':pb:' in button['action'].get('payload', '') for row in markup['buttons'] for button in row)
+
+
 async def test_vk_owner_gets_admin_menu_and_broadcast_reaches_vk_and_telegram(vk):
     from app.services import fanout
     from tests.test_postgres_integration import create_destination

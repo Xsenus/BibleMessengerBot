@@ -2,7 +2,7 @@
 
 Владелец ищет стих или отрывок, под результатом появляется предложение «Отправить всем».
 После подтверждения отрывок ставится в общую очередь доставки для каждого активного
-назначения (личные чаты, группы, каналы Telegram и MAX) на языке и в издании этого
+назначения (личные чаты, группы, каналы Telegram, MAX и ВКонтакте) на языке и в издании этого
 назначения. Очередь, ограничитель скорости и контрольные точки — те же, что у обычных
 сообщений, поэтому рассылка переживает перезапуск и не дублируется.
 """
@@ -89,7 +89,7 @@ async def load_draft(connection: Any, draft_id: int, actor_id: int) -> Any:
 async def confirmation(connection: Any, draft_id: int, actor_id: int, chat: Any) -> tuple[str, InlineKeyboardMarkup]:
     """Запрос подтверждения: сколько получателей и кнопки «Подтвердить» / «Отмена»."""
     draft = await load_draft(connection, draft_id, actor_id)
-    if draft['status'] != 'draft':
+    if draft['status'] not in {'draft', 'sending', 'failed'}:
         raise UserError('invalid')
     rows = await recipients(connection)
     private = sum(1 for r in rows if r['chat_type'] == 'private')
@@ -144,52 +144,99 @@ async def render_for(connection: Any, edition: Any, refs: list[dict], locale: st
 
 
 async def send(connection: Any, draft_id: int, actor_id: int, max_length: int = 3900) -> dict[str, int]:
-    """Поставить отрывок в очередь доставки всем получателям.
-
-    Черновик атомарно переводится `draft → sending`: повторное нажатие ничего не дублирует.
-    Для каждого назначения под блокировкой чата строится текст в его издании и создаётся
-    задание с уникальным ключом `broadcast:<id>` (повторная постановка безопасна).
-    Возвращает счётчики {recipients, queued, skipped}.
-    """
-    from app.worker.delivery import insert_payload
-    await load_draft(connection, draft_id, actor_id)
-    draft = await connection.fetchrow(
-        "UPDATE broadcasts SET status='sending',updated_at=now() WHERE id=$1 AND status='draft' RETURNING *", draft_id)
-    if not draft:
+    """Confirm or manually resume a broadcast. Durable intent precedes the idempotent fan-out."""
+    draft = await load_draft(connection, draft_id, actor_id)
+    if draft['status'] not in {'draft', 'sending', 'failed'}:
         raise UserError('invalid')
-    refs = json.loads(draft['refs']) if isinstance(draft['refs'], str) else draft['refs']
-    targets = await recipients(connection)
-    queued = skipped = 0
-    rendered: dict[tuple[int, str], Any] = {}        # (издание, язык интерфейса) → готовый текст: один раз на все чаты с тем же изданием
-    for target in targets:
-        try:
-            async with chat_lock(connection, target['telegram_chat_id']), connection.transaction():
-                chat = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1', target['telegram_chat_id'])
-                edition = await bible.chat_translation(connection, target['telegram_chat_id'])
-                text = None
-                if edition and chat['is_active']:
-                    cache_key = (edition['id'], chat['ui_language'])
-                    if cache_key not in rendered:
-                        rendered[cache_key] = await render_for(connection, edition, refs, chat['ui_language'], draft['image_id'])
-                    text = rendered[cache_key]
-                if text is None:
-                    skipped += 1
-                    continue
-                await insert_payload(connection, chat, edition, text, f'broadcast:{draft_id}', 'broadcast',
-                                     {'kind': 'broadcast', 'broadcast_id': draft_id, 'image_id': draft['image_id']}, max_length=max_length)
-                queued += 1
-        except Exception as error:
-            skipped += 1
-            LOGGER.warning('Broadcast %s skipped for one destination (%s)', draft_id, type(error).__name__)
     await connection.execute(
-        "UPDATE broadcasts SET status='done',recipients=$2,queued=$3,skipped=$4,updated_at=now() WHERE id=$1",
-        draft_id, len(targets), queued, skipped)
-    await connection.execute(
-        "INSERT INTO operator_events(actor_id,action,details) VALUES($1,'broadcast',$2::jsonb)", actor_id,
-        json.dumps({'broadcast_id': draft_id, 'recipients': len(targets), 'queued': queued, 'skipped': skipped}))
-    from app.services import audit
-    await audit.record(connection, actor_id, 'bot', 'broadcast.send', str(draft_id), {'recipients': len(targets), 'queued': queued})
+        """UPDATE broadcasts SET status='sending',attempts=0,retry_at=now()+interval '1 minute',last_error='',updated_at=now()
+           WHERE id=$1 AND status IN ('draft','failed')""", draft_id)
+    return await deliver_broadcast(connection, draft_id, max_length)
+
+
+async def deliver_broadcast(connection: Any, draft_id: int, max_length: int = 3900) -> dict[str, int]:
+    """Finish confirmed intent; the row lock prevents concurrent fan-out and duplicate completion events."""
+    from app.worker.delivery import insert_payload
+    try:
+        async with connection.transaction():
+            draft = await connection.fetchrow('SELECT * FROM broadcasts WHERE id=$1 FOR UPDATE SKIP LOCKED', draft_id)
+            if not draft or draft['status'] != 'sending':
+                raise UserError('invalid')
+            refs = json.loads(draft['refs']) if isinstance(draft['refs'], str) else draft['refs']
+            targets = await recipients(connection)
+            skipped_targets: set[int] = set()
+            failed_targets: set[int] = set()
+            rendered: dict[tuple[int, str], Any] = {}
+            for target in targets:
+                try:
+                    async with chat_lock(connection, target['telegram_chat_id']), connection.transaction():
+                        chat = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1', target['telegram_chat_id'])
+                        edition = await bible.chat_translation(connection, target['telegram_chat_id'])
+                        text = None
+                        if edition and chat and chat['is_active']:
+                            cache_key = (edition['id'], chat['ui_language'])
+                            if cache_key not in rendered:
+                                rendered[cache_key] = await render_for(connection, edition, refs, chat['ui_language'], draft['image_id'])
+                            text = rendered[cache_key]
+                        if text is None:
+                            skipped_targets.add(target['telegram_chat_id'])
+                            continue
+                        await insert_payload(connection, chat, edition, text, f'broadcast:{draft_id}', 'broadcast',
+                                             {'kind': 'broadcast', 'broadcast_id': draft_id, 'image_id': draft['image_id']},
+                                             max_length=max_length)
+                except Exception as error:
+                    failed_targets.add(target['telegram_chat_id'])
+                    LOGGER.warning('Broadcast %s could not enqueue one destination (%s)', draft_id, type(error).__name__)
+            existing = await connection.fetch(
+                'SELECT telegram_chat_id FROM delivery_log WHERE payload_key=$1 AND telegram_chat_id=ANY($2::bigint[])',
+                f'broadcast:{draft_id}', [target['telegram_chat_id'] for target in targets])
+            queued_targets = {row['telegram_chat_id'] for row in existing}
+            queued = len(queued_targets)
+            skipped = len(skipped_targets - queued_targets)
+            failed = len(failed_targets - queued_targets)
+            await connection.execute(
+                """UPDATE broadcasts SET status=CASE WHEN $5 THEN CASE WHEN attempts>=4 THEN 'failed' ELSE 'sending' END ELSE 'done' END,
+                   recipients=$2,queued=$3,skipped=$4,attempts=attempts+1,
+                   retry_at=CASE WHEN $5 AND attempts<4 THEN now()+interval '1 minute' END,last_error=$6,updated_at=now()
+                   WHERE id=$1""", draft_id, len(targets), queued, skipped, bool(failed),
+                'Destinations awaiting enqueue' if failed else '')
+            if not failed:
+                await connection.execute(
+                    "INSERT INTO operator_events(actor_id,action,details) VALUES($1,'broadcast',$2::jsonb)", draft['created_by'],
+                    json.dumps({'broadcast_id': draft_id, 'recipients': len(targets), 'queued': queued, 'skipped': skipped}))
+                from app.services import audit
+                await audit.record(connection, draft['created_by'], 'bot', 'broadcast.send', str(draft_id),
+                                   {'recipients': len(targets), 'queued': queued})
+    except UserError:
+        raise
+    except Exception as error:
+        # The transaction rolled back, but the earlier confirmation is durable. Back off
+        # rather than getting stuck or retrying malformed payloads on every composer tick.
+        await connection.execute(
+            """UPDATE broadcasts SET attempts=attempts+1,status=CASE WHEN attempts>=4 THEN 'failed' ELSE 'sending' END,
+               retry_at=CASE WHEN attempts<4 THEN now()+interval '1 minute' END,last_error=$2,updated_at=now()
+               WHERE id=$1 AND status='sending'""", draft_id, type(error).__name__)
+        raise
+    if failed:
+        raise RuntimeError('broadcast has destinations awaiting enqueue')
     return {'recipients': len(targets), 'queued': queued, 'skipped': skipped}
+
+
+async def recover(connection: Any, limit: int = 5) -> int:
+    """Resume broadcasts confirmed before a crash; draft/cancelled broadcasts are never sent."""
+    rows = await connection.fetch(
+        """SELECT id FROM broadcasts WHERE status='sending' AND attempts<5
+           AND COALESCE(retry_at,updated_at+interval '1 minute')<=now() ORDER BY updated_at,id LIMIT $1""", limit)
+    done = 0
+    for row in rows:
+        try:
+            await deliver_broadcast(connection, row['id'])
+            done += 1
+        except UserError:
+            pass  # A concurrent worker is already processing or has completed it.
+        except Exception as error:
+            LOGGER.warning('Broadcast %s recovery failed (%s)', row['id'], type(error).__name__)
+    return done
 
 
 IMAGE_WAIT = 1800  # секунд: сколько ждать картинку, прежде чем отправить текст без неё

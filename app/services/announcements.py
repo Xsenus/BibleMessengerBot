@@ -232,17 +232,23 @@ async def set_status(connection: Any, announcement_id: int, status: str) -> bool
 
 
 async def deliver_run(connection: Any, announcement: Any, run_id: int) -> dict[str, int]:
-    """Поставить сообщение запуска в очередь доставки всей аудитории и записать итог."""
-    audience = announcement['audience']
-    audience = json.loads(audience) if isinstance(audience, str) else audience
-    counts = await fanout.enqueue(connection, key=f'announcement:{run_id}', text=render(announcement['title'], announcement['body']),
-                                  mode='announcement', audience=audience, asset_id=announcement['asset_id'],
-                                  progress={'announcement_id': announcement['id']})
-    if counts['recipients'] and not counts['queued'] and counts.get('failed'):
-        # Ничего не поставлено в очередь из-за сбоев: запуск остаётся `sending` и будет повторён (ключи доставки идемпотентны).
-        raise RuntimeError('announcement run queued nothing')
-    await connection.execute("UPDATE announcement_runs SET status='done',recipients=$2,queued=$3,skipped=$4 WHERE id=$1",
-                             run_id, counts['recipients'], counts['queued'], counts['skipped'])
+    """Enqueue a scheduled occurrence and mark it done only after every eligible destination is durable."""
+    async with connection.transaction():
+        run = await connection.fetchrow('SELECT * FROM announcement_runs WHERE id=$1 FOR UPDATE', run_id)
+        if run['status'] != 'sending':
+            return {'recipients': run['recipients'], 'queued': run['queued'], 'skipped': run['skipped'], 'failed': 0}
+        audience = announcement['audience']
+        audience = json.loads(audience) if isinstance(audience, str) else audience
+        counts = await fanout.enqueue(connection, key=f'announcement:{run_id}', text=render(announcement['title'], announcement['body']),
+                                      mode='announcement', audience=audience, asset_id=announcement['asset_id'],
+                                      progress={'announcement_id': announcement['id']})
+        await connection.execute("UPDATE announcement_runs SET status=$5,recipients=$2,queued=$3,skipped=$4 WHERE id=$1",
+                                 run_id, counts['recipients'], counts['queued'], counts['skipped'],
+                                 'sending' if counts['failed'] else 'done')
+    if counts['failed']:
+        # Commit the partial outbox before requesting a retry; the keys fill missing
+        # recipients safely even if the worker already delivered earlier recipients.
+        raise RuntimeError('announcement run has destinations awaiting enqueue')
     return counts
 
 

@@ -64,9 +64,10 @@ class Provider:
 
     @property
     def reservation_usd(self):
-        """Резерв бюджета (USD) на одну отправку — с запасом, включая неудачные и неопределённые. Для провайдеров из панели — 0 (бесплатные уровни)."""
+        """Conservative submission reserve; unknown custom pricing cannot submit."""
         if self.custom is not None:
-            return Decimal(0)
+            from app.services.free_image_providers import reservation_for
+            return reservation_for(self.custom)
         return RESERVES[self.name]
 
 

@@ -53,7 +53,7 @@ async def test_provider_test_button_records_result_and_returns_preview(db, monke
         return png(), {}, None
     monkeypatch.setattr(free_image_providers, 'generate', fake)
     async with make(monkeypatch, c) as client:
-        pid = (await client.post('/api/admin/image-providers', headers=H, json={'slug': 'poll', 'adapter': 'pollinations'})).json()['id']
+        pid = (await client.post('/api/admin/image-providers', headers=H, json={'slug': 'poll', 'adapter': 'pollinations', 'billing_mode': 'free_only'})).json()['id']
         result = (await client.post(f'/api/admin/image-providers/{pid}/test', headers=H)).json()
         assert result['ok'] and base64.b64decode(result['preview'])[:2] == b'\xff\xd8'
         assert await c.fetchval('SELECT last_test_ok FROM image_custom_providers') is True

@@ -23,7 +23,8 @@ class SmartTransport(httpx.AsyncBaseTransport):
 
     def __init__(self, service: str | None = None, *, router: Router = ROUTER, verify: ssl.SSLContext | str | bool = True) -> None:
         self.service, self.router, self.verify = service, router, verify
-        self._proxies: dict[str, httpx.AsyncBaseTransport] = {}
+        self._proxies: dict[str, tuple[str, httpx.AsyncBaseTransport]] = {}
+        self._retired: list[httpx.AsyncBaseTransport] = []
         self._direct = httpx.AsyncClient(verify=verify, trust_env=True)   # прямой путь учитывает HTTPS_PROXY из окружения
 
     def _transport(self, route: Route, request: httpx.Request) -> httpx.AsyncBaseTransport:
@@ -31,11 +32,13 @@ class SmartTransport(httpx.AsyncBaseTransport):
         if route.proxy_url is None:
             return self._direct._transport_for_url(request.url)    # noqa: SLF001 — стабильный внутренний метод httpx 0.28
         cached = self._proxies.get(route.key)
-        if cached is None or getattr(cached, '_proxy_url', None) != route.proxy_url:
-            cached = httpx.AsyncHTTPTransport(proxy=httpx.Proxy(route.proxy_url), verify=self.verify)
-            cached._proxy_url = route.proxy_url
+        if cached is None or cached[0] != route.proxy_url:
+            transport = httpx.AsyncHTTPTransport(proxy=httpx.Proxy(route.proxy_url), verify=self.verify)
+            if cached is not None:
+                self._retired.append(cached[1])
+            cached = (route.proxy_url, transport)
             self._proxies[route.key] = cached
-        return cached
+        return cached[1]
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         """Выполнить запрос по плану маршрутов, записывая успехи и неудачи в роутер."""
@@ -45,7 +48,13 @@ class SmartTransport(httpx.AsyncBaseTransport):
         for route in plan:
             started = time.monotonic()
             try:
-                response = await self._transport(route, request).handle_async_request(request)
+                transport = self._transport(route, request)
+            except (ValueError, ImportError) as error:
+                self.router.record_failure(service, route, type(error).__name__)
+                last = error
+                continue
+            try:
+                response = await transport.handle_async_request(request)
             except httpx.TransportError as error:
                 self.router.record_failure(service, route, type(error).__name__)
                 last = error
@@ -65,9 +74,12 @@ class SmartTransport(httpx.AsyncBaseTransport):
     async def aclose(self) -> None:
         """Закрыть все соединения."""
         await self._direct.aclose()
-        for transport in self._proxies.values():
+        for _, transport in self._proxies.values():
             await transport.aclose()
         self._proxies.clear()
+        for transport in self._retired:
+            await transport.aclose()
+        self._retired.clear()
 
 
 def routed_client(service: str | None = None, **kwargs: Any) -> httpx.AsyncClient:
