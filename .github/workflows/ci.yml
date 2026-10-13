@@ -126,7 +126,7 @@ jobs:
           cp .env.example .env
           docker compose --profile '*' config --quiet
       - name: Build (and scan) image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
