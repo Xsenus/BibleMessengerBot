@@ -8,6 +8,12 @@ updates:
       # Aiogram 3.31 declares pydantic<2.14; review when Aiogram is upgraded.
       - dependency-name: pydantic
         versions: [">=2.14"]
+      # Pydantic pins one exact core version; change it only with its parent.
+      - dependency-name: pydantic-core
+        versions: [">=0"]
+      # aiohttp 3.14 (required by Aiogram) declares multidict<7.
+      - dependency-name: multidict
+        versions: [">=7"]
       # SymPy 1.14 declares mpmath<1.4; review when SymPy is upgraded.
       - dependency-name: mpmath
         versions: [">=1.4"]

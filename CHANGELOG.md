@@ -2,6 +2,8 @@
 
 ## Не выпущено
 
+- Дополнительные обновления Dependabot: checkout/setup-python v7, setup-buildx v4, минимальные версии Ruff 0.17 и pip-audit 2.10.1. Отдельные несовместимые обновления pydantic-core 2.50 и multidict 7 исключены: Pydantic закрепляет core 2.46.5, aiohttp требует multidict <7.
+
 - Согласованы обновления Dependabot: Hub 2.2 / Transformers 5.19 / tokenizers 0.23.3 / PyTorch 2.14.1+cpu, filelock 4.1, mypy 2.4 и pytest-cov 7.1; обновлены совместимые HTTP/API/БД/S3-зависимости и GitHub Actions. Несовместимые Pydantic 2.14 и mpmath 1.4 исключены по требованиям Aiogram/SymPy. Официальная CPU-сборка задаётся один раз в requirements, без загрузки CUDA-зависимостей.
 - Production-образ переведён на Python 3.14, сборка панели — на Node.js 26; полный CI проверяет Python 3.12 и 3.14, реальную БД и все голоса. Артефакты тестов разделены по версиям Python. Правила Dependabot группируют взаимосвязанные нейробиблиотеки и исключают заведомо несовместимые обновления.
 
