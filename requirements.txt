@@ -4,7 +4,8 @@ httpx[socks]>=0.27,<1
 aiohttp-socks>=0.10,<1
 fastapi>=0.143.0,<1
 uvicorn[standard]>=0.54.0,<1
-pydantic>=2.14.0,<3
+# Aiogram 3.31 requires Pydantic below 2.14.
+pydantic>=2.8,<2.14
 tzdata>=2026.5
 boto3==1.43.111
 cryptography==50.0.2
