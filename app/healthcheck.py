@@ -17,7 +17,10 @@ def container_started_at(proc_root: Path = Path('/proc')) -> datetime | None:
         boot_line = next(line for line in (proc_root / 'stat').read_text().splitlines()
                          if line.startswith('btime '))
         boot_seconds = int(boot_line.split()[1])
-        ticks_per_second = os.sysconf('SC_CLK_TCK')
+        sysconf = getattr(os, 'sysconf', None)
+        if sysconf is None:
+            return None
+        ticks_per_second = sysconf('SC_CLK_TCK')
         return datetime.fromtimestamp(boot_seconds + start_ticks / ticks_per_second + 1,
                                       tz=UTC)
     except (OSError, ValueError, IndexError, StopIteration, AttributeError, ZeroDivisionError):
