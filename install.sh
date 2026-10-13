@@ -84,6 +84,12 @@ ENV
 fi
 # Validate silently: a rendered Compose configuration can contain secrets.
 docker compose config --quiet
+# A live installation must not be reseeded or leave optional API consumers running.
+running="$(docker compose --profile '*' ps --services --filter status=running)"
+if grep -Eq '^(bot|worker|admin|illustrator|speaker|composer|max-web|maxbot|vkbot)$' <<<"$running"; then
+  log 'Existing application detected; using the guarded update without corpus reimport.'
+  exec bash deploy/rolling-update.sh --yes
+fi
 log 'Building image and checking installed dependencies.'
 docker compose build --pull bootstrap
 # Back up a running existing database before stopping any application service.

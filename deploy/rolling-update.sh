@@ -25,6 +25,7 @@ trap finish EXIT
 
 echo '1/4 Сборка образа…'
 "${compose[@]}" build
+"${compose[@]}" run --rm --no-deps bootstrap python -m app.neural_audio_admin prepare
 
 echo '2/4 Проверка миграций (ничего не меняет)…'
 code=0
