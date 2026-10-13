@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="sky"><stop stop-color="#24385b"/><stop offset="1" stop-color="#071326"/></radialGradient>
+    <linearGradient id="gold" x2="0" y2="1"><stop stop-color="#fff2ba"/><stop offset="1" stop-color="#c59239"/></linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="31" fill="url(#sky)"/>
+  <path d="M30 9h4v7h7v4h-7v15h-4V20h-7v-4h7z" fill="url(#gold)"/>
+  <path d="M9 41c8-4 15-4 23 1 8-5 15-5 23-1l-3 14c-7-3-13-3-20 1-7-4-13-4-20-1z" fill="url(#gold)"/>
+  <path d="M14 38c6-2 12-1 18 3 6-4 12-5 18-3l-1 13c-6-2-11-1-17 2-6-3-11-4-17-2z" fill="#fff5d7"/>
+  <path d="M32 41v12" stroke="#a98043" stroke-width="1.5"/>
+</svg>

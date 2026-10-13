@@ -1,4 +1,4 @@
-"""Локальная панель оператора: только чтение, слушает только локальный интерфейс. Настройки меняются в Telegram."""
+"""Локальная диагностика и административная панель: чтение и управление через защищённый API."""
 from __future__ import annotations
 import json
 import os
@@ -36,7 +36,7 @@ async def lifespan(_: FastAPI):
         await close_pool()
 
 
-app = FastAPI(title='BibleMessengerBot read-only operations',version='1.20.0',lifespan=lifespan,
+app = FastAPI(title='BibleMessengerBot operations',version='1.20.0',lifespan=lifespan,
               docs_url=None,redoc_url=None,openapi_url=None)
 
 
