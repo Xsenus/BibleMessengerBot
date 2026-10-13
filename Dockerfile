@@ -1,4 +1,4 @@
-FROM node:22-alpine AS panel
+FROM node:26-alpine AS panel
 WORKDIR /ui
 COPY admin-ui/package.json admin-ui/package-lock.json ./
 RUN npm ci --no-audit --no-fund
