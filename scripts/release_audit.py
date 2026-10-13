@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Офлайн-аудит релиза: запись воспроизводимых проверок и явный список невыполненных интеграционных проверок."""
 from __future__ import annotations
+import argparse
 import importlib.util
 import json
 import os
@@ -30,7 +31,8 @@ def project_files() -> list[Path]:
 def command(name: str, args: list[str]) -> dict[str,Any]:
     """Выполнить команду проверки один раз, сохранить полный журнал и записать реальный код возврата."""
     try:
-        result = subprocess.run(args,cwd=ROOT,text=True,stdout=subprocess.PIPE,
+        result = subprocess.run(args,cwd=ROOT,text=True,encoding='utf-8',errors='replace',stdout=subprocess.PIPE,
+                                env={**os.environ, 'PYTHONUTF8': '1'},
                                 stderr=subprocess.STDOUT,timeout=180,check=False)
         code,output = result.returncode,result.stdout
     except (OSError,subprocess.TimeoutExpired) as exc:
@@ -104,7 +106,7 @@ def main() -> int:
     if not env['modules']['asyncpg'] or os.getenv('RUN_DB_TESTS')!='1':
         not_executed.insert(0,'Actual PostgreSQL/asyncpg integration: missing asyncpg or RUN_DB_TESTS is not enabled.')
     ok=all(c['status']=='passed' for c in checks)
-    profiles=json.loads((ROOT/'data/language_profiles.json').read_text())
+    profiles=json.loads((ROOT/'data/language_profiles.json').read_text(encoding='utf-8'))
     report={'project':'BibleMessengerBot','version':(ROOT/'VERSION').read_text().strip(),
             'generated_at_machine_clock':datetime.now(UTC).isoformat(),'release_context_date':'2026-09-22',
             'status':'OFFLINE_PASS_LIVE_UNVERIFIED' if ok else 'OFFLINE_FAILED',
@@ -129,9 +131,10 @@ def main() -> int:
     lines += ['', '## Фактическое наполнение', '',
               f"Каталогов UI: {report['ui_catalogs']}. Источников: 3. Профиль all-open не ограничен списком из 56 языков, но фильтрует лицензии и формат. Полностью скачанных изданий в ZIP: **0**. Готового дампа нет.",
               '', 'Установщик должен выполнить реальные интеграционные тесты, импорт и аудит на VPS. До их успешного завершения публикации не запускаются. Это дополнительная проверка на сервере, а не уже выполненная здесь работа. Гарантии отсутствия всех ошибок нет.']
-    (EVIDENCE/'RELEASE-AUDIT.md').write_text('\n'.join(lines)+'\n')
+    (EVIDENCE/'RELEASE-AUDIT.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
     print(json.dumps({'status':report['status'],'tests':tests,'report':str((EVIDENCE/'RELEASE-AUDIT.json').relative_to(ROOT))},ensure_ascii=False,indent=2))
     return 0 if ok else 1
 
 if __name__=='__main__':
+    argparse.ArgumentParser(description=__doc__).parse_args()
     raise SystemExit(main())
