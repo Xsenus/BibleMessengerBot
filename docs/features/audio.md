@@ -27,8 +27,8 @@ Piper `ru_RU-denis-medium` сохранён как автоматический 
 фиксируют размеры и SHA-256. Silero содержит упакованный Python-код; импорт
 официального пакета разрешён только после полной проверки зафиксированного хеша.
 Другие модели используют safetensors/ONNX. Загрузка весов при чтении не выполняется.
-Среда закреплена на PyTorch **2.13.0+cpu** (официальный CPU-индекс) и Transformers
-**5.10.4**; отозванная версия Transformers 5.10.0 не используется. Точные зависимости,
+Среда закреплена на PyTorch **2.14.1+cpu** (официальный CPU-индекс) и Transformers
+**5.19.0**, совместимых с Hugging Face Hub **2.2.0** и tokenizers **0.23.3**. Точные зависимости,
 включая совместимые Hub/tokenizers и setuptools, заданы в `constraints-neural-linux.txt`.
 VITS загружает только локальные safetensors с `local_files_only=True`,
 `use_safetensors=True`, `trust_remote_code=False`; обновление библиотек сохраняет
