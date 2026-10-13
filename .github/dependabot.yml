@@ -4,7 +4,19 @@ updates:
     directory: /
     schedule: {interval: weekly}
     open-pull-requests-limit: 5
+    ignore:
+      # Aiogram 3.31 declares pydantic<2.14; review when Aiogram is upgraded.
+      - dependency-name: pydantic
+        versions: [">=2.14"]
+      # SymPy 1.14 declares mpmath<1.4; review when SymPy is upgraded.
+      - dependency-name: mpmath
+        versions: [">=1.4"]
+      # PyPI updates discard +cpu and pull CUDA. Upgrade the official CPU build manually.
+      - dependency-name: torch
+        versions: [">=0"]
     groups:
+      neural-runtime:
+        patterns: [transformers, tokenizers, huggingface-hub, sympy, filelock, fsspec, onnxruntime, piper-tts]
       minor-and-patch:
         update-types: [minor, patch]
   - package-ecosystem: github-actions
