@@ -118,7 +118,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         await wait_for_database(settings)
         report = await migration_status(settings)
         if not args.check and report["status"] == "pending":
-            await seed_only(settings)
+            # Schema upgrades must preserve operator-edited reference data and IDs.
+            # Initial reference seeding remains an explicit `seed`/bootstrap step.
+            async with maintenance(settings):
+                await apply_schema(settings)
             report = await migration_status(settings)
         return report
     if args.command == "stats":

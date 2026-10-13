@@ -18,6 +18,8 @@ if 'config' in args:
     sys.exit(int(os.getenv('FAKE_CONFIG', '0')))
 if 'build' in args:
     sys.exit(int(os.getenv('FAKE_BUILD', '0')))
+if 'app.neural_audio_admin' in args:
+    sys.exit(int(os.getenv('FAKE_MODELS', '0')))
 if 'ps' in args and '--services' in args:
     print(os.getenv('FAKE_RUNNING', 'bot\nmax-web\npostgres\nprayer-ai'))
 if 'app.cli' in args and 'migrate' in args:
@@ -25,16 +27,19 @@ if 'app.cli' in args and 'migrate' in args:
 if 'exec' in args and 'pg_dump' in ' '.join(args):
     print('SYNTHETIC BACKUP, NOT A POSTGRESQL ARCHIVE')
     sys.exit(int(os.getenv('FAKE_BACKUP', '0')))
+if 'pg_restore' in ' '.join(args) and '--clean' in ' '.join(args):
+    sys.exit(int(os.getenv('FAKE_RESTORE', '0')))
 if 'up' in args and args[-1] == os.getenv('FAKE_UP_FAIL'):
     sys.exit(7)
 '''
 
 
-def invoke(tmp_path, **settings):
+def invoke(tmp_path, entrypoint='deploy/rolling-update.sh', **settings):
     project = tmp_path / 'project'
     (project / 'deploy').mkdir(parents=True)
     shutil.copy2(ROOT / 'deploy' / 'rolling-update.sh', project / 'deploy')
     shutil.copy2(ROOT / 'backup.sh', project)
+    shutil.copy2(ROOT / 'update.sh', project)
     (project / '.env').write_text('POSTGRES_PASSWORD=SYNTHETIC\n')
     commands = tmp_path / 'bin'
     commands.mkdir()
@@ -47,7 +52,7 @@ def invoke(tmp_path, **settings):
     logfile = tmp_path / 'calls.jsonl'
     env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ['PATH'],
                FAKE_LOG=str(logfile), **settings)
-    result = subprocess.run(['bash', str(project / 'deploy' / 'rolling-update.sh'), '--yes'],
+    result = subprocess.run(['bash', str(project / entrypoint), '--yes'],
                             cwd=project, env=env, text=True, capture_output=True, timeout=30)
     calls = [json.loads(line) for line in logfile.read_text().splitlines()]
     return result, calls
@@ -73,7 +78,7 @@ def test_failed_migration_restores_existing_containers_including_max_web(tmp_pat
     assert next(call for call in calls if 'start' in call)[-2:] == ['bot', 'max-web']
 
 
-@pytest.mark.parametrize('setting', ['FAKE_CONFIG', 'FAKE_BUILD', 'FAKE_BACKUP'])
+@pytest.mark.parametrize('setting', ['FAKE_CONFIG', 'FAKE_BUILD', 'FAKE_MODELS', 'FAKE_BACKUP'])
 def test_preflight_or_backup_failure_does_not_stop_services(tmp_path, setting):
     result, calls = invoke(tmp_path, **{setting: '4'})
     assert result.returncode == 4
@@ -85,6 +90,13 @@ def test_no_migrations_preserves_disabled_platforms(tmp_path):
     assert result.returncode == 0, result.stderr
     assert not any('stop' in call or 'start' in call for call in calls)
     assert [call[-1] for call in calls if 'up' in call] == ['worker']
+
+
+def test_standard_update_entrypoint_keeps_max_web_in_migration_guard(tmp_path):
+    result, calls = invoke(tmp_path, entrypoint='update.sh')
+    assert result.returncode == 0, result.stderr
+    assert next(call for call in calls if 'stop' in call)[-2:] == ['bot', 'max-web']
+    assert [call[-1] for call in calls if 'up' in call] == ['bot', 'max-web']
 
 
 def test_restart_failure_is_reported_and_remaining_containers_are_resumed(tmp_path):

@@ -27,6 +27,13 @@ git
 
 # Development/build leftovers must not enter release images
 .ruff_cache
+.mypy_cache
+.coverage
+.coverage.*
+coverage.xml
+htmlcov
+test-results.xml
+.playwright-mcp
 build
 dist
 *.egg-info

@@ -7,18 +7,28 @@ cd "$(dirname "$(readlink -f "$0")")"
   echo 'Usage: bash restore.sh backups/FILE.dump --confirm-replace-data [--start-services]' >&2; exit 2;
 }
 file="$(readlink -f "$1")"
+compose=(docker compose --profile '*')
+running="$("${compose[@]}" ps --services --filter status=running)"
+previous=()
+for service in bot worker admin illustrator speaker composer max-web maxbot vkbot; do
+  if grep -qx "$service" <<<"$running"; then previous+=("$service"); fi
+done
+mkdir -p runtime-evidence
+printf '%s\n' "${previous[@]}" >runtime-evidence/restore-services.txt
 docker compose up -d postgres
 docker compose exec -T postgres pg_restore --list <"$file" >/dev/null
 bash backup.sh
-docker compose stop bot worker admin illustrator speaker composer
+if (( ${#previous[@]} )); then "${compose[@]}" stop "${previous[@]}"; fi
 trap 'echo "Restore stopped; services remain paused. Original backup is in backups/." >&2' ERR
 docker compose exec -T postgres sh -c 'exec pg_restore --clean --if-exists --single-transaction --exit-on-error --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <"$file"
-docker compose run --rm --no-deps bootstrap python -m app.cli seed
+docker compose run --rm --no-deps bootstrap python -m app.cli migrate
 docker compose run --rm --no-deps bootstrap python -m app.cli audit
 docker compose run --rm --no-deps bootstrap python -m app.neural_audio_admin prepare
 if [[ "${3:-}" == '--start-services' ]]; then
-  docker compose up -d --no-deps bot worker admin illustrator speaker composer
+  if (( ${#previous[@]} )); then
+    "${compose[@]}" up -d --no-deps --wait --wait-timeout 240 "${previous[@]}"
+  fi
 else
   echo 'Restore and audit passed. Delivery remains stopped: review restored outbox/history before starting bot and worker.'
-  echo 'Resume after review: docker compose up -d --no-deps bot worker admin illustrator speaker composer'
+  echo 'Previously running services are recorded in runtime-evidence/restore-services.txt; resume only those after review.'
 fi

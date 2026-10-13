@@ -8,3 +8,20 @@
 | [../../CONTRIBUTING.md](../../CONTRIBUTING.md) | Правила работы с кодом, проверки перед коммитом |
 
 Быстрые проверки перед коммитом: `ruff check .`, `mypy`, `pytest` (для тестов с БД: `RUN_DB_TESTS=1 DATABASE_URL=postgresql://…`).
+
+## Локальное окружение
+
+Используйте Python 3.12 или новее; production-образ и CI используют Python 3.12. В Windows создайте `.venv` установленным интерпретатором подходящей версии, например:
+
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install torch==2.13.0+cpu --index-url https://download.pytorch.org/whl/cpu
+.\.venv\Scripts\python.exe -m pip install -c constraints-linux.txt -r requirements-dev.txt -r requirements-test.txt -r requirements-neural.txt
+.\.venv\Scripts\python.exe -m pip check
+```
+
+Linux использует те же requirements и закреплённые зависимости. FFmpeg, eSpeak NG и Tesseract устанавливаются отдельно; веса голосов проверяются командой `python -m app.neural_audio_admin prepare`. Не переносите production-токены и не направляйте тесты на production-БД. Тесты с `RUN_DB_TESTS=1` создают и удаляют только собственные уникальные временные базы.
+
+`python -m app.cli migrate --check` ничего не меняет; код 3 означает ожидающие миграции. `python -m app.cli migrate` применяет только схему под блокировкой обслуживания, без повторного наполнения справочников. Для первоначальной установки предусмотрены `seed` и bootstrap. Остановите все подключённые обработчики перед миграциями; в production используйте [штатное обновление](../operations/operations.md#обновление-кода).
+
+Результаты тестов, coverage и кэши не входят в Git. Рабочие `.env`, локальные БД, сертификаты, модели голосов и другие нужные для запуска данные сохраняйте отдельно от временных отчётов.
