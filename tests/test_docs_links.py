@@ -11,7 +11,7 @@ def test_markdown_links_resolve():
     files += [p for p in (ROOT / "docs").rglob("*.md") if "history" not in p.relative_to(ROOT / "docs").parts[:1]]
     broken = []
     for path in files:
-        for match in LINK.finditer(path.read_text()):
+        for match in LINK.finditer(path.read_text(encoding='utf-8')):
             target = match.group(1)
             if re.match(r"^[a-z]+:", target):
                 continue

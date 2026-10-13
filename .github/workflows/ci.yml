@@ -148,7 +148,7 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/admin/net)" = 401
           curl -fsS -H "X-Admin-Key: $ADMIN_API_KEY" http://127.0.0.1:18080/api/admin/net >/dev/null
       - name: Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: bible-messenger-bot:ci
           severity: CRITICAL
