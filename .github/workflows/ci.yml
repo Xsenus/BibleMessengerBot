@@ -100,6 +100,22 @@ jobs:
   image:
     needs: [lint, test, audit, panel]
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: biblebot_image_ci
+          POSTGRES_USER: biblebot_image_ci
+          POSTGRES_PASSWORD: image-ci-only-not-a-production-secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U biblebot_image_ci -d biblebot_image_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://biblebot_image_ci:image-ci-only-not-a-production-secret@127.0.0.1:5432/biblebot_image_ci
+      BIBLE_PROFILE: none
+      ADMIN_API_KEY: image-ci-only-key-with-at-least-32-characters
     permissions:
       contents: read
       packages: write
@@ -118,6 +134,19 @@ jobs:
           tags: bible-messenger-bot:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Container database and admin smoke test
+        run: |
+          docker run --rm --network host -e DATABASE_URL -e BIBLE_PROFILE bible-messenger-bot:ci python -m app.cli seed --profile none
+          docker run -d --name biblebot-ci-admin --network host -e DATABASE_URL -e BIBLE_PROFILE -e ADMIN_API_KEY bible-messenger-bot:ci uvicorn app.web.main:app --host 127.0.0.1 --port 18080
+          trap 'docker logs biblebot-ci-admin; docker rm -f biblebot-ci-admin' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/ready >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18080/ready
+          curl -fsS http://127.0.0.1:18080/panel/ >/dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/admin/net)" = 401
+          curl -fsS -H "X-Admin-Key: $ADMIN_API_KEY" http://127.0.0.1:18080/api/admin/net >/dev/null
       - name: Trivy vulnerability scan
         uses: aquasecurity/trivy-action@0.28.0
         with:
