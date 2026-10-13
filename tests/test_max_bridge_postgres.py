@@ -261,6 +261,23 @@ async def test_two_next_clicks_on_same_menu_have_independent_acknowledged_progre
     assert await c.fetchval("SELECT count(*) FROM delivery_log WHERE mode='manual' AND status='sent'")==2
 
 
+async def test_visible_prayerbook_callback_opens_prayer_menu(max_context):
+    _c, dispatcher, _transports, _requests, sent, _path = max_context
+    await command(max_context, '/start')
+    await drain(max_context)
+    original = {'sender': {'user_id': 900, 'is_bot': True, 'first_name': 'Fixture Bible'},
+                'recipient': {'chat_id': 303, 'chat_type': 'dialog'},
+                'body': {'mid': sent[0][0], 'text': 'Fixture'}}
+    event = {'update_type': 'message_callback', 'timestamp': 456, 'user_locale': 'en', 'message': original,
+             'callback': {'callback_id': 'fixture-prayerbook', 'user': {'user_id': 101, 'first_name': 'Fixture'},
+                          'payload': 'maxcmd:/prayerbook'}}
+    await dispatcher.dispatch(event, 'fixture-prayerbook-event')
+    await drain(max_context)
+    assert 'Prayer book' in sent[-1][1]['text']
+    buttons = sent[-1][1]['attachments'][0]['payload']['buttons']
+    assert any(':pb:' in button.get('payload', '') for row in buttons for button in row)
+
+
 async def test_native_support_menu_sbp_checkout_confirmation_and_private_ticket(max_context,monkeypatch):
     from uuid import uuid4
 

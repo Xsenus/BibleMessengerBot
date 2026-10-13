@@ -1,4 +1,4 @@
-"""Recover missed notifications and lost API responses without new charge keys."""
+"""Сверка платежей: добирает пропущенные уведомления и потерянные ответы API, не создавая новых ключей списания."""
 from __future__ import annotations
 
 import asyncio
@@ -12,6 +12,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 async def poll(connection, api, *, limit=10):
+    """Проверить у провайдера до `limit` самых давно не проверявшихся неоконченных платежей и возвратов (не старше 7 дней) и обновить их состояние; ошибки откладываются до следующего прохода."""
     orders = await connection.fetch('''SELECT * FROM native_payment_orders
         WHERE status IN ('creating','pending') AND created_at>now()-interval '7 days'
         AND (provider_payment_id IS NOT NULL OR created_at>now()-interval '23 hours')
@@ -35,6 +36,7 @@ async def poll(connection, api, *, limit=10):
 
 
 async def loop(pool, stop):
+    """Цикл сверки раз в минуту до сигнала остановки; если ЮKassa не настроена, просто ждёт остановки."""
     settings = MerchantSettings.from_env()
     if not settings.enabled:
         await stop.wait()

@@ -1,4 +1,4 @@
-"""Singleton MAX consumer and idempotent command menu; HTTP receiver is separate."""
+"""Служба MAX: единственный потребитель событий и идемпотентное меню команд; приём вебхуков — отдельная служба."""
 from __future__ import annotations
 
 import asyncio
@@ -17,22 +17,27 @@ from app.maxbot.events import UPDATE_TYPES
 from app.maxbot.inbox import consumer_loop, recover
 from app.payments.reconcile import loop as payment_loop
 from app.maxbot.payment_menus import loop as payment_menu_loop
+from app.net import store as net_store
+from app.services import features
 from app.services.locks import lock_key
 
 
 async def heartbeat(connection):
+    """Каждые 15 секунд записывать сигнал жизни службы `maxbot`."""
     while True:
         await connection.execute("INSERT INTO service_heartbeats(service) VALUES('maxbot') ON CONFLICT(service) DO UPDATE SET last_seen=now()")
         await asyncio.sleep(15)
 
 
 def command_menu():
+    """Список команд для меню MAX (из общего набора на русском); команды оплаты показываются только когда платежи подключены."""
     enabled=merchant_available()
     return [{'name':c.command,'description':'Поддержать картой или СБП' if c.command=='donate' else c.description}
             for c in commands_for('ru') if enabled or c.command not in {'donate','paysupport'}]
 
 
 async def main():
+    """Запустить службу: проверить настройки и токен, взять блокировку единственного потребителя, обновить меню команд, убедиться что вебхук наш (чужой не перезаписывается), подписаться на события и запустить цикл обработки, сигнал жизни, сверку платежей и обновление меню оплаты."""
     settings = Settings.from_env(require_bot_token=False)
     config = MaxSettings.from_env(require_token=True)
     if not config.webhook_url or not config.webhook_secret:
@@ -54,6 +59,7 @@ async def main():
             await acquire_runtime_guard(owner)
             if not await owner.fetchval('SELECT pg_try_advisory_lock($1)',lock_key('singleton-maxbot',1)):
                 raise RuntimeError('Another MAX consumer is running')
+            await net_store.refresh(owner)
             info = await client.get_me()
             if type(info.get('user_id')) is not int or info['user_id']<=0 or not info.get('is_bot'):
                 raise RuntimeError('MAX token does not identify a bot')
@@ -67,7 +73,7 @@ async def main():
             await recover(owner)
             dispatcher = MaxDispatcher(bridge,pool,settings)
             consumer = asyncio.create_task(consumer_loop(pool,dispatcher,stop))
-            tasks = [asyncio.create_task(heartbeat(owner)),consumer,asyncio.create_task(payment_loop(pool,stop)),
+            tasks = [asyncio.create_task(heartbeat(owner)),consumer,asyncio.create_task(features.refresh_loop(pool)),asyncio.create_task(net_store.refresh_loop(pool)),asyncio.create_task(payment_loop(pool,stop)),
                      asyncio.create_task(payment_menu_loop(pool,client,info['user_id'],stop)),asyncio.create_task(stop.wait())]
             done,_ = await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
             for task in done:

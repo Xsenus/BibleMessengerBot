@@ -1,9 +1,12 @@
-"""Durable failover with daily provider limits and one monthly paid-request budget."""
+"""Надёжное переключение между провайдерами картинок: суточные лимиты по провайдерам и один общий месячный бюджет платных запросов."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import time
+import logging
+
 import httpx
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -13,26 +16,103 @@ from app.services import image_providers as api
 from app.services.locks import lock_key
 
 
+LOGGER = logging.getLogger(__name__)
+_CUSTOM: list = []          # провайдеры из панели; обновляются из БД перед каждым заданием
+PAID_RANK_BASE = 1000       # платные встроенные провайдеры идут после тех, у кого приоритет в панели меньше 1000
+
+
+async def load_custom(connection):
+    """Прочитать включённые провайдеры из панели (ключи расшифровываются); провайдер с нечитаемым ключом пропускается с записью в журнал."""
+    from app.services import secrets_box
+    await load_ranking(connection)
+    rows = await connection.fetch("SELECT * FROM image_custom_providers WHERE is_enabled ORDER BY priority,id")
+    loaded = []
+    for row in rows:
+        try:
+            key = secrets_box.decrypt(row['api_key_enc'])
+        except (ValueError, RuntimeError):
+            LOGGER.error('Image provider %s skipped: secret cannot be decrypted', row['slug'])
+            continue
+        spec = dict(row, api_key=key, extra=json.loads(row['extra']) if isinstance(row['extra'], str) else row['extra'])
+        loaded.append(api.Provider('x-' + row['slug'], key or 'keyless:' + row['slug'], custom=spec))
+    _CUSTOM[:] = loaded
+    return loaded
+
+
+RANKING: dict = {'mode': 'priority', 'scores': {}, 'style': '', 'loaded_at': 0.0}
+STATS_TTL = 60.0
+
+
+async def provider_stats(connection, days=7):
+    """Показатели провайдеров за `days` суток: попытки, успехи, браки по надписям, среднее время успеха (секунд) и оценка 0..1."""
+    rows = await connection.fetch("""SELECT provider,count(*) AS attempts,
+        count(*) FILTER (WHERE state='succeeded') AS ok,
+        count(*) FILTER (WHERE error_code='quality_text') AS rejected,
+        avg(duration_ms) FILTER (WHERE state='succeeded') AS avg_ms
+        FROM image_generation_attempts WHERE created_at>now()-make_interval(days=>$1) GROUP BY provider""", days)
+    result = {}
+    for row in rows:
+        attempts, ok, rejected = row['attempts'], row['ok'], row['rejected']
+        rate = (ok + 1) / (attempts + 2)                                    # сглаживание: у нового провайдера оценка близка к 0.5
+        reject_rate = rejected / attempts if attempts else 0.0
+        speed = 1 / (1 + float(row['avg_ms'] or 0) / 60000)
+        result[row['provider']] = dict(attempts=attempts, ok=ok, rejected=rejected, avg_seconds=round(float(row['avg_ms'] or 0) / 1000, 1),
+                                       success_rate=round(ok / attempts, 3) if attempts else None,
+                                       score=round(max(0.0, rate - 0.5 * reject_rate) * (0.7 + 0.3 * speed), 3))
+    return result
+
+
+async def load_ranking(connection):
+    """Режим выбора (`priority` — по числу приоритета, `auto` — по статистике успехов) и оценки провайдеров; обновляется раз в минуту."""
+    if time.monotonic() - RANKING['loaded_at'] < STATS_TTL:
+        return
+    mode = await connection.fetchval("SELECT value FROM app_settings WHERE key='images.ranking'") or 'priority'
+    RANKING['mode'] = mode if mode in {'priority', 'auto'} else 'priority'
+    RANKING['style'] = (await connection.fetchval("SELECT value FROM app_settings WHERE key='images.style'") or '')[:300]
+    RANKING['scores'] = {name: item['score'] for name, item in (await provider_stats(connection)).items()} if RANKING['mode'] == 'auto' else {}
+    RANKING['loaded_at'] = time.monotonic()
+
+
+def has_custom():
+    """Есть ли включённые провайдеры из панели."""
+    return bool(_CUSTOM)
+
+
+def rank(settings, provider):
+    """Порядок выбора: провайдеры из панели по своему приоритету, встроенные — после PAID_RANK_BASE в заданном порядке."""
+    priority = (provider.custom['priority'] if provider.custom is not None
+                else PAID_RANK_BASE + settings.provider_order.index(provider.name))
+    if RANKING['mode'] == 'auto':
+        # Apply the same reliability score to every service; priority breaks ties.
+        return 500 - RANKING['scores'].get(provider.name, 0.5) * 400 + priority / 1_000_000
+    return priority
+
+
 def providers(settings):
+    """Список настроенных провайдеров в порядке приоритета (для OpenAI — по каждому ключу); провайдеры без ключа пропускаются."""
     from app.services.openai_credentials import image_keys
     keys = {"openai": settings.key, **settings.extra_keys}
-    return [
+    builtin = [
         api.Provider(name, key) for name in settings.provider_order
         for key in (image_keys(settings.key, settings.openai_keys) if name == 'openai' else (keys.get(name, ''),))
         if key
     ]
+    return builtin + ([] if settings.skip_custom else list(_CUSTOM))
 
 
 def attempt_limit(settings):
+    """Максимальное число попыток на задание: не меньше 5 и не меньше числа провайдеров."""
     return max(5, len(providers(settings)))
 
 
 def fingerprint(provider):
+    """Отпечаток ключа (SHA-256) — по нему различают ключи, не раскрывая значение."""
     return hashlib.sha256(provider.key.encode()).hexdigest()
 
 
 async def configure(connection, settings):
-    """New keys get independent breakers; existing cooldowns/history are retained."""
+    """Завести состояние здоровья для новых ключей (существующие блокировки и история сохраняются) и вернуть в очередь задания, остановленные из-за авторизации или квоты, если появился другой провайдер."""
+    await load_custom(connection)
     for provider in providers(settings):
         await connection.execute(
             """INSERT INTO image_provider_health(provider,key_fingerprint)
@@ -48,8 +128,39 @@ async def configure(connection, settings):
             AND attempts<$1""", attempt_limit(settings))
 
 
+async def budget_usage(connection):
+    """Generation jobs and panel probes consume the same UTC limits."""
+    return await connection.fetch("""WITH submissions AS (
+        SELECT provider,key_fingerprint,reserved_usd,created_at FROM image_generation_attempts
+        UNION ALL
+        SELECT provider,key_fingerprint,reserved_usd,created_at FROM image_provider_test_attempts)
+        SELECT provider,key_fingerprint,COALESCE(sum(reserved_usd),0) AS monthly,
+        count(*) FILTER(WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
+        FROM submissions
+        WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+        GROUP BY provider,key_fingerprint""")
+
+
+async def reserve_test(connection, provider, settings):
+    """Reserve a panel probe before submission; unknown prices are rejected."""
+    amount = provider.reservation_usd
+    if amount is None:
+        return None, 'pricing_unknown'
+    async with connection.transaction():
+        await connection.execute("SELECT pg_advisory_xact_lock($1)", lock_key('image-budget', 1))
+        usage = await budget_usage(connection)
+        if sum(row['monthly'] for row in usage) + amount > settings.monthly_usd:
+            return None, 'monthly_budget'
+        if sum(row['daily'] for row in usage if row['provider'] == provider.name) >= provider.custom['daily_limit']:
+            return None, 'daily_limit'
+        identifier = await connection.fetchval("""INSERT INTO image_provider_test_attempts
+            (provider,key_fingerprint,reserved_usd) VALUES($1,$2,$3) RETURNING id""",
+            provider.name, fingerprint(provider), amount)
+        return identifier, None
+
+
 async def reserve(connection, job_id, settings):
-    """Select provider and reserve budget atomically across jobs/processes."""
+    """Атомарно выбрать провайдера и зарезервировать бюджет: учитываются уже использованные для задания, суточные лимиты, блокировки по ошибкам и месячный бюджет. Возвращает (попытка, провайдер, причина отказа); при отсутствии кандидатов задание откладывается или помечается исчерпанным."""
     async with connection.transaction():
         await connection.execute("SELECT pg_advisory_xact_lock($1)", lock_key("image-budget", 1))
         job = await connection.fetchrow(
@@ -65,11 +176,7 @@ async def reserve(connection, job_id, settings):
         health = {
             (r["provider"], r["key_fingerprint"]): r for r in await connection.fetch("SELECT * FROM image_provider_health")
         }
-        usage = await connection.fetch("""SELECT provider,key_fingerprint,COALESCE(sum(reserved_usd),0) AS monthly,
-            count(*) FILTER(WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
-            FROM image_generation_attempts
-            WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
-            GROUP BY provider,key_fingerprint""")
+        usage = await budget_usage(connection)
         monthly_reserved = sum(r["monthly"] for r in usage)
         daily_used = {}
         credential_used = {}
@@ -80,6 +187,9 @@ async def reserve(connection, job_id, settings):
         blocked = False
         daily_exhausted = False
         for provider in providers(settings):
+            if provider.reservation_usd is None:
+                blocked = True
+                continue
             if any(
                 r["provider"] == provider.name
                 and r["key_fingerprint"] in {None, fingerprint(provider)}
@@ -89,7 +199,8 @@ async def reserve(connection, job_id, settings):
             identifier = (provider.name, fingerprint(provider))
             daily_count = (credential_used.get(identifier, 0) + credential_used.get(('openai', None), 0) if provider.name == 'openai'
                            and settings.openai_daily_scope == 'key' else daily_used.get(provider.name, 0))
-            if daily_count >= settings.daily_requests:
+            limit = provider.custom['daily_limit'] if provider.custom is not None else settings.daily_requests
+            if daily_count >= limit:
                 daily_exhausted = True
                 continue
             state = health.get(identifier)
@@ -103,8 +214,7 @@ async def reserve(connection, job_id, settings):
                 continue
             candidates.append(provider)
         # Preserve provider order, balancing usage only between keys of the same service.
-        candidates.sort(key=lambda p: (settings.provider_order.index(p.name),
-                                      credential_used.get((p.name, fingerprint(p)), 0)))
+        candidates.sort(key=lambda p: (rank(settings, p), credential_used.get((p.name, fingerprint(p)), 0)))
         if not candidates:
             if daily_exhausted:
                 # Keep the job eligible for the next UTC day; another provider
@@ -150,6 +260,7 @@ async def reserve(connection, job_id, settings):
 
 
 async def fail(connection, job_id, attempt, provider, error, *, max_attempts=5):
+    """Записать неудачную попытку: код ошибки, исход (`failed` или `uncertain`), состояние задания (повтор или окончательный отказ; модерация окончательна) и блокировку ключа на время (сутки для auth/quota)."""
     async with connection.transaction():
         await connection.execute(
             "UPDATE image_generation_attempts SET state=$2,error_code=$3 WHERE id=$1",
@@ -183,7 +294,7 @@ async def fail(connection, job_id, attempt, provider, error, *, max_attempts=5):
 
 
 async def recover(connection):
-    """Resume accepted async tasks after restart, quarantine submissions without IDs."""
+    """После перезапуска продолжить принятые асинхронные задачи (есть адрес опроса), а отправки без идентификатора пометить неопределёнными, чтобы не дублировать оплату."""
     async with connection.transaction():
         await connection.execute("""UPDATE image_generation_jobs j SET state='retry',retry_at=now(),
             error_code=NULL,updated_at=now() WHERE state='running' AND EXISTS
@@ -197,8 +308,10 @@ async def recover(connection):
 
 
 async def process_job(connection, job_id, settings, *, generator=None):
+    """Обработать одно задание картинки: проверить, что текст стиха не изменился, при необходимости получить описание сцены у локальной модели (для Stability), зарезервировать провайдера или продолжить опрос принятой задачи, сгенерировать, проверить OCR-фильтром на надписи и сохранить картинку; при любом неясном сбое сохранения платный запрос не повторяется. Возвращает короткий код результата."""
+    await load_custom(connection)
     job = await connection.fetchrow(
-        """SELECT j.*,i.translation_id,i.book_code,i.chapter,i.verse,
+        """SELECT j.*,i.translation_id,i.book_code,i.chapter,i.verse,i.verse_end,
         i.text_sha256,i.artwork_scope,i.status AS image_status FROM image_generation_jobs j
         JOIN verse_illustrations i ON i.id=j.image_id WHERE j.id=$1""",
         job_id,
@@ -226,7 +339,8 @@ async def process_job(connection, job_id, settings, *, generator=None):
     )
     resume = None
     scene = None
-    if not generator and not pending and any(p.name == 'stability' for p in providers(settings)):
+    needs_scene = lambda p: p.name == 'stability' or p.custom is not None  # noqa: E731
+    if not generator and not pending and any(needs_scene(p) for p in providers(settings)):
         try:
             stored_usage=json.loads(job['usage']) if isinstance(job['usage'],str) else job['usage'] or {}
             scene=stored_usage.get('scene_description')
@@ -235,7 +349,8 @@ async def process_job(connection, job_id, settings, *, generator=None):
                 await connection.execute("UPDATE image_generation_jobs SET usage=$2::jsonb WHERE id=$1",job_id,json.dumps(dict(stored_usage,scene_description=scene)))
         except (ValueError, KeyError, IndexError, TypeError, httpx.HTTPError, TimeoutError):
             # No paid reservation when the free planner cannot prepare a scene.
-            settings = replace(settings, provider_order=tuple(p for p in settings.provider_order if p != 'stability'))
+            settings = replace(settings, skip_custom=True,
+                               provider_order=tuple(p for p in settings.provider_order if p != 'stability'))
     if pending:
         provider = next((p for p in providers(settings) if p.name == pending["provider"]
                          and fingerprint(p) == pending['key_fingerprint']), None)
@@ -259,6 +374,7 @@ async def process_job(connection, job_id, settings, *, generator=None):
             return reason
 
     async def accepted(identifier, url):
+        """Сохранить идентификатор и адрес опроса принятой удалённой задачи до начала ожидания (чтобы после перезапуска не платить дважды)."""
         await connection.execute(
             "UPDATE image_generation_attempts SET request_id=$2,polling_url=$3 WHERE id=$1",
             attempt,
@@ -266,20 +382,27 @@ async def process_job(connection, job_id, settings, *, generator=None):
             url,
         )
 
+    started = time.monotonic()
+    styled = lambda text: f"{text} Art style: {RANKING['style']}." if RANKING['style'] else text  # noqa: E731
     try:
         if generator:
             data, usage, request_id = await generator(
-                provider, scene if provider.name == 'stability' and scene else job["prompt"], accepted=accepted, resume=resume
+                provider, styled(scene if needs_scene(provider) and scene else job["prompt"]), accepted=accepted, resume=resume
             )
         elif provider.name == "openai":
             data, usage, request_id = await artwork.generate(
-                replace(settings, key=provider.key), job["prompt"]
+                replace(settings, key=provider.key), styled(job["prompt"])
             )
+        elif provider.custom is not None:
+            from app.services import free_image_providers
+            if not scene:                                   # текст стиха во внешние бесплатные сервисы не отправляется
+                raise api.GenerationError("scene_unavailable", retry=True, retry_after=60)
+            data, usage, request_id = await free_image_providers.generate(provider.custom, styled(scene))
         else:
             data, usage, request_id = await api.generate(
-                provider, scene if provider.name == 'stability' and scene else job["prompt"], accepted=accepted, resume=resume
+                provider, styled(scene if needs_scene(provider) and scene else job["prompt"]), accepted=accepted, resume=resume
             )
-        if provider.name == 'stability' and scene:
+        if needs_scene(provider) and scene:
             usage=dict(usage,scene_description=scene)
         # The source may have changed while waiting for the external API.
         current = await illustrations.source_row(connection, job)
@@ -294,7 +417,8 @@ async def process_job(connection, job_id, settings, *, generator=None):
                 job_id,
             )
             return "source_changed"
-        await connection.execute('UPDATE image_generation_attempts SET request_id=$2 WHERE id=$1',attempt,request_id)
+        await connection.execute('UPDATE image_generation_attempts SET request_id=$2,duration_ms=$3 WHERE id=$1',
+                                 attempt, request_id, int((time.monotonic() - started) * 1000))
         verdict = await image_quality.gate(connection, job['image_id'], attempt, data)
         if verdict == 'rejected':
             await fail(connection, job_id, attempt, provider, api.GenerationError('quality_text'), max_attempts=attempt_limit(settings))

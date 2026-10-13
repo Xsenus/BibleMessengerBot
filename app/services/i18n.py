@@ -1,4 +1,4 @@
-"""Explicit destination-localized interface strings, separate from Bible content."""
+"""Тексты интерфейса на языке назначения; отделены от содержимого Библии."""
 from __future__ import annotations
 import json
 from functools import lru_cache
@@ -12,7 +12,7 @@ ISO3_TO_UI.update({'nob':'no', 'fil':'tl', 'yue':'zh', 'grc':'el','ara':'ar','fa
 
 @lru_cache(maxsize=1)
 def catalogs() -> dict[str, dict[str, str]]:
-    """Load and strictly validate all bundled UI catalogs once."""
+    """Загрузить и строго проверить все каталоги перевода интерфейса из `locales/` (набор ключей как у английского, без пустых значений). Результат кэшируется."""
     data = {p.stem: json.loads(p.read_text(encoding='utf-8')) for p in ROOT.glob('*.json')}
     base = set(data['en'])
     for locale, values in data.items():
@@ -22,12 +22,12 @@ def catalogs() -> dict[str, dict[str, str]]:
 
 
 def available_ui() -> dict[str, str]:
-    """Only advertise fully populated local catalogs, never the import wish list."""
+    """Языки интерфейса, у которых есть полный каталог: {код: родное название}."""
     return {k: v['_name'] for k, v in catalogs().items()}
 
 
 def ui_for_language(value: str | None) -> str | None:
-    """Return an available UI locale or None; no silent language substitution."""
+    """Язык интерфейса для кода языка (`ru`, `rus`, `pt-BR`…) или None, если полного каталога нет; подмена другим языком не делается."""
     if not value:
         return None
     code = value.lower().replace('_','-').split('-')[0]
@@ -36,17 +36,17 @@ def ui_for_language(value: str | None) -> str | None:
 
 
 def initial_ui(telegram_language: str | None) -> str:
-    """A new private destination uses Telegram's UI language, otherwise English."""
+    """Начальный язык нового личного чата: по языку Telegram, иначе английский."""
     return ui_for_language(telegram_language) or 'en'
 
 
 def tr(locale: str, key: str, **values: object) -> str:
-    """Resolve a known translation; missing keys are programming errors."""
+    """Получить перевод по ключу и подставить значения; неизвестный язык или ключ — ошибка программирования."""
     if locale not in catalogs():
         raise ValueError(f'Unsupported UI locale: {locale}')
     return catalogs()[locale][key].format(**values)
 
 
 def native_ui_name(locale: str) -> str:
-    """Display the native language name in selectors and settings."""
+    """Родное название языка интерфейса для списков и настроек."""
     return catalogs()[locale]['_name']

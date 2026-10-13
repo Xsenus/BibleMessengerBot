@@ -1,7 +1,6 @@
-"""Validated Stars orders and an immutable, idempotent payment/refund ledger.
+"""Проверенные заказы Stars и неизменяемый идемпотентный журнал платежей и возвратов.
 
-Only authenticated Telegram payment updates (or authoritative reconciliation)
-may call record_payment/record_refund. Pre-checkout is never payment evidence.
+Только подлинные обновления Telegram об оплате (или авторизованная сверка) могут вызывать `record_payment`/`record_refund`; предварительная проверка платежом не считается.
 """
 from __future__ import annotations
 
@@ -19,36 +18,42 @@ _PAYLOAD = re.compile(r'donation:v1:[A-Za-z0-9_-]{32}')
 
 
 def _user(user_id: int) -> None:
+    """Проверить идентификатор пользователя (целое положительное)."""
     if type(user_id) is not int or not 0 < user_id < 2**63:
         raise ValueError('Invalid donation user')
 
 
 def _amount(amount: int, currency: str = CURRENCY) -> None:
+    """Проверить сумму Stars (целое от MIN_AMOUNT до MAX_AMOUNT) и валюту XTR."""
     if type(amount) is not int or not MIN_AMOUNT <= amount <= MAX_AMOUNT or currency != CURRENCY:
         raise ValueError('Invalid Stars amount or currency')
 
 
 def _payload(payload: str) -> None:
+    """Проверить формат внутренней метки заказа `donation:v1:…`."""
     if not isinstance(payload, str) or not _PAYLOAD.fullmatch(payload):
         raise ValueError('Invalid donation payload')
 
 
 def _opaque(value: str) -> None:
+    """Проверить непрозрачный идентификатор платежа Telegram (непустая строка без NUL, до 2048 байт)."""
     if not isinstance(value, str) or not value.strip() or '\x00' in value or not 1 <= len(value.encode()) <= 2048:
         raise ValueError('Invalid Telegram payment identifier')
 
 
 def _matches(order: Any, user_id: int, amount: int, currency: str) -> bool:
+    """Совпадают ли заказ, пользователь, сумма и валюта."""
     return bool(order and order['user_id'] == user_id and order['amount'] == amount and order['currency'] == currency)
 
 
 async def _read_order(connection: Any, payload: str) -> Any:
+    """Прочитать заказ по метке вместе с идентификатором платежа Telegram (если оплачен)."""
     return await connection.fetchrow('''SELECT o.*,p.telegram_payment_charge_id FROM donation_orders o
         LEFT JOIN donation_payments p ON p.order_id=o.id WHERE o.payload=$1''', payload)
 
 
 async def create_order(connection: Any, user_id: int, amount: int) -> Any:
-    """Create a single-user, single-use invoice with 192 bits of random payload."""
+    """Создать одноразовый заказ для пользователя со случайной меткой (192 бита)."""
     _user(user_id)
     _amount(amount)
     payload = 'donation:v1:' + secrets.token_urlsafe(24)
@@ -58,7 +63,7 @@ async def create_order(connection: Any, user_id: int, amount: int) -> Any:
 
 async def validate_checkout(connection: Any, payload: str, user_id: int, currency: str,
                             total_amount: int, query_id: str) -> bool:
-    """Atomically reserve an unexpired invoice for exactly one pre-checkout query."""
+    """Атомарно зарезервировать неистёкший счёт ровно под один предварительный запрос оплаты: проверяются пользователь, сумма, валюта, срок и уникальность запроса. Возвращает True, если оплату можно разрешить."""
     try:
         _payload(payload)
         _user(user_id)
@@ -85,7 +90,7 @@ async def validate_checkout(connection: Any, payload: str, user_id: int, currenc
 
 async def record_payment(connection: Any, *, payload: str, user_id: int, currency: str,
                          total_amount: int, charge_id: str) -> tuple[Any, bool]:
-    """Record confirmed money once, even after expiry or a lost checkout update."""
+    """Записать подтверждённый платёж ровно один раз (даже после истечения срока или потерянного обновления). Возвращает (заказ, впервые ли записан); конфликт идентификаторов — ValueError."""
     _payload(payload)
     _user(user_id)
     _amount(total_amount, currency)
@@ -110,7 +115,7 @@ async def record_payment(connection: Any, *, payload: str, user_id: int, currenc
 
 
 async def list_user_donations(connection: Any, user_id: int, limit: int = 10) -> list[Any]:
-    """Only this user's confirmed receipts; pending invoices are not donations."""
+    """Последние подтверждённые платежи пользователя (неоплаченные счета не показываются)."""
     _user(user_id)
     if type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError('Invalid donation history limit')
@@ -120,7 +125,7 @@ async def list_user_donations(connection: Any, user_id: int, limit: int = 10) ->
 
 
 async def create_support_request(connection: Any, user_id: int, text: str) -> int:
-    """Save a private support ticket; no payment details are posted to other chats."""
+    """Сохранить обращение пользователя по оплате (1–4000 символов); данные не публикуются в чужих чатах. Возвращает номер."""
     _user(user_id)
     if not isinstance(text, str) or '\x00' in text or not 1 <= len(text.strip()) <= 4000:
         raise ValueError('Support request must contain 1 to 4000 characters')
@@ -130,7 +135,7 @@ async def create_support_request(connection: Any, user_id: int, text: str) -> in
 
 async def record_refund(connection: Any, *, payload: str, currency: str,
                         total_amount: int, charge_id: str) -> bool:
-    """Append a confirmed full refund without altering the original receipt."""
+    """Дописать подтверждённый полный возврат, не меняя исходную квитанцию; повторная запись возвращает False."""
     _payload(payload)
     _amount(total_amount, currency)
     _opaque(charge_id)

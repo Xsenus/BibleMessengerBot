@@ -1,4 +1,4 @@
-"""Resolve chapter and verse addresses against the selected edition's numbering."""
+"""Разбор адресов глав и стихов относительно нумерации выбранного издания."""
 
 from __future__ import annotations
 
@@ -117,12 +117,14 @@ SHORT_EN = {
 
 
 def normalized(value: str) -> str:
+    """Нормализовать название для сравнения: NFKC, нижний регистр, «ё»→«е», только буквы и цифры."""
     value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")
     return "".join(c for c in value if c.isalnum())
 
 
 @dataclass(frozen=True)
 class Reference:
+    """Разобранный адрес: название книги, глава и необязательный диапазон стихов."""
     book: str
     chapter: int
     first: int | None = None
@@ -130,6 +132,7 @@ class Reference:
 
 
 def parse_reference(query: str) -> Reference | None:
+    """Разобрать запрос вида «Иоанна 3», «Ин 3:16», «Пс 118:55–57»; возвращает Reference или None, если это не адрес (обратный диапазон — ошибка)."""
     if not 1 <= len(query.strip()) <= 200:
         return None
     match = PATTERN.fullmatch(query.strip())
@@ -150,6 +153,7 @@ def parse_reference(query: str) -> Reference | None:
 
 @lru_cache(maxsize=1)
 def aliases() -> dict[str, str]:
+    """Словарь «нормализованное название → код книги» из справочника, русских и английских сокращений (кэшируется)."""
     result = {}
     rows = json.loads(
         (Path(__file__).resolve().parents[2] / "data/books.json").read_text(encoding="utf-8")
@@ -167,6 +171,7 @@ def aliases() -> dict[str, str]:
 
 
 async def resolve_book(connection: Any, translation_id: int, name: str) -> str | None:
+    """Найти код книги по названию: сначала по общему словарю, затем по названиям издания и языков; неоднозначное название не угадывается."""
     key = normalized(name)
     if key in aliases():
         return aliases()[key]
@@ -179,15 +184,10 @@ async def resolve_book(connection: Any, translation_id: int, name: str) -> str |
     return matches.pop() if len(matches) == 1 else None
 
 
-async def lookup(
-    connection: Any, translation: Any, query: str
-) -> tuple[Reference, str, list[Any]] | None:
-    reference = parse_reference(query)
-    if reference is None:
-        return None
-    book = await resolve_book(connection, translation["id"], reference.book)
-    if not book:
-        raise UserError("no_result")
+async def fetch_rows(connection: Any, translation: Any, book: str, chapter: int,
+                     first: int | None, last: int | None) -> list[Any]:
+    """Строки стихов отрывка в издании (вся глава, если `first` не задан). Пустой результат или отсутствие любого запрошенного стиха — ошибка `no_result`: другой стих не подставляется."""
+    reference = Reference(book, chapter, first, last)
     rows = await connection.fetch(
         """SELECT book_code,chapter,verse,verse_end,text,is_range_continuation
         FROM verses WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND text<>''
@@ -207,10 +207,25 @@ async def lookup(
         or not any(r["verse"] <= reference.last <= (r["verse_end"] or r["verse"]) for r in rows)
     ):
         raise UserError("no_result")
+    return rows
+
+
+async def lookup(
+    connection: Any, translation: Any, query: str
+) -> tuple[Reference, str, list[Any]] | None:
+    """Найти текст по адресу в издании: книга, глава и стихи (или вся глава); отсутствие любого запрошенного стиха — ошибка `no_result`, другой стих не подставляется. Возвращает (адрес, код книги, строки)."""
+    reference = parse_reference(query)
+    if reference is None:
+        return None
+    book = await resolve_book(connection, translation["id"], reference.book)
+    if not book:
+        raise UserError("no_result")
+    rows = await fetch_rows(connection, translation, book, reference.chapter, reference.first, reference.last)
     return reference, book, rows
 
 
 async def render(connection: Any, translation: Any, result: tuple, locale: str) -> str:
+    """Оформить найденный отрывок: заголовок книги и главы, стихи с номерами, подпись издания."""
     from app.services import bible
 
     reference, book, rows = result

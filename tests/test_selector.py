@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 
 from app.catalog.models import LicenseInfo, TranslationMeta
 from app.catalog.selector import select_translations

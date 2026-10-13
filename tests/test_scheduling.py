@@ -1,4 +1,4 @@
-from datetime import datetime, time, timezone
+from datetime import datetime, time, UTC
 
 import pytest
 
@@ -15,16 +15,16 @@ def test_invalid_time():
 
 
 def test_next_occurrence_same_day():
-    now = datetime(2026, 9, 21, 6, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 21, 6, 0, tzinfo=UTC)
     result = next_occurrence(time(9, 0), "UTC", now=now)
-    assert result == datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc)
+    assert result == datetime(2026, 9, 21, 9, 0, tzinfo=UTC)
 
 
 def test_next_occurrence_respects_weekdays():
     # 2026-09-21 is Monday; only Tuesday is allowed.
-    now = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
     result = next_occurrence(time(9, 0), "UTC", [2], now=now)
-    assert result == datetime(2026, 9, 22, 9, 0, tzinfo=timezone.utc)
+    assert result == datetime(2026, 9, 22, 9, 0, tzinfo=UTC)
 
 
 def test_timezone_validation():

@@ -1,4 +1,4 @@
-"""Prepare tomorrow's artwork independently of the time-critical Telegram worker."""
+"""Служба иллюстраций: готовит картинки заранее, независимо от срочной отправки в Telegram."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from dataclasses import replace
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
 from app.logging import configure_logging
+from app.net import store as net_store
 from app.services import artwork, cloud_backup, image_router
 from app.services.locks import lock_key
 
@@ -17,6 +18,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 async def heartbeat(pool):
+    """Каждые 20 секунд записывать сигнал жизни службы `illustrator`."""
     while True:
         async with pool.acquire() as c:
             await c.execute(
@@ -26,6 +28,7 @@ async def heartbeat(pool):
 
 
 async def mirror(pool, cloud):
+    """Фоновое зеркалирование готовых картинок в облачное хранилище каждые 30 секунд; сбой откладывается, но не останавливает службу."""
     while True:
         try:
             async with pool.acquire() as c:
@@ -36,15 +39,19 @@ async def mirror(pool, cloud):
 
 
 async def worker():
+    """Запустить службу: единственный экземпляр, восстановление прерванных заданий и в цикле каждые 10 секунд — обновление промптов, планирование на завтра, рассылка готовых картинок и генерация очередных заданий через роутер провайдеров."""
     settings = Settings.from_env(require_bot_token=False)
     art = artwork.ArtSettings.from_env()
     if art.provider == 'openai':
         art = replace(art, provider_order=('openai',))
+    elif art.provider == 'manual':
+        art = replace(art, provider_order=())       # ручной режим: платные ключи не используются, работают только провайдеры из панели
     cloud = cloud_backup.CloudSettings.from_env()
     await wait_for_database(settings)
     pool = await create_pool(settings)
     beat = None
     copies = None
+    netloop = None
     try:
         async with pool.acquire() as owner:
             await acquire_runtime_guard(owner)
@@ -52,17 +59,19 @@ async def worker():
                 "SELECT pg_try_advisory_lock($1)", lock_key("singleton-illustrator", 1)
             ):
                 raise RuntimeError("Another illustrator is running")
+            await net_store.refresh(owner)
             await image_router.recover(owner)
-            if art.provider in {'auto', 'openai'}:
-                await image_router.configure(owner, art)
+            await image_router.configure(owner, art)
             beat = asyncio.create_task(heartbeat(pool))
             copies = asyncio.create_task(mirror(pool, cloud))
+            netloop = asyncio.create_task(net_store.refresh_loop(pool))
             while True:
                 async with pool.acquire() as c:
                     await artwork.upgrade_queued_prompts(c)
                     await artwork.plan_ahead(c)
                     await artwork.dispatch_requests(c)
-                    if art.provider in {'auto', 'openai'}:
+                    await image_router.load_custom(c)               # провайдеры из панели подхватываются без перезапуска
+                    if art.provider in {'auto', 'openai'} or image_router.has_custom():
                         jobs = await artwork.due_jobs(c, max_attempts=image_router.attempt_limit(art))
                         for job in jobs:
                             outcome = await image_router.process_job(c, job['id'], art)
@@ -70,7 +79,7 @@ async def worker():
                             await artwork.dispatch_requests(c)
                 await asyncio.sleep(10)
     finally:
-        for task in (beat, copies):
+        for task in (beat, copies, netloop):
             if task:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

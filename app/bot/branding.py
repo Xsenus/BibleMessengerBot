@@ -1,4 +1,4 @@
-"""Idempotent public Telegram profile and menu, independent of polling health."""
+"""Публичный профиль бота в Telegram (имя, описание, команды, меню, аватар): обновляется идемпотентно и не зависит от работы приёма сообщений."""
 from __future__ import annotations
 
 import asyncio
@@ -11,6 +11,7 @@ from typing import Any
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.types import BotCommand, FSInputFile, InputProfilePhotoStatic, MenuButtonCommands
 
+from app.services.features import support_enabled
 from app.services.i18n import available_ui, tr
 
 LOGGER = logging.getLogger(__name__)
@@ -60,6 +61,7 @@ COMMAND_DESCRIPTIONS = {
 
 
 def commands_for(locale: str) -> list[BotCommand]:
+    """Список команд меню бота для языка: основные команды из COMMAND_KEYS, плюс часовой пояс, поддержка, ежедневный стих, чтение по адресу, утро/вечер, голос и скрытие клавиатуры. Подпись команды поддержки зависит от того, подключены ли платежи картой."""
     from app.payments.yookassa import merchant_available
     language = locale or 'ru'
     descriptions = COMMAND_DESCRIPTIONS.get(language)
@@ -67,13 +69,17 @@ def commands_for(locale: str) -> list[BotCommand]:
         for i,(command,key) in enumerate(COMMAND_KEYS)]
     commands.extend([
         BotCommand(command='timezone', description='Выбрать свой город и часовой пояс' if language == 'ru' else 'Choose your city and time zone'),
-        BotCommand(command='donate', description=(('Поддержать: Stars, карта или СБП' if language=='ru' else 'Support: Stars, card or SBP')
+        *([BotCommand(command='donate', description=(('Поддержать: Stars, карта или СБП' if language=='ru' else 'Support: Stars, card or SBP')
                    if merchant_available() else ('Добровольно поддержать бота ⭐' if language == 'ru' else 'Support the bot with Stars ⭐'))),
-        BotCommand(command='paysupport', description='Вопрос по платежу или возврат' if language == 'ru' else 'Payment issue or refund request'),
+        BotCommand(command='paysupport', description='Вопрос по платежу или возврат' if language == 'ru' else 'Payment issue or refund request')]
+          if support_enabled() else []),
         BotCommand(command='daily', description='Включить ежедневный стих' if language == 'ru' else 'Enable daily verse delivery'),
         BotCommand(command='read', description='Найти главу или стих по адресу' if language == 'ru' else 'Read a chapter or verse by reference'),
         BotCommand(command='devotions', description='Стихи утром и вечером' if language == 'ru' else 'Morning and evening verses'),
         BotCommand(command='voice', description='Выбрать голос чтения: Давид или Мария' if language == 'ru' else 'Choose Russian reading voice: David or Mary'),
+        BotCommand(command='prayerbook', description='Молитвослов: молитвы из Библии' if language == 'ru' else 'Prayer book: prayers from the Bible'),
+        BotCommand(command='bookmarks', description='Мои закладки: /bookmark Ин 3:16' if language == 'ru' else 'My bookmarks: /bookmark John 3:16'),
+        BotCommand(command='streak', description='Серия дней чтения (/done — отметить)' if language == 'ru' else 'Reading streak (/done to mark)'),
         BotCommand(command='hide_keyboard', description='Скрыть нижние кнопки' if language == 'ru' else 'Hide the bottom keyboard'),
         BotCommand(command='menu', description='Показать нижние кнопки' if language == 'ru' else 'Show the bottom keyboard'),
     ])
@@ -81,15 +87,11 @@ def commands_for(locale: str) -> list[BotCommand]:
 
 
 async def apply_branding(bot: Any, connection: Any, *, avatar_path: Path | None = None) -> bool:
-    """Apply changed fields only; record fingerprints only after Telegram accepts.
-
-    A missing avatar or recoverable API failure never stops message processing.
-    The background supervisor retries it. Profile-description pictures are a
-    separate BotFather feature, not a field configured by these API methods.
-    """
+    """Обновить профиль бота: менять только изменившиеся поля и запоминать отпечаток лишь после подтверждения Telegram. Отсутствие аватара или временный сбой API не мешают работе бота — повтор выполняет фоновый цикл. Возвращает True, если всё применено."""
     complete = True
 
     async def update(component: str, value: Any, method: Any, **kwargs: Any) -> None:
+        """Обновить один компонент профиля (имя, описание, команды, меню, фото), если его отпечаток отличается от сохранённого; при отказе Telegram отметить обновление неполным."""
         nonlocal complete
         fingerprint = hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
         key = f'branding:{bot.id}:{component}'
@@ -131,7 +133,7 @@ async def apply_branding(bot: Any, connection: Any, *, avatar_path: Path | None 
 
 
 async def branding_loop(bot: Any, pool: Any) -> None:
-    """Retry optional branding without blocking or terminating the poller."""
+    """Фоновый цикл обновления профиля: повтор через 5 минут при сбое и через час после успеха, с учётом ограничений Telegram; текст ошибок API не логируется."""
     while True:
         delay = 300
         try:

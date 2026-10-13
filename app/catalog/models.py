@@ -1,4 +1,4 @@
-"""Typed catalog and import records."""
+"""Типизированные записи каталога и импорта."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from typing import Any
 
 @dataclass(frozen=True, slots=True)
 class LicenseInfo:
+    """Сведения о лицензии издания: источник, тип, версия, адрес, правообладатель, годы и переводчик."""
     source_id: str
     license_type: str
     license_version: str = ""
@@ -22,6 +23,7 @@ class LicenseInfo:
 
 @dataclass(frozen=True, slots=True)
 class TranslationMeta:
+    """Описание издания из каталога: язык, идентификатор, названия, права, число книг, глав и стихов по разделам (Ветхий и Новый Завет, второканонические), направление письма и дата источника."""
     language_code: str
     translation_id: str
     language_name: str
@@ -50,14 +52,17 @@ class TranslationMeta:
 
     @property
     def total_books(self) -> int:
+        """Общее число книг издания (три раздела вместе)."""
         return self.ot_books + self.nt_books + self.dc_books
 
     @property
     def total_verses(self) -> int:
+        """Общее число стихов издания по каталогу."""
         return self.ot_verses + self.nt_verses + self.dc_verses
 
     @property
     def coverage(self) -> str:
+        """Покрытие по каталогу: `full` (39+27 книг), `ot`, `nt`, `partial` или `unknown`."""
         if self.ot_books >= 39 and self.nt_books >= 27:
             return "full"
         if self.ot_books > 0 and self.nt_books == 0:
@@ -71,6 +76,7 @@ class TranslationMeta:
 
 @dataclass(frozen=True, slots=True)
 class VerseReference:
+    """Координата стиха в эталонной сетке: книга, глава, стих и номер строки в файле."""
     book_code: str
     chapter: int
     verse: int
@@ -79,6 +85,7 @@ class VerseReference:
 
 @dataclass(frozen=True, slots=True)
 class DownloadedTranslation:
+    """Скачанное издание: описание, путь к файлу, адрес источника и SHA-256 содержимого."""
     metadata: TranslationMeta
     path: Path
     source_url: str

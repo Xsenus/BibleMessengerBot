@@ -2,7 +2,7 @@
 from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from datetime import datetime,timezone
+from datetime import datetime,UTC
 import pytest
 
 pytest.importorskip('aiogram',reason='aiogram is unavailable in this audit environment')
@@ -52,7 +52,7 @@ async def test_non_admin_cannot_change_group_language():
 
 
 def test_real_message_chat_type_is_normalized():
-    message=Message(message_id=1,date=datetime.now(timezone.utc),chat=Chat(id=101,type='private'),
+    message=Message(message_id=1,date=datetime.now(UTC),chat=Chat(id=101,type='private'),
         from_user=User(id=101,is_bot=False,first_name='Fixture'),text='/settings')
     assert enum_value(message.chat.type)=='private'
 

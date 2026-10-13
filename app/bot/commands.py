@@ -1,4 +1,4 @@
-"""Pure command parsing, suitable for exhaustive offline validation."""
+"""Разбор команд и данных кнопок — чистые функции без обращений к сети и БД, их легко проверять тестами."""
 from __future__ import annotations
 from dataclasses import dataclass
 import re
@@ -12,7 +12,7 @@ MODE_ALIASES = {'morning':'morning_verse','evening':'evening_verse','утро':'
 
 @dataclass(frozen=True,slots=True)
 class ParsedCommand:
-    """Remote targets are explicit channel/group handles, never arbitrary private recipients."""
+    """Разобранная команда: имя, аргументы, необязательная цель (канал или группа) и упомянутый бот. Цель — только явный @канал или отрицательный числовой ID, но не произвольный личный получатель."""
     name: str
     arguments: tuple[str,...]
     target: str | None = None
@@ -20,7 +20,7 @@ class ParsedCommand:
 
 
 def parse_command(text: str) -> ParsedCommand:
-    """Parse a bounded command and an optional final @channel or negative numeric ID."""
+    """Разобрать текст команды (до 4096 символов): `/имя[@бот] аргументы…`. Для управляющих команд последний аргумент вида `@канал` или `-100…` становится целью. Неверный формат — UserError('invalid')."""
     if len(text)>4096:
         raise UserError('invalid')
     tokens = text.strip().split()
@@ -35,7 +35,7 @@ def parse_command(text: str) -> ParsedCommand:
 
 
 def mode_name(value: str) -> str:
-    """Keep stable machine command names while accepting familiar short aliases."""
+    """Привести режим рассылки к внутреннему имени, принимая привычные короткие названия (утро, вечер, порядок, стих, тема, план и т. п.); неизвестный режим — ошибка."""
     name = MODE_ALIASES.get(value.lower(),value.lower())
     if name not in {'sequential','verse_of_day','topic_of_day','reading_plan','morning_verse','evening_verse'}:
         raise UserError('invalid')
@@ -43,7 +43,7 @@ def mode_name(value: str) -> str:
 
 
 def encode_callback(action: str, chat_id: int, value: str = '') -> str:
-    """Telegram callback_data is at most 64 UTF-8 bytes, not 64 characters."""
+    """Собрать данные кнопки `v1:действие:чат:значение`; Telegram ограничивает их 64 байтами (а не символами), двоеточие внутри запрещено."""
     text = f'v1:{action}:{chat_id}:{value}'
     if len(text.encode())>64 or ':' in action or ':' in value:
         raise ValueError('Invalid callback payload')
@@ -51,7 +51,7 @@ def encode_callback(action: str, chat_id: int, value: str = '') -> str:
 
 
 def decode_callback(text: str) -> tuple[str,int,str]:
-    """Reject fabricated shapes before they can reach authorization or SQL."""
+    """Разобрать данные кнопки и отвергнуть поддельные формы до проверки прав и обращения к SQL. Возвращает (действие, чат, значение)."""
     if len(text.encode())>64:
         raise UserError('invalid')
     parts = text.split(':')

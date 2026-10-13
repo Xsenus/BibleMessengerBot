@@ -1,4 +1,4 @@
-"""Recover confirmed Stars payments/refunds if a polling update was interrupted."""
+"""Восстановление подтверждённых платежей и возвратов Stars, если обновление при опросе было потеряно."""
 from __future__ import annotations
 
 import asyncio
@@ -11,6 +11,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 async def reconcile_page(bot: Any, pool: Any, offset: int = 0) -> dict[str, int]:
+    """Прочитать страницу (до 100) транзакций Stars и записать платежи и возвраты нашего журнала; чужие счета пропускаются, несовпадения отклоняются. Возвращает счётчики: просмотрено, платежей, возвратов, отклонено."""
     page = await bot.get_star_transactions(offset=offset, limit=100, request_timeout=15)
     result = {'scanned': len(page.transactions), 'payments': 0, 'refunds': 0, 'rejected': 0}
     for transaction in page.transactions:
@@ -45,7 +46,7 @@ async def reconcile_page(bot: Any, pool: Any, offset: int = 0) -> dict[str, int]
 
 
 async def reconciliation_loop(bot: Any, pool: Any) -> None:
-    """Check recent transactions and rotate through history, without sending messages."""
+    """Каждые 5 минут проверять свежие транзакции и постепенно просматривать историю (до 5 страниц за цикл, позиция хранится в БД); сообщения не отправляются."""
     key = f'donations:reconciliation-offset:{bot.id}'
     while True:
         try:

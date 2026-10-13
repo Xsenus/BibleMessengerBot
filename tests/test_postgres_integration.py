@@ -4,12 +4,10 @@ They are SKIPPED, not counted as passed, when asyncpg or RUN_DB_TESTS=1 is absen
 No Telegram request and no real Bible download is made in these tests.
 """
 from __future__ import annotations
-import asyncio
 from dataclasses import replace
-from datetime import datetime,time,timezone,timedelta
+from datetime import time
 import hashlib
 import os
-from pathlib import Path
 from urllib.parse import urlsplit,urlunsplit
 from uuid import uuid4
 import pytest
@@ -19,7 +17,7 @@ asyncpg = pytest.importorskip('asyncpg',reason='Real PostgreSQL integration requ
 pytestmark = [pytest.mark.asyncio,pytest.mark.skipif(os.getenv('RUN_DB_TESTS')!='1',reason='Set RUN_DB_TESTS=1 against a PostgreSQL server to execute, not simulate, SQL checks')]
 
 from app.config import Settings
-from app.db import apply_schema
+from app.db import apply_schema, migration_files
 from app.catalog.importer import import_translation,_is_up_to_date
 from app.catalog.models import DownloadedTranslation,VerseReference
 from app.services.seed import seed_static_content
@@ -104,7 +102,7 @@ async def drain(connection,identifier,sender):
 
 async def test_migrations_and_real_import_indexes(db):
     connection,settings,path=db
-    assert await connection.fetchval('SELECT count(*) FROM schema_migrations')==22
+    assert await connection.fetchval('SELECT count(*) FROM schema_migrations') == len(migration_files())
     edition,downloaded,refs=await load_fixture(connection,path)
     assert await _is_up_to_date(connection,downloaded)
     await import_translation(connection,downloaded,refs)

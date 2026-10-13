@@ -1,4 +1,4 @@
-"""Indexed Bible lookup; text, numbering, provenance and destination UI are distinct."""
+"""Выборки Библии по индексам. Текст, нумерация, происхождение и язык интерфейса — отдельные понятия."""
 from __future__ import annotations
 import hashlib
 import re
@@ -15,7 +15,7 @@ from app.services.i18n import native_ui_name, tr, ui_for_language
 
 @dataclass(frozen=True, slots=True)
 class TranslationChoice:
-    """An actually imported and audited edition, not a planned catalog entry."""
+    """Реально импортированное и проверенное издание для выбора пользователем (не запись каталога): язык, идентификатор источника, названия, покрытие, лицензия и объём."""
     id: int
     language_code: str
     source_id: str
@@ -28,7 +28,7 @@ class TranslationChoice:
 
 
 def display_title(translation: Any) -> str:
-    """Readable edition names without changing any source metadata or Bible text."""
+    """Читаемое название издания (для известных — русское или общепринятое) без изменения метаданных источника."""
     source = translation.get('source_name', '')
     identifier = translation.get('source_translation_id', '')
     known = {('getBible/v2', 'synodal'): 'Синодальный перевод',
@@ -37,7 +37,7 @@ def display_title(translation: Any) -> str:
 
 
 def display_language(language_code: str, ui_language: str) -> str:
-    """Use readable names for the bundled editions, then native UI language names."""
+    """Название языка на языке интерфейса: для русского и английского — привычные, для древних — «Древнееврейский/Древнегреческий», для остальных — из профилей или родное название."""
     names = {'ru': {'rus': 'Русский', 'eng': 'Английский'},
              'en': {'rus': 'Russian', 'eng': 'English'}}
     if language_code in names.get(ui_language, {}):
@@ -55,7 +55,7 @@ def display_language(language_code: str, ui_language: str) -> str:
 
 
 async def list_translations(connection: Any) -> list[TranslationChoice]:
-    """Advertise usable editions only, with physical counts and measured coverage."""
+    """Все пригодные издания (проверенные, с текстом) для выбора, с реальными числами книг и стихов."""
     rows = await connection.fetch("""SELECT t.*,l.code AS language_code FROM translations t
         JOIN languages l ON l.id=t.language_id WHERE t.is_active AND t.verse_count>0
         AND t.audit_status IN ('passed','passed_with_warnings') ORDER BY l.code,t.title""")
@@ -67,7 +67,7 @@ async def list_translations(connection: Any) -> list[TranslationChoice]:
 
 async def find_translation(connection: Any, identifier: str | int | None,
                            *, preferred_language: str | None = None) -> Any:
-    """Never substitute a different edition/language for an explicit selection."""
+    """Найти издание по числовому ID, по `источник:id` или по однозначному короткому ID; либо по предпочтительному языку (лучшее: полная Библия, больше стихов). Другое издание или язык молча не подставляются."""
     base = """SELECT t.*,l.code AS language_code,l.text_direction FROM translations t
         JOIN languages l ON l.id=t.language_id WHERE t.is_active AND t.verse_count>0
         AND t.audit_status IN ('passed','passed_with_warnings') """
@@ -101,7 +101,7 @@ async def find_translation(connection: Any, identifier: str | int | None,
 
 async def chat_translation(connection: Any, telegram_chat_id: int,
                            *, fallback_language: str | None = None) -> Any:
-    """Groups use their own saved language, never that of the latest message author."""
+    """Издание чата: сохранённое в настройках или подобранное по языку чата (в группе — не по языку автора последнего сообщения)."""
     row = await connection.fetchrow('SELECT default_translation_id,bible_language_code,ui_language FROM telegram_chats WHERE telegram_chat_id=$1',telegram_chat_id)
     if not row:
         return None
@@ -111,12 +111,12 @@ async def chat_translation(connection: Any, telegram_chat_id: int,
 
 async def user_translation(connection: Any, telegram_user_id: int,
                            telegram_language_code: str | None = None) -> Any:
-    """Compatibility helper; private chats share the destination settings mechanism."""
+    """Устаревший помощник: личные чаты используют общий механизм настроек чата."""
     return await chat_translation(connection,telegram_user_id)
 
 
 async def _book_name(connection: Any, book_code: str, language_code: str, translation_id: int | None = None) -> str:
-    """Use a localized book name when present, otherwise the language-neutral USFM code."""
+    """Название книги: сначала из издания, затем из справочника по языку, иначе код USFM."""
     if translation_id is not None:
         name=await connection.fetchval('SELECT name FROM translation_book_names WHERE translation_id=$1 AND book_code=$2',translation_id,book_code)
         if name:return name
@@ -125,22 +125,25 @@ async def _book_name(connection: Any, book_code: str, language_code: str, transl
 
 
 def verse_label(row: Any) -> str:
-    """Show verse ranges as ranges, not as an incorrectly attributed single verse."""
+    """Подпись номера стиха: диапазон «5–7» для объединённых стихов."""
     last = row.get('verse_end') or row['verse']
     return str(row['verse']) if last == row['verse'] else f"{row['verse']}–{last}"
 
 
 def _safe_link(value: str | None) -> str | None:
+    """Вернуть ссылку, только если она безопасная (http/https, есть хост, без логина)."""
     parsed = urlparse(value or '')
     return value if parsed.scheme in {'http','https'} and parsed.hostname and not parsed.username else None
 
 
 def _linked(label: str, url: str | None) -> str:
+    """Текст в виде HTML-ссылки (если адрес безопасный) или просто экранированный текст."""
     safe = _safe_link(url)
     return f'<a href="{escape(safe).replace(chr(34), "&quot;")}">{escape(label)}</a>' if safe else escape(label)
 
 
 def _license_name(translation: Any, ui_language: str) -> str:
+    """Читаемое название лицензии (общественное достояние, CC0, CC BY… с версией)."""
     raw = translation.get('license_type') or ''
     identifier = _identifier(raw)
     if identifier == 'public-domain':
@@ -157,18 +160,20 @@ def _license_name(translation: Any, ui_language: str) -> str:
 
 
 def _source_name(translation: Any) -> str:
+    """Читаемое название источника издания."""
     source = translation.get('source_name') or 'eBible / BibleNLP'
     return {'getBible/v2': 'getBible', 'BibleNLP/eBible': 'BibleNLP / eBible'}.get(source, source)
 
 
 def _rights(translation: Any) -> list[str]:
+    """Уникальные сведения о правах: уведомление, правообладатель, переводчик."""
     return list(dict.fromkeys(x for x in (
         translation.get('copyright_notice'), translation.get('copyright_holder'),
         translation.get('translated_by')) if x))
 
 
 def attribution(translation: Any, ui_language: str) -> str:
-    """Keep routine reading concise while retaining required licensed attribution."""
+    """Краткая подпись под чтением: название издания, а для изданий не в общественном достоянии — права, источник и лицензия со ссылками."""
     lines = [f'<i>{escape(display_title(translation))}</i>']
     identifier = _identifier(translation.get('license_type') or '')
     linked_license = _url_identifier(translation.get('license_url') or '')
@@ -184,7 +189,7 @@ def attribution(translation: Any, ui_language: str) -> str:
 
 
 def license_details(translation: Any, ui_language: str) -> str:
-    """Explain provenance separately from reading; raw records remain untouched."""
+    """Подробности для `/license`: лицензия, источник, исходные данные, права и пояснение о нумерации."""
     russian = ui_language == 'ru'
     lines = [f'<b>{escape(display_title(translation))}</b>',
              f"{tr(ui_language,'license')}: {_linked(_license_name(translation, ui_language), translation.get('license_url'))}"]
@@ -214,7 +219,7 @@ def license_details(translation: Any, ui_language: str) -> str:
 
 async def render_verse(connection: Any, row: Any, translation: Any,
                        *, ui_language: str = 'ru') -> str:
-    """Escape verse text verbatim and retain the source reference range."""
+    """Оформить стих: цитата, ссылка «Книга глава:стих» и подпись издания; для объединённого отрывка используется отрисовка чтений."""
     if row.get('reading_rows'):
         from app.services.readings import render
         return await render(connection,row,translation,ui_language)
@@ -226,19 +231,19 @@ async def render_verse(connection: Any, row: Any, translation: Any,
 
 
 async def _ordinal_verse(connection: Any, translation: Any, ordinal: int) -> Any:
-    """Dense ordinals avoid repeated random OFFSET scans over the entire edition."""
+    """Стих по сквозному номеру (быстро, без OFFSET по всему изданию)."""
     return await connection.fetchrow('''SELECT book_code,chapter,verse,verse_end,text FROM verses
         WHERE translation_id=$1 AND ordinal=$2''',translation['id'],ordinal)
 
 
 async def random_verse(connection: Any, translation: Any) -> Any:
-    """Choose one visible source verse/range uniformly within the selected edition."""
+    """Случайный видимый стих издания (равномерно)."""
     count = translation['nonempty_verse_count']
     return await _ordinal_verse(connection,translation,secrets.randbelow(count)+1) if count else None
 
 
 async def verse_of_day(connection: Any, translation: Any, seed: str, on_date: date | None = None) -> Any:
-    """Stable daily selection for the specified destination's local date."""
+    """Стабильный «стих дня» для местной даты и чата: номер выбирается хешем даты, чата и издания."""
     count = translation['nonempty_verse_count']
     if not count:
         return None
@@ -248,7 +253,7 @@ async def verse_of_day(connection: Any, translation: Any, seed: str, on_date: da
 
 async def topic_verse(connection: Any, translation: Any, topic_code: str | None = None,
                       seed: str = '', on_date: date | None = None) -> tuple[str, Any] | None:
-    """Choose only themes that have actual text in this particular edition."""
+    """Стих по теме (только для изданий с нумерацией BibleNLP, где есть проверенная привязка тем); выбор стабильный по дате."""
     if not translation.get('numbering_system','BibleNLP Original versification').startswith('BibleNLP'):
         return None  # No verified cross-versification theme mapping for native source editions yet.
     rows = await connection.fetch('''SELECT tr.topic_code,v.book_code,v.chapter,v.verse,v.verse_end,v.text
@@ -265,14 +270,14 @@ async def topic_verse(connection: Any, translation: Any, topic_code: str | None 
 
 
 async def chapter_rows(connection: Any, translation_id: int, book_code: str, chapter: int) -> list[Any]:
-    """Read a chapter by its composite primary key."""
+    """Строки стихов главы по составному ключу."""
     return await connection.fetch('''SELECT book_code,chapter,verse,verse_end,text,is_range_continuation
         FROM verses WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 ORDER BY verse''',translation_id,book_code,chapter)
 
 
 async def render_chapter(connection: Any, translation: Any, book_code: str, chapter: int,
                          *, ui_language: str = 'ru', with_attribution: bool = True) -> str | None:
-    """Render visible anchors; <range> continuation tokens are never sent as Bible text."""
+    """Оформить главу целиком: заголовок и видимые стихи (маркеры продолжения диапазона не выводятся) с подписью издания; пустую главу вернуть как None."""
     rows = await chapter_rows(connection,translation['id'],book_code,chapter)
     visible = [r for r in rows if r['text'] and not r['is_range_continuation']]
     if not visible:
@@ -285,7 +290,7 @@ async def render_chapter(connection: Any, translation: Any, book_code: str, chap
 
 
 async def first_chapter(connection: Any, translation_id: int, *, testament: str | None = None) -> Any:
-    """Use the materialized chapter index instead of a verses GROUP BY per message."""
+    """Первая глава издания (по индексу глав), можно по Заветам."""
     return await connection.fetchrow('''SELECT c.book_code,c.chapter FROM translation_chapters c
         JOIN books b ON b.code=c.book_code WHERE c.translation_id=$1
         AND ($2::text IS NULL OR b.testament=$2) ORDER BY c.position LIMIT 1''',translation_id,testament)
@@ -293,7 +298,7 @@ async def first_chapter(connection: Any, translation_id: int, *, testament: str 
 
 async def next_chapter_reference(connection: Any, translation_id: int, book_code: str | None,
     chapter: int | None, *, testament: str | None = None) -> tuple[str,int] | None:
-    """Return the chapter after the last fully delivered chapter."""
+    """Следующая за последней доставленной глава (по индексу глав); сохранённый прогресс, которого нет в текущем издании, — ошибка, нужен явный сброс."""
     position = 0
     if book_code and chapter:
         position = await connection.fetchval('SELECT position FROM translation_chapters WHERE translation_id=$1 AND book_code=$2 AND chapter=$3',translation_id,book_code,chapter)
@@ -307,7 +312,7 @@ async def next_chapter_reference(connection: Any, translation_id: int, book_code
 
 async def next_for_user(connection: Any, telegram_user_id: int, translation: Any,
                         *, plan_code: str = 'sequential') -> tuple[str,int,str] | None:
-    """Read-only preview for compatibility; progress is committed only by the outbox."""
+    """Предпросмотр следующей главы для совместимости; прогресс фиксируется только очередью отправки."""
     saved = await connection.fetchrow('SELECT * FROM chat_reading_progress WHERE telegram_chat_id=$1 AND translation_id=$2',telegram_user_id,translation['id'])
     reference = await next_chapter_reference(connection,translation['id'],saved['book_code'] if saved else None,saved['chapter'] if saved else None)
     if not reference:
@@ -317,11 +322,30 @@ async def next_for_user(connection: Any, telegram_user_id: int, translation: Any
 
 
 async def search_verses(connection: Any, translation_id: int, query: str, limit: int = 10) -> list[Any]:
-    """Literal substring search: SQL wildcards in user input have no special meaning."""
+    """Поиск в тексте издания (2–200 символов): сначала точная подстрока, затем — по словам с учётом форм слов
+    (все слова, а если таких нет — любые из них, лучшие совпадения первыми). До 20 результатов."""
     query = query.strip()
     if not 2 <= len(query) <= 200:
         return []
+    limit = min(max(limit,1),20)
     escaped_query = query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
-    return await connection.fetch("""SELECT book_code,chapter,verse,verse_end,text FROM verses
+    rows = await connection.fetch("""SELECT book_code,chapter,verse,verse_end,text FROM verses
         WHERE translation_id=$1 AND text<>'' AND search_text LIKE lower($2) ESCAPE '\\'
-        ORDER BY source_line LIMIT $3""",translation_id,'%'+escaped_query+'%',min(max(limit,1),20))
+        ORDER BY source_line LIMIT $3""",translation_id,'%'+escaped_query+'%',limit)
+    if rows or len(query.split())<2 and len(query)<4:
+        return rows
+    return await words_search(connection,translation_id,query,limit)
+
+
+async def words_search(connection: Any, translation_id: int, query: str, limit: int) -> list[Any]:
+    """Полнотекстовый поиск PostgreSQL по словам (морфология русского или английского языка издания); сначала стихи со всеми словами, потом с любыми."""
+    config = 'russian' if (await connection.fetchval('SELECT l.code FROM translations t JOIN languages l ON l.id=t.language_id WHERE t.id=$1',translation_id) or 'ru')=='ru' else 'english'
+    sql = """SELECT book_code,chapter,verse,verse_end,text,ts_rank(to_tsvector($4::regconfig,search_text),q) AS rank
+        FROM verses,(SELECT {query} AS q) AS s
+        WHERE translation_id=$1 AND text<>'' AND to_tsvector($4::regconfig,search_text) @@ q
+        ORDER BY rank DESC,source_line LIMIT $3"""
+    for form in ("websearch_to_tsquery($4::regconfig,$2)","replace(plainto_tsquery($4::regconfig,$2)::text,' & ',' | ')::tsquery"):
+        rows = await connection.fetch(sql.format(query=form),translation_id,query,limit,config)
+        if rows:
+            return rows
+    return []

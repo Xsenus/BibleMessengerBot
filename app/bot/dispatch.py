@@ -1,0 +1,355 @@
+"""Выполнение команд: разбирает уже распознанную команду и выполняет действие в нужном чате (настройки, подписки, чтение, поиск)."""
+from __future__ import annotations
+import logging
+from datetime import datetime
+from typing import Any
+from zoneinfo import ZoneInfo
+from aiogram.types import Message,ReplyKeyboardRemove
+from app.bot.commands import mode_name
+from app.bot.ui import main_keyboard,welcome_text,menu_hint,search_prompt
+from app.services import bible, broadcast
+from app.services.platforms import is_bridged
+from app.services import passage,illustrations,readings
+from app.services import audit
+from app.services.accounts import claim_owner,redeem_admin_invite
+from app.services.destinations import configure_chat,ensure_resolved,cancel_queued
+from app.services.errors import UserError
+from app.services.formatting import escape
+from app.services.i18n import native_ui_name,tr,ui_for_language
+from app.services.locks import chat_lock
+from app.services.scheduling import parse_hhmm,next_reading,validate_timezone
+from app.services.subscriptions import create_or_update_subscription,set_enabled,delete_subscriptions,list_subscriptions
+from app.worker.delivery import enqueue_next,resolve_uncertain
+from app.bot.common import destination,enum_value
+from app.bot.menus import (change_language,change_voice,command_target_suffix,daily_confirmation,edition_menu,
+    enable_devotions,help_text,language_menu,modes_menu,settings_keyboard,settings_text,status_text,ui_menu,voices_menu)
+
+LOGGER = logging.getLogger(__name__)
+
+LOGGER = logging.getLogger(__name__)
+
+
+
+
+async def run_command(connection: Any, bot: Any, settings: Any, message: Message,
+                      parsed: Any) -> tuple[str | None,Any]:
+    """Выполнить одну команду пользователя и вернуть (текст ответа, клавиатура).
+
+    Сначала определяется и авторизуется целевой чат (`destination`), затем команда маршрутизируется по имени: голос, клавиатура и меню, ежедневный стих и утро/вечер, язык и издание, пауза/возобновление/отписка, часовой пояс и время, подписки, сброс прогресса, решение по неопределённой доставке, темы. Остальные команды требуют выбранное издание: `/license`, `/next` (ставит главу в очередь, ответ придёт воркером), `/today`, `/random`, `/topic`, `/search` и `/read` (поиск по адресу или словам, с картинками при наличии). Ошибки пользователя поднимаются как UserError с ключом сообщения.
+    """
+    user = message.from_user
+    args = list(parsed.arguments)
+    name = parsed.name
+    chat = await destination(connection,bot,message.chat,user.id,parsed.target,settings)
+    locale = chat['ui_language']
+    # /voice — выбор русского голоса чтения
+    if name=='voice':
+        if not args:
+            return voices_menu(chat)
+        aliases={'давид':'david','мария':'mary','aidar':'david','kseniya':'mary'}
+        if len(args)!=1:
+            raise UserError('invalid')
+        value=aliases.get(args[0].casefold(),args[0].casefold())
+        chat=await change_voice(connection,chat,value)
+        return voices_menu(chat)
+    # /hide_keyboard — скрыть нижнюю клавиатуру (только личный чат Telegram)
+    if name=='hide_keyboard':
+        if enum_value(message.chat.type)!='private' or is_bridged(getattr(bot,'platform',None)):
+            raise UserError('invalid')
+        await connection.execute('UPDATE telegram_chats SET keyboard_hidden=true WHERE telegram_chat_id=$1',message.chat.id)
+        return ('Кнопки скрыты. Вернуть их: /menu. Команды доступны через кнопку «Меню».' if locale=='ru' else
+                'Buttons hidden. Restore them with /menu. Commands remain available in Menu.'),ReplyKeyboardRemove()
+    # /start в личном чате — приветствие и главная клавиатура
+    if name=='start' and enum_value(message.chat.type)=='private':
+        if not is_bridged(getattr(bot,'platform',None)) and connection is not None:
+            await connection.execute('UPDATE telegram_chats SET keyboard_hidden=false WHERE telegram_chat_id=$1',message.chat.id)
+        edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
+        return welcome_text(locale,bible.display_title(edition) if edition else None),main_keyboard(locale,collapsible=not is_bridged(getattr(bot,'platform',None)))
+    # /settings, /register — показать настройки
+    if name in {'start','settings','register'}:
+        return await settings_text(connection,chat),settings_keyboard(chat)
+    if name=='help':
+        return help_text(locale),None
+    if name=='menu_hint':
+        return menu_hint(locale),None
+    if name=='menu':
+        if enum_value(message.chat.type)=='private' and not is_bridged(getattr(bot,'platform',None)):
+            await connection.execute('UPDATE telegram_chats SET keyboard_hidden=false WHERE telegram_chat_id=$1',message.chat.id)
+            return menu_hint(locale),main_keyboard(locale)
+        return menu_hint(locale),None
+    if name=='search' and not args:
+        return search_prompt(locale),None
+    if name=='read' and not args:
+        return search_prompt(locale),None
+    # /devotions [off] — утренние и вечерние стихи и молитва
+    if name=='devotions':
+        if args==['off']:
+            for mode in ['morning_verse','evening_verse']:
+                await set_enabled(connection,chat['telegram_chat_id'],False,mode)
+            return ('Утренние и вечерние стихи отключены.' if locale=='ru' else 'Morning and evening verses disabled.'),settings_keyboard(chat)
+        if args:raise UserError('invalid')
+        return await enable_devotions(connection,chat,user.id),settings_keyboard(chat)
+    # /daily [HH:MM [пояс]|off] — ежедневный стих
+    if name=='daily':
+        if args==['off']:
+            await set_enabled(connection,chat['telegram_chat_id'],False,'verse_of_day')
+            return ('🔕 Ежедневный стих отключён.' if locale=='ru' else '🔕 Daily verse disabled.'),settings_keyboard(chat)
+        if len(args)>2:
+            raise UserError('invalid')
+        edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
+        if not edition:
+            raise UserError('not_ready')
+        sub = await create_or_update_subscription(connection,chat_id=chat['telegram_chat_id'],created_by=user.id,
+            translation_id=edition['id'],mode='verse_of_day',
+            send_time=parse_hhmm(args[0] if args else settings.default_send_time),
+            timezone_name=args[1] if len(args)>1 else chat['timezone'])
+        return daily_confirmation(sub,locale),settings_keyboard(chat)
+    # /claim КОД — стать владельцем бота (один раз, только в личном чате)
+    if name=='claim':
+        if enum_value(message.chat.type)!='private':
+            raise UserError('private_only')
+        ok = len(args)==1 and await claim_owner(connection,telegram_user_id=user.id,supplied_code=args[0],expected_code=settings.owner_claim_code)
+        if not ok and len(args)==1 and await redeem_admin_invite(connection,user.id,args[0]):
+            # Код-приглашение от владельца: пользователь (на любой платформе) становится администратором.
+            await audit.record(connection,user.id,'bot','admin.claim_invite')
+            return ('✅ Вы назначены администратором. Меню: /admin' if locale=='ru' else '✅ You are now an administrator. Menu: /admin'),None
+        return tr(locale,'owner_ok' if ok else 'owner_fail'),None
+    # /announce — объявления и расписания (текст берётся из исходного сообщения, чтобы сохранить переводы строк)
+    if name=='announce':
+        from app.services import announcements
+        raw = (message.text or '').split(None,1)
+        text,markup = await announcements.command(connection,user.id,chat,raw[1] if len(raw)>1 else '')
+        words = (raw[1] if len(raw)>1 else '').split(None,1)
+        if words and words[0] != 'list':
+            await audit.record(connection,user.id,'bot','announce.'+words[0][:20],'',{'text':raw[1][:120]})
+        return text,(markup if markup.inline_keyboard else None)
+    # /post ID | /post ignore ID — копия поста источника всем / пропустить
+    if name=='post':
+        from app.services import chat_sources
+        result = await chat_sources.command(connection,user.id,args,locale=='ru')
+        await audit.record(connection,user.id,'bot','post.'+(args[0] if args and not args[0].isdigit() else 'publish'),args[-1] if args else '')
+        return result,None
+    # /video [add платформа канал [notify] | on|off|notify|silent|del ID] — слежение за видеоканалами
+    if name=='video':
+        from app.services import video_watch
+        result = await video_watch.command(connection,user.id,chat,args)
+        if args and args[0] != 'list':
+            await audit.record(connection,user.id,'bot','video.'+args[0][:20],' '.join(args[1:])[:100])
+        return result
+    # /prayerbook [код] — молитвослов: подборки отрывков для молитвы
+    if name=='prayerbook':
+        from app.services import prayerbook
+        if not args:
+            return prayerbook.menu(chat)
+        edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
+        if not edition:
+            raise UserError('not_ready')
+        return await prayerbook.show(connection,chat,edition,args[0])
+    # Закладки и серия чтения
+    if name in {'bookmark','bookmarks','unbookmark','done','streak'}:
+        from app.services import reader
+        ru = locale=='ru'
+        today = datetime.now(ZoneInfo(chat['timezone'])).date()
+        edition = await bible.chat_translation(connection,chat['telegram_chat_id']) if name in {'bookmark','bookmarks'} else None
+        if name in {'bookmark','bookmarks'} and not edition:
+            raise UserError('not_ready')
+        if name=='bookmark':
+            if not args:
+                return ('Укажите адрес: <code>/bookmark Ин 3:16 заметка</code>' if ru else 'Give a reference: <code>/bookmark John 3:16 note</code>'),None
+            identifier,title = await reader.add_bookmark(connection,chat['telegram_chat_id'],edition,' '.join(args))
+            return (f'🔖 Закладка №{identifier}: {title}' if ru else f'🔖 Bookmark #{identifier}: {title}'),None
+        if name=='bookmarks':
+            if len(args)>1 or (args and (not args[0].isascii() or not args[0].isdigit() or len(args[0])>3 or int(args[0])<1)):
+                raise UserError('invalid')
+            return await reader.listing(connection,chat['telegram_chat_id'],edition,ru,page=int(args[0]) if args else 1),None
+        if name=='unbookmark':
+            done = len(args)==1 and args[0].isdigit() and await reader.remove_bookmark(connection,chat['telegram_chat_id'],int(args[0]))
+            return (('Закладка удалена.' if ru else 'Bookmark removed.') if done else tr(locale,'no_result')),None
+        if name=='done':
+            await reader.mark_read(connection,chat['telegram_chat_id'],today)
+        return reader.streak_text(*await reader.streak(connection,chat['telegram_chat_id'],today),ru),None
+    # /admin — меню администратора (доступно администраторам и владельцу)
+    if name=='admin':
+        from app.bot import admin
+        return await admin.command(connection,user.id,chat,args)
+    # /language [код] — язык Библии (издание подбирается автоматически)
+    if name=='language':
+        if not args:
+            return await language_menu(connection,chat)
+        if len(args)!=1:
+            raise UserError('invalid')
+        chat = await change_language(connection,chat,user.id,args[0])
+        notice = '' if ui_for_language(args[0]) else tr(chat['ui_language'],'ui_fallback',ui=native_ui_name(chat['ui_language']))+'\n'
+        return notice+await settings_text(connection,chat),settings_keyboard(chat)
+    # /ui [код] — язык интерфейса
+    if name=='ui':
+        if not args:
+            return ui_menu(chat)
+        locale_new = ui_for_language(args[0]) if len(args)==1 else None
+        if not locale_new:
+            raise UserError('unknown_language')
+        chat = await configure_chat(connection,chat_id=chat['telegram_chat_id'],actor_id=user.id,ui_language=locale_new)
+        return await settings_text(connection,chat),settings_keyboard(chat)
+    # /translations [язык] — список изданий
+    if name=='translations':
+        return await edition_menu(connection,chat,0,args[0] if args else None)
+    # /translation ID — выбрать издание
+    if name=='translation':
+        if len(args)!=1:
+            raise UserError('invalid')
+        edition = await bible.find_translation(connection,args[0])
+        if not edition:
+            raise UserError('no_result')
+        chat = await configure_chat(connection,chat_id=chat['telegram_chat_id'],actor_id=user.id,translation_id=edition['id'])
+        return await settings_text(connection,chat),settings_keyboard(chat)
+    if name=='status':
+        return await status_text(connection,chat),settings_keyboard(chat)
+    # /pause, /resume, /unsubscribe [режим] — управление подписками
+    if name in {'pause','resume','unsubscribe'}:
+        if len(args)>1:
+            raise UserError('invalid')
+        mode = mode_name(args[0]) if args else None
+        if name=='unsubscribe':
+            await delete_subscriptions(connection,chat['telegram_chat_id'],mode)
+        else:
+            await set_enabled(connection,chat['telegram_chat_id'],name=='resume',mode)
+        return tr(locale,'saved'),settings_keyboard(chat)
+    # /thread N|off — тема форума для публикаций в группе
+    if name=='thread':
+        if len(args)!=1 or not (args[0]=='off' or args[0].isdigit() and int(args[0])>0):
+            raise UserError('invalid')
+        livechat = await bot.get_chat(chat['telegram_chat_id'])
+        if args[0]!='off' and not getattr(livechat,'is_forum',False):
+            raise UserError('invalid')
+        chat = await configure_chat(connection,chat_id=chat['telegram_chat_id'],actor_id=user.id,set_thread=True,
+            message_thread_id=None if args[0]=='off' else int(args[0]))
+        return tr(locale,'saved'),settings_keyboard(chat)
+    # /timezone [пояс] — город или часовой пояс чата
+    if name=='timezone':
+        from app.bot.timezones import menu
+        if not args:
+            return menu(chat)
+        if len(args)!=1:
+            raise UserError('invalid')
+        chat=await configure_chat(connection,chat_id=chat['telegram_chat_id'],actor_id=user.id,timezone_name=args[0])
+        return await settings_text(connection,chat),settings_keyboard(chat)
+    # /time HH:MM [пояс] — время рассылок (для утра/вечера задаёт время молитвы)
+    if name=='time':
+        if not args:
+            target = await command_target_suffix(connection,chat)
+            return f"{tr(locale,'time')}: <code>/time 09:00 {escape(chat['timezone'])}{target}</code>",None
+        if not 1<=len(args)<=2:
+            raise UserError('invalid')
+        clock,tz = parse_hhmm(args[0]),args[1] if len(args)==2 else chat['timezone']
+        validate_timezone(tz)
+        async with chat_lock(connection,chat['telegram_chat_id']),connection.transaction():
+            chat = await configure_chat(connection,chat_id=chat['telegram_chat_id'],actor_id=user.id,timezone_name=tz)
+            rows = await list_subscriptions(connection,chat['telegram_chat_id'])
+            for row in rows:
+                await connection.execute('UPDATE subscriptions SET send_time=$2,next_run_at=$3,revision=revision+1 WHERE id=$1',row['id'],row['send_time'] if row['mode'] in {'morning_verse','evening_verse'} else clock,
+                    next_reading(row['mode'],row['send_time'] if row['mode'] in {'morning_verse','evening_verse'} else clock,tz,list(row['days_of_week'])) if row['is_enabled'] else None)
+        return tr(locale,'saved'),settings_keyboard(chat)
+    # /subscribe режим [HH:MM [пояс [план]]] — создать или изменить подписку
+    if name in {'subscribe','channel'}:
+        if not args:
+            return modes_menu(chat)
+        if not 1<=len(args)<=4:
+            raise UserError('invalid')
+        mode = mode_name(args[0])
+        edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
+        if not edition:
+            raise UserError('not_ready')
+        await create_or_update_subscription(connection,chat_id=chat['telegram_chat_id'],created_by=user.id,
+            translation_id=edition['id'],mode=mode,send_time=parse_hhmm(args[1] if len(args)>1 else settings.default_send_time),
+            timezone_name=args[2] if len(args)>2 else chat['timezone'],plan_code=args[3] if len(args)>3 else None)
+        return tr(locale,'saved'),settings_keyboard(chat)
+    # /reset confirm — сбросить прогресс и отключить подписки
+    if name=='reset':
+        if args!=['confirm']:
+            raise UserError('invalid')
+        async with chat_lock(connection,chat['telegram_chat_id']),connection.transaction():
+            await ensure_resolved(connection,chat['telegram_chat_id'])
+            await cancel_queued(connection,chat['telegram_chat_id'])
+            await connection.execute('DELETE FROM chat_reading_progress WHERE telegram_chat_id=$1',chat['telegram_chat_id'])
+            await connection.execute('''UPDATE subscriptions SET current_book_code=NULL,current_chapter=NULL,current_verse=NULL,
+                plan_day=0,completed=false,is_enabled=false,next_run_at=NULL,revision=revision+1 WHERE telegram_chat_id=$1''',chat['telegram_chat_id'])
+            await connection.execute("INSERT INTO operator_events(actor_id,chat_id,action) VALUES($1,$2,'reset_progress')",user.id,chat['telegram_chat_id'])
+        return tr(locale,'saved')+'\n/resume',settings_keyboard(chat)
+    # /resolve ID действие — решение оператора по неопределённой доставке
+    if name=='resolve':
+        if len(args)!=2 or not args[0].isdigit():
+            raise UserError('invalid')
+        await resolve_uncertain(connection,int(args[0]),chat['telegram_chat_id'],user.id,args[1])
+        return tr(locale,'saved'),settings_keyboard(chat)
+    # /topics — список тем
+    if name=='topics':
+        topics = await connection.fetch('SELECT code,title_ru,title_en FROM topics WHERE is_active ORDER BY code')
+        # Codes are stable identifiers; avoid presenting untranslated prose as a localized interface.
+        return tr(locale,'topics')+'\n'+'\n'.join(f"<code>/topic {t['code']}</code>" for t in topics),None
+    edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
+    if not edition:
+        raise UserError('not_ready')
+    if name=='license':
+        return bible.license_details(edition,locale),None
+    # /next — следующая глава (отправляет воркер)
+    if name=='next':
+        from app.services import reader
+        await enqueue_next(connection,chat,edition,f'{message.chat.id}:{message.message_id}',settings.max_message_length)
+        await reader.mark_read(connection,chat['telegram_chat_id'],datetime.now(ZoneInfo(chat['timezone'])).date())
+        # The delivery worker sends the reading; no separate queue receipt is needed.
+        return None,None
+    # Команды выбора стиха: /today, /random, /topic, /search, /read
+    local_date = datetime.now(ZoneInfo(chat['timezone'])).date()
+    row = None
+    if name=='today':
+        row = await readings.daily(connection,edition,str(chat['telegram_chat_id']),local_date)
+    elif name=='random':
+        row = await readings.choose(connection,edition)
+    elif name=='topic':
+        result = await bible.topic_verse(connection,edition,args[0] if args else None,str(chat['telegram_chat_id']),local_date)
+        row = await readings.contextual(connection,edition,result[1]) if result else None
+    elif name in {'search','read'}:
+        result = await passage.lookup(connection,edition,' '.join(args))
+        if result:
+            text = await passage.render(connection,edition,result,locale)
+            if result[0].first is None:
+                text = await illustrations.decorate_chapter(connection,text,edition,result[1],result[0].chapter,
+                    chat=chat,request_key=f"{message.chat.id}:{message.message_id}",
+                    thread_id=message.message_thread_id,max_length=settings.max_message_length,rows=result[2])
+            elif len(result[2])==1:
+                text = await illustrations.decorate(connection,text,result[2][0],edition,chat=chat,
+                    request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id)
+            else:
+                # Диапазон стихов (например, Гал 6:1–10): картинка закрепляется за точной последовательностью.
+                text = await illustrations.decorate_range(connection,text,edition,result[2],chat=chat,
+                    request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id,
+                    max_length=settings.max_message_length)
+            # Владельцу бота предлагается разослать найденный отрывок всем (кнопка появится под результатом).
+            await broadcast.offer(connection,user.id,broadcast.refs_from_reference(result[0],result[1]),edition['id'],await broadcast.image_of(connection,text))
+            if name=='read':
+                from app.services import reader
+                await reader.mark_read(connection,chat['telegram_chat_id'],local_date)
+            return text,None
+        if name=='read':
+            return search_prompt(locale),None
+        rows = await bible.search_verses(connection,edition['id'],' '.join(args),5)
+        from app.services.message_languages import combine
+        await broadcast.offer(connection,user.id,broadcast.refs_from_rows(rows),edition['id'])
+        return combine([await bible.render_verse(connection,r,edition,ui_language=locale) for r in rows]) or tr(locale,'no_result'),None
+    else:
+        raise UserError('invalid')
+    if row:
+        text = await bible.render_verse(connection,row,edition,ui_language=locale)
+        decorated = await illustrations.decorate(connection,text,row,edition,chat=chat,
+            request_key=f"{message.chat.id}:{message.message_id}",thread_id=message.message_thread_id)
+        shown = row.get('reading_rows') or [row]
+        await broadcast.offer(connection,user.id,[dict(book=row['book_code'],chapter=row['chapter'],
+            first=shown[0]['verse'],last=shown[-1].get('verse_end') or shown[-1]['verse'])],edition['id'],
+            await broadcast.image_of(connection,decorated))
+        if name=='today':
+            from app.services import reader
+            await reader.mark_read(connection,chat['telegram_chat_id'],local_date)
+        return decorated,None
+    return tr(locale,'no_result'),None
+
+

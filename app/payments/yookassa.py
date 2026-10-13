@@ -1,4 +1,4 @@
-"""Fixed-host authenticated merchant API with explicit, persistent idempotency."""
+"""Клиент платёжного API ЮKassa: фиксированный хост, авторизация магазина и явные постоянные ключи идемпотентности."""
 from __future__ import annotations
 
 import os
@@ -11,14 +11,16 @@ import httpx
 
 
 class PaymentError(Exception):
-    """Sanitized error; never includes authentication or customer/provider bodies."""
+    """Обезличенная ошибка платежа с кодом; в неё никогда не попадают данные авторизации, клиента или тело ответа провайдера."""
 
     def __init__(self, code: str):
+        """Запомнить код ошибки и использовать его же как текст."""
         self.code = code
         super().__init__(code)
 
 
 def https_url(value: str) -> bool:
+    """Проверить, что строка — безопасный HTTPS-адрес (порт 443, без логина и пароля, до 2048 символов)."""
     if not isinstance(value,str):
         return False
     try:
@@ -30,6 +32,7 @@ def https_url(value: str) -> bool:
 
 
 def identifier(value: str) -> str:
+    """Привести значение к каноническому UUID-строке; иначе PaymentError('invalid_identifier')."""
     try:
         return str(UUID(value))
     except (ValueError, TypeError, AttributeError):
@@ -37,6 +40,7 @@ def identifier(value: str) -> str:
 
 
 def minor_amount(value: dict) -> int:
+    """Перевести сумму из ответа провайдера (`{'value': '100.00', 'currency': 'RUB'}`) в копейки; допустимы только положительные рубли с целым числом копеек до 10000 ₽."""
     try:
         if not isinstance(value,dict) or not isinstance(value.get('value'),str):
             raise ValueError
@@ -53,6 +57,7 @@ def minor_amount(value: dict) -> int:
 
 @dataclass(frozen=True, slots=True)
 class MerchantSettings:
+    """Настройки магазина (идентификатор, секретный ключ, адрес возврата, контакт поддержки, флаг включения). Секретный ключ скрыт из repr."""
     shop_id: str = ''
     secret_key: str = field(default='', repr=False)
     return_url: str = ''
@@ -61,10 +66,12 @@ class MerchantSettings:
 
     @property
     def enabled(self):
+        """Истина, если платежи включены и заданы все обязательные значения."""
         return bool(self.active and self.shop_id and self.secret_key and self.return_url and self.support_contact)
 
     @classmethod
     def from_env(cls):
+        """Прочитать настройки из переменных окружения YOOKASSA_* и проверить их формат (числовой идентификатор магазина, HTTPS-адрес возврата, длина контакта)."""
         result = cls(*(os.getenv(key, '').strip() for key in
                        ('YOOKASSA_SHOP_ID', 'YOOKASSA_SECRET_KEY', 'YOOKASSA_RETURN_URL', 'PAYMENT_SUPPORT_CONTACT')),
                      active=os.getenv('YOOKASSA_ENABLED','true').strip().lower() in {'true','1','yes'})
@@ -78,7 +85,10 @@ class MerchantSettings:
 
 
 def merchant_available():
-    """Optional payment configuration must not break reading/navigation."""
+    """Безопасная проверка «платежи доступны»: при неверной конфигурации возвращает False, чтобы не ломать чтение и навигацию."""
+    from app.services.features import support_enabled
+    if not support_enabled():
+        return False
     try:
         return MerchantSettings.from_env().enabled
     except ValueError:
@@ -86,7 +96,9 @@ def merchant_available():
 
 
 class YooKassa:
+    """Асинхронный клиент API ЮKassa (https://api.yookassa.ru/v3/) без перенаправлений."""
     def __init__(self, settings: MerchantSettings, *, transport=None):
+        """Создать HTTP-клиент с авторизацией магазина и тайм-аутами; отказывается работать, если магазин не настроен."""
         if not settings.enabled:
             raise PaymentError('merchant_not_configured')
         self.settings = settings
@@ -96,9 +108,11 @@ class YooKassa:
                                         follow_redirects=False, transport=transport)
 
     async def close(self):
+        """Закрыть HTTP-клиент."""
         await self.client.aclose()
 
     async def request(self, method, path, *, body=None, key=None):
+        """Выполнить запрос к API: относительный путь, для POST обязателен ключ идемпотентности. Сетевые сбои и ответы 5xx/429 превращаются в `provider_unavailable`, прочие отказы — в `provider_rejected`, некорректный JSON — в `invalid_response`."""
         if path.startswith(('/', 'http')) or '..' in path:
             raise PaymentError('invalid_path')
         headers = {}
@@ -120,12 +134,15 @@ class YooKassa:
         return result
 
     async def payment(self, payment_id):
+        """Получить платёж по идентификатору (авторизованный GET)."""
         return await self.request('GET', 'payments/' + identifier(payment_id))
 
     async def refund(self, refund_id):
+        """Получить возврат по идентификатору (авторизованный GET)."""
         return await self.request('GET', 'refunds/' + identifier(refund_id))
 
     async def create(self, order):
+        """Создать платёж по заказу: сумма, способ (карта/СБП), перенаправление на оплату, описание и метаданные (приложение, номер заказа); повтор с тем же ключом не создаёт второй платёж."""
         amount = {'value': f"{order['amount_minor'] // 100}.{order['amount_minor'] % 100:02d}", 'currency': 'RUB'}
         return await self.request('POST', 'payments', key=str(order['idempotency_key']), body={
             'amount': amount, 'capture': True, 'save_payment_method': False,
@@ -136,6 +153,7 @@ class YooKassa:
         })
 
     async def create_refund(self, order, refund):
+        """Создать полный возврат по платежу заказа; ключ идемпотентности хранится вместе с возвратом."""
         return await self.request('POST', 'refunds', key=str(refund['idempotency_key']), body={
             'payment_id': identifier(order['provider_payment_id']),
             'amount': {'value': f"{order['amount_minor'] // 100}.{order['amount_minor'] % 100:02d}", 'currency': 'RUB'},

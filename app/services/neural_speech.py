@@ -1,4 +1,4 @@
-"""Pinned local neural voices. No remote model code, paid API or robotic fallback."""
+"""Закреплённые локальные нейроголоса. Нет удалённого кода моделей, платных API и «роботизированного» запасного голоса."""
 from __future__ import annotations
 
 import hashlib
@@ -18,20 +18,24 @@ LANGUAGES = tuple(MODELS)
 
 
 def cache_root():
+    """Каталог моделей озвучки (AUDIO_MODELS_PATH, по умолчанию /app/cache/tts)."""
     return Path(os.getenv('AUDIO_MODELS_PATH', '/app/cache/tts'))
 
 
 def profile(language):
+    """Идентификатор профиля голоса языка: движок и отпечаток описания модели (меняется при смене модели — кэш озвучки не смешивается)."""
     model = MODELS[language]
     digest = hashlib.sha256(json.dumps(model, sort_keys=True).encode()).hexdigest()[:16]
     return f'neural-v1:{model["engine"]}:{digest}'
 
 
 def directory(language):
+    """Каталог файлов модели для языка."""
     return cache_root() / profile(language).replace(':', '-')
 
 
 def complete(language):
+    """Проверить, что модель языка полностью установлена: метка READY и точные размеры всех файлов."""
     root = directory(language)
     try:
         return (root / 'READY').read_text() == profile(language) and all(
@@ -41,7 +45,7 @@ def complete(language):
 
 
 async def prepare(*, client=None):
-    """Download only declared files, atomically, verifying exact size and SHA-256."""
+    """Скачать объявленные файлы моделей: потоково, с точным контролем размера и SHA-256, во временный файл с атомарным переименованием; готовность отмечается файлом READY."""
     async with httpx.AsyncClient(timeout=180, follow_redirects=True) if client is None else _client(client) as api:
         for language, model in MODELS.items():
             root = directory(language)
@@ -74,11 +78,12 @@ async def prepare(*, client=None):
 
 @asynccontextmanager
 async def _client(client):
+    """Вспомогательный контекстный менеджер для готового HTTP-клиента (чтобы не закрывать чужой клиент)."""
     yield client
 
 
 def segments(text, maximum=350):
-    """Bound inference RAM while preserving every character and word in order."""
+    """Разбить текст на фрагменты по знакам конца предложения и длине (до 350 символов), сохранив все слова по порядку: ограничивает память при синтезе."""
     from app.services.speech import portions
     result = []; start = 0
     for boundary in re.finditer(r'(?<=[.!?;:·])\s+', text):
@@ -89,7 +94,7 @@ def segments(text, maximum=350):
 
 
 def normalize_for_model(text, language, vocabulary):
-    """Preserve letters the checkpoint tokenizer would otherwise silently delete."""
+    """Подготовить текст для токенизатора модели: нижний регистр, замены латинских букв, числовые буквы греческого, а недостающие буквы заменить на базовые; неподдерживаемая буква — ошибка, а не молчаливая потеря."""
     text = unicodedata.normalize('NFC', text).lower()
     if language == 'lat':
         text = text.translate(str.maketrans({'æ': 'ae', 'œ': 'oe', 'j': 'i', 'k': 'c', 'w': 'v'}))
@@ -110,7 +115,7 @@ def normalize_for_model(text, language, vocabulary):
 
 
 def render(language, text, target):
-    """Runs in an isolated child process: heavyweight memory is released on exit."""
+    """Синтезировать речь в WAV (в изолированном дочернем процессе, чтобы память освобождалась): русский через Piper, остальные языки через VITS с одним потоком и фиксированным seed."""
     import wave
     if language not in MODELS or not complete(language):
         raise ValueError('neural_voice_not_installed')

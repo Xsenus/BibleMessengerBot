@@ -1,4 +1,4 @@
-"""Prepare pinned, verified free local prayer model; never execute remote code."""
+"""Подготовка бесплатной локальной модели молитв: закреплённая ревизия, проверка размера и SHA-256, код модели не исполняется."""
 import asyncio
 import hashlib
 import json
@@ -11,6 +11,7 @@ MODEL=json.loads((Path(__file__).parent/'data/prayer-model.json').read_text())
 
 
 async def prepare(*, client=None):
+    """Скачать модель, если её нет или она повреждена: потоково, с ограничением размера и проверкой контрольной суммы; готовый файл появляется атомарным переименованием."""
     root=Path(os.getenv('PRAYER_MODELS_PATH','/app/cache/prayer-ai'))
     root.mkdir(parents=True,exist_ok=True)
     target=root/MODEL['name']

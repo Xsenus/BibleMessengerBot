@@ -1,6 +1,7 @@
 """Reading stays readable while source and license provenance remain available."""
 from __future__ import annotations
 
+from tests.bot_patch import patch_bot
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -85,7 +86,7 @@ async def test_friendly_names_shared_by_settings_menu_start_and_license(monkeypa
     data = edition()
     chat = {'telegram_chat_id':101, 'ui_language':'ru', 'timezone':'UTC'}
     monkeypatch.setattr(handlers.bible, 'chat_translation', AsyncMock(return_value=data))
-    monkeypatch.setattr(handlers, 'destination', AsyncMock(return_value=chat))
+    patch_bot(monkeypatch, 'destination', AsyncMock(return_value=chat))
     connection = SimpleNamespace(fetch=AsyncMock(return_value=[data]), execute=AsyncMock())
     settings = await handlers.settings_text(connection, chat)
     assert 'Перевод: Синодальный перевод' in settings and 'Язык Библии: Русский' in settings

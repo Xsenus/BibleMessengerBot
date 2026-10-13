@@ -1,4 +1,4 @@
-"""Shared asynchronous reading audio; free by default, paid requests require opt-in."""
+"""Общая асинхронная озвучка чтений: по умолчанию бесплатная, платные запросы только по явному разрешению."""
 from __future__ import annotations
 
 import asyncio
@@ -39,6 +39,7 @@ LOCAL_VOICES = {'grc':'grc','lat':'la','hbo':'he','heb':'he','zho':'cmn','cmn':'
 
 @dataclass(frozen=True)
 class SpeechSettings:
+ """Настройки озвучки: включена ли, провайдер (`free`, `neural`, `edge`, `espeak`, `openai`), ключ и модель для платного режима, дневной и месячный лимиты символов, русский голос и движок."""
  enabled: bool = True
  provider: str = 'free'
  key: str = field(default='',repr=False)
@@ -52,6 +53,7 @@ class SpeechSettings:
 
  @classmethod
  def from_env(cls):
+  """Прочитать настройки из AUDIO_*: проверяет провайдера, неотрицательность лимитов и движок русского языка."""
   provider=os.getenv('AUDIO_PROVIDER','free')
   if provider not in {'free','neural','edge','espeak','openai'}:
    raise ValueError('Invalid AUDIO_PROVIDER')
@@ -70,12 +72,13 @@ class SpeechSettings:
 
 
 def for_chat(settings, chat):
+ """Применить к настройкам русский голос, выбранный в чате (Давид или Мария)."""
  from app.services.russian_speech import SPEAKERS
  return replace(settings,russian_voice=SPEAKERS.get(chat.get('audio_voice','david'),'aidar'))
 
 
 def spoken_text(html, edition, locale):
- """Read the displayed source, excluding headings, verse labels and provenance."""
+ """Текст для озвучки: только читаемая часть отображаемого сообщения, без заголовков, подписей номеров стихов и сведений об источнике."""
  for language in {locale,ui_for_language(edition['language_code']) or locale}:
   footer=bible.attribution(edition,language)
   if html.endswith(footer):
@@ -87,6 +90,7 @@ def spoken_text(html, edition, locale):
 
 
 def voice_profile(language, settings):
+ """Идентификатор голоса для языка и настроек; входит в ключ кэша, чтобы смена голоса не смешивала записи."""
  from app.services import neural_speech
  if language=='rus' and settings.provider in {'free','neural'} and settings.russian_engine!='piper':
   from app.services.russian_speech import profile
@@ -95,13 +99,14 @@ def voice_profile(language, settings):
 
 
 def identity(text, language, settings):
+ """Ключ кэша озвучки: SHA-256 от профиля голоса, провайдера, языка и текста (одинаковый текст озвучивается один раз для всех)."""
  mode=settings.provider
  signature=f'{voice_profile(language,settings)}:{mode}:{settings.model if mode=="openai" else ""}:{settings.voice if mode=="openai" else ""}:{language}\0{text}'
  return hashlib.sha256(signature.encode()).hexdigest()
 
 
 async def attach(connection, card_id, settings=None):
- """Freeze the actual visible page and language without waiting for synthesis."""
+ """Привязать озвучку к карточке чтения: взять текст текущей страницы и языка, создать (или найти) запись озвучки без ожидания синтеза."""
  from app.services.message_languages import pages
  settings=settings or SpeechSettings.from_env()
  if not settings.enabled:
@@ -121,6 +126,7 @@ async def attach(connection, card_id, settings=None):
 
 
 async def ensure_audio(connection, text, language, settings):
+ """Найти или создать запись озвучки в очереди по ключу кэша; возвращает её ID."""
  key=identity(text,language,settings)
  return await connection.fetchval('''INSERT INTO reading_audio(cache_key,language_code,source_text,provider_mode,voice_profile)
   VALUES($1,$2,$3,$4,$5) ON CONFLICT(cache_key) DO UPDATE SET cache_key=EXCLUDED.cache_key RETURNING id''',
@@ -128,16 +134,19 @@ async def ensure_audio(connection, text, language, settings):
 
 
 async def media(connection, card):
+ """Готовая озвучка карточки (если включена и состояние `ready`), иначе None."""
  if not card.get('audio_id') or not SpeechSettings.from_env().enabled:
   return None
  return await connection.fetchrow("SELECT * FROM reading_audio WHERE id=$1 AND state='ready'",card['audio_id'])
 
 
 async def acknowledged(connection, card_id, audio_id):
+ """Отметить, что озвучка показана пользователю (для карточки Telegram)."""
  await connection.execute('UPDATE reading_cards SET audio_sent_id=$2 WHERE id=$1',card_id,audio_id)
 
 
 async def run_process(*args, stdin=None, timeout=180):
+ """Запустить внешнюю программу с тайм-аутом; при ошибке — RuntimeError без текста озвучки и ключей в сообщении, при отмене процесс завершается."""
  process=await asyncio.create_subprocess_exec(*args,stdin=asyncio.subprocess.PIPE,
   stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
  try:
@@ -153,7 +162,7 @@ async def run_process(*args, stdin=None, timeout=180):
 
 
 def portions(text, maximum=3000):
- """Lossless bounded inputs, including chapters longer than a provider request."""
+ """Разбить текст на части без потерь (по пробелам, до `maximum` символов) — для длинных глав."""
  result=[]
  while text:
   cut=min(len(text),maximum)
@@ -166,6 +175,7 @@ def portions(text, maximum=3000):
 
 
 async def validate_audio(path):
+ """Проверить MP3 через ffprobe (размер, аудиопоток, длительность до часа) и вернуть (байты, длительность в секундах)."""
  if not path.is_file() or not 512<=path.stat().st_size<=MAX_BYTES:
   raise ValueError('invalid_audio_size')
  raw=await run_process('ffprobe','-v','error','-select_streams','a:0',
@@ -180,7 +190,7 @@ async def validate_audio(path):
 
 
 async def synthesize(text, language, settings, *, client=None):
- """Return validated MP3 bytes, duration and exact provider/voice provenance."""
+ """Получить проверенный MP3: нейроголоса (русский Silero с запасным Piper, прочие языки VITS), платный OpenAI (при разрешении и лимитах), бесплатный Edge или локальный eSpeak. Возвращает (данные, длительность, провайдер, голос)."""
  with tempfile.TemporaryDirectory(prefix='bible-audio-') as directory:
   root=Path(directory);output=root/'reading.mp3'
   from app.services import neural_speech
@@ -274,10 +284,12 @@ async def synthesize(text, language, settings, *, client=None):
 
 @asynccontextmanager
 async def _client(client):
+ """Вспомогательный контекстный менеджер для готового HTTP-клиента."""
  yield client
 
 
 async def reserve_paid(connection, audio, settings):
+ """Атомарно зарезервировать символы платной озвучки в пределах суточного и месячного лимитов; иначе None."""
  if not settings.paid_enabled or not settings.key or min(settings.monthly_characters,settings.daily_characters)<=0:
   return None
  characters=len(audio['source_text'])
@@ -292,12 +304,14 @@ async def reserve_paid(connection, audio, settings):
 
 
 async def recover(connection):
+ """После перезапуска пометить прерванные задания озвучки: платные — неопределённые, бесплатные — повторить."""
  await connection.execute("UPDATE audio_generation_attempts SET state='uncertain',updated_at=now() WHERE state='running'")
  await connection.execute("""UPDATE reading_audio SET state=CASE WHEN provider_mode='openai' THEN 'uncertain' ELSE 'retry' END,
   retry_at=now(),error_code='worker_interrupted',updated_at=now() WHERE state='running'""")
 
 
 async def process(connection, identifier, settings=None, *, generator=synthesize):
+ """Обработать одно задание озвучки под блокировкой: проверить конфигурацию, нужность и лимит хранилища, при необходимости зарезервировать платный лимит, синтезировать и сохранить. Возвращает код (`ready`, `retry`, `failed`, `uncertain`, `busy`, ...)."""
  settings=settings or SpeechSettings.from_env()
  if not settings.enabled:
   return 'disabled'
@@ -357,7 +371,7 @@ async def process(connection, identifier, settings=None, *, generator=synthesize
 
 
 async def upgrade_profiles(connection, settings=None):
- """Rebind old cached voices without discarding their media or changing selections."""
+ """Перепривязать старые карточки к текущему голосу (медиа не удаляются, выбор языка не меняется)."""
  from app.services import neural_speech
  settings=settings or SpeechSettings.from_env()
  if not settings.enabled or settings.provider not in {'free','neural'}:
@@ -368,7 +382,7 @@ async def upgrade_profiles(connection, settings=None):
   JOIN telegram_chats ch USING(telegram_chat_id)
   JOIN reading_audio a ON a.id=c.audio_id JOIN jsonb_each_text($1::jsonb) p
   ON p.key=CASE WHEN a.language_code='rus' THEN 'rus:'||ch.audio_voice ELSE a.language_code END
-  WHERE a.provider_mode=$2 AND a.voice_profile<>p.value AND (c.platform='max' OR c.audio_sent_id IS NULL)
+  WHERE a.provider_mode=$2 AND a.voice_profile<>p.value AND (c.platform<>'telegram' OR c.audio_sent_id IS NULL)
   ORDER BY c.id LIMIT 100''',json.dumps(profiles),settings.provider)
  for card in cards:
   async with chat_lock(connection,card['telegram_chat_id']),connection.transaction():
@@ -377,7 +391,7 @@ async def upgrade_profiles(connection, settings=None):
 
 
 async def refresh_prepared_tracks(connection, settings=None):
- """A changed voice also applies to future bundles, without replaying sent audio."""
+ """Применить смену голоса к уже подготовленным пакетам чтений, не повторяя отправленное аудио."""
  settings=settings or SpeechSettings.from_env()
  if not settings.enabled or settings.provider not in {'free','neural'}:
   return 0
@@ -398,21 +412,21 @@ async def refresh_prepared_tracks(connection, settings=None):
 
 
 async def dispatch(connection):
- """Fan out shared ready audio to exact acknowledged cards, using their latest language."""
+ """Разослать готовое общее аудио по карточкам, на которых оно ещё не показано: ставит в очередь правку исходного сообщения с актуальным языком."""
  from app.worker.delivery import insert_payload
  if not SpeechSettings.from_env().enabled:
   return 0
  cards=await connection.fetch("""SELECT c.id,c.telegram_chat_id FROM reading_cards c JOIN reading_audio a ON a.id=c.audio_id
   JOIN telegram_chats t ON t.telegram_chat_id=c.telegram_chat_id AND t.is_active
   WHERE a.state='ready' AND c.telegram_message_id IS NOT NULL
-  AND CASE WHEN c.platform='max' THEN c.audio_offered_id IS DISTINCT FROM c.audio_id
+  AND CASE WHEN c.platform<>'telegram' THEN c.audio_offered_id IS DISTINCT FROM c.audio_id
       ELSE c.audio_sent_id IS DISTINCT FROM c.audio_id END
   ORDER BY c.id LIMIT 100""")
  count=0
  for hint in cards:
   async with chat_lock(connection,hint['telegram_chat_id']),connection.transaction():
    card=await connection.fetchrow('SELECT * FROM reading_cards WHERE id=$1 FOR UPDATE',hint['id'])
-   confirmed=card.get('audio_offered_id') if card.get('platform')=='max' else card['audio_sent_id']
+   confirmed=card.get('audio_offered_id') if card.get('platform','telegram')!='telegram' else card['audio_sent_id']
    if not await media(connection,card) or card['audio_id']==confirmed:
     continue
    chat=await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1',card['telegram_chat_id'])

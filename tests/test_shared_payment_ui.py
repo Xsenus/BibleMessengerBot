@@ -1,5 +1,4 @@
 """Conditional UI and callback ownership; no merchant or Telegram network requests."""
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest

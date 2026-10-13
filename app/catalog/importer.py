@@ -1,4 +1,4 @@
-"""Transactional, idempotent import of selected Bible editions."""
+"""Транзакционный идемпотентный импорт выбранных изданий Библии в PostgreSQL."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from app.catalog.source import SOURCE_REVISION
 from app.catalog.policy import decide_license
 from app.services.locks import lock_key
 from app.catalog.report import selection_summary
-from app.catalog.selector import SelectionItem, SelectionResult, select_translations
+from app.catalog.selector import SelectionResult, select_translations
 from app.catalog.source import BibleNlpSource
 from app.config import Settings
 
@@ -28,6 +28,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 async def seed_books(connection: asyncpg.Connection, books_path: Path | None = None) -> None:
+    """Загрузить справочник книг и их названий на языках из `data/books.json` (повторный вызов обновляет записи)."""
     path = books_path or Path(__file__).resolve().parents[2] / "data" / "books.json"
     books = json.loads(path.read_text(encoding="utf-8"))
     for item in books:
@@ -63,6 +64,7 @@ async def ensure_reference_books(
     connection: asyncpg.Connection,
     references: Iterable[VerseReference],
 ) -> None:
+    """Убедиться, что все книги из эталонной сетки есть в справочнике; недостающие добавляются как второканонические (`DC`) в конец порядка."""
     ordered_codes = list(dict.fromkeys(reference.book_code for reference in references))
     existing_rows = await connection.fetch("SELECT code FROM books WHERE code = ANY($1::text[])", ordered_codes)
     existing = {row["code"] for row in existing_rows}
@@ -83,6 +85,7 @@ async def ensure_reference_books(
 
 
 def _metadata_json(metadata: TranslationMeta) -> str:
+    """Собрать JSON дополнительных сведений об издании для записи в БД."""
     return json.dumps(
         {
             "language_name": metadata.language_name,
@@ -103,6 +106,7 @@ async def _is_up_to_date(
     connection: asyncpg.Connection,
     downloaded: DownloadedTranslation,
 ) -> bool:
+    """Проверить, что издание BibleNLP уже загружено без изменений: тот же SHA-256 и ревизия, успешный аудит, число стихов и индекс глав на месте."""
     row = await connection.fetchrow(
         """
         SELECT id, source_sha256, verse_count, audit_status, source_revision
@@ -133,6 +137,7 @@ async def import_translation(
     prepared_records: list | None = None,
     prepared_audit: CorpusAudit | None = None,
 ) -> dict[str, Any]:
+    """Импортировать издание одной транзакцией под блокировкой издания: проверить лицензию и хеш файла, выполнить аудит, записать язык и издание, заменить стихи пачками через COPY, пересобрать индекс глав и сохранить результаты аудита. Возвращает сводку."""
     metadata = downloaded.metadata
     if prepared_records is None:
         text_lines = downloaded.path.read_text(encoding="utf-8-sig").splitlines()
@@ -307,6 +312,7 @@ async def run_legacy_import(
     refresh_translations: bool = False,
     maintenance_owned: bool = False,
 ) -> dict[str, Any]:
+    """Прежний импорт только из BibleNLP (оставлен для совместимости): выбирает издания по профилю, пробует запасные варианты при сбое лучшего и ведёт запись о запуске."""
     if settings.bible_profile == "none":
         return {"status": "skipped", "reason": "BIBLE_PROFILE=none"}
 
@@ -488,7 +494,7 @@ async def run_legacy_import(
 
 async def run_import(settings: Settings, *, refresh_catalog: bool = True,
                      refresh_translations: bool = False, maintenance_owned: bool = False) -> dict[str, Any]:
-    """Default bootstrap path: independent sources, per-edition transactions, durable reports."""
+    """Основная точка импорта: запускает мультиисточниковый конвейер с параметрами из настроек и окружения."""
     from app.catalog.multisource.runner import run_multisource
     from app.catalog.multisource.types import ImportOptions
     options = ImportOptions.from_env(profile=settings.bible_profile,

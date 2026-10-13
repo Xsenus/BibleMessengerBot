@@ -1,0 +1,95 @@
+# Мониторинг и оповещения
+
+## Метрики Prometheus
+
+`GET /metrics` на административной странице (`127.0.0.1:8080`, HTTP Basic: пользователь `admin`, пароль `ADMIN_API_KEY`).
+Значения вычисляются из PostgreSQL при каждом запросе, поэтому одинаковы для всех процессов и переживают перезапуск.
+
+| Метрика | Смысл |
+|---|---|
+| `bible_deliveries{status}` | доставки по статусам |
+| `bible_oldest_outstanding_delivery_seconds` | возраст самой старой неотправленной доставки |
+| `bible_deliveries_sent_last_hour`, `bible_deliveries_failed_last_day` | поток и ошибки |
+| `bible_service_heartbeat_age_seconds{service}` | время с последнего сигнала службы |
+| `bible_chats_active`, `bible_subscriptions_enabled` | размер аудитории |
+| `bible_image_budget_spent_usd` / `bible_image_budget_limit_usd` | бюджет картинок за месяц (UTC) |
+| `bible_image_jobs{state}`, `bible_image_provider_blocked{provider}` | очередь и блокировки генераторов |
+| `bible_backup_age_seconds{kind}` | возраст последней проверенной копии |
+| `bible_announcements_active`, `bible_announcements_overdue` | активные объявления и опоздавшие более чем на 15 минут |
+| `bible_source_posts_new` | посты источников, ожидающие решения |
+| `bible_video_feeds_failing` | видеоканалы с ошибкой последнего опроса |
+| `bible_vk_inbox_pending` | необработанные события ВКонтакте |
+
+Пример `scrape_config` для Prometheus через SSH-туннель или локальный агент:
+
+```yaml
+- job_name: bible
+  metrics_path: /metrics
+  basic_auth: {username: admin, password_file: /etc/prometheus/bible-admin-key}
+  static_configs: [{targets: ['127.0.0.1:8080']}]
+```
+
+## Оповещения владельцу в Telegram
+
+`python -m app.alerts` проверяет те же данные и пишет владельцу бота (`is_owner`) при проблеме:
+служба молчит > 3 мин, неотправленная доставка > 30 мин, доставки с неопределённым исходом,
+бюджет картинок ≥ 80 %, заблокированный провайдер, копия старше 36 ч. Повтор — раз в `ALERT_REPEAT_HOURS` (6 по умолчанию),
+при исчезновении проблемы приходит сообщение «Восстановлено». Состояние хранится в `app_settings`.
+
+Запуск по таймеру systemd:
+
+```bash
+sudo cp deploy/bible-messenger-alerts.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now bible-messenger-alerts.timer
+```
+
+Разовая проверка: `docker compose --profile maintenance run --rm --no-deps alerts`.
+
+## Анонимная статистика использования
+
+Таблица `usage_events` (миграция 023) хранит только суточные счётчики `день × платформа × событие`
+(`cmd:daily`, `cb:lang` и т. п.). Идентификаторы пользователей, чатов и текст сообщений не сохраняются.
+Топ за 7 дней доступен в метрике `bible_usage_events_7d{platform,event}`; запрос вручную:
+
+```sql
+SELECT platform, event, sum(count) FROM usage_events
+WHERE day > current_date - 7 GROUP BY 1, 2 ORDER BY 3 DESC;
+```
+
+## Хранение данных (retention)
+
+`python -m app.maintenance` (службa `housekeeping`, профиль `maintenance`) удаляет небольшими пачками только устаревшие
+служебные строки; тексты Библии, настройки, подписки, платежи и история бюджета картинок не затрагиваются:
+
+| Таблица | Что удаляется | Срок по умолчанию | Переменная |
+|---|---|---|---|
+| `delivery_log` | `sent`/`skipped`, не связанные с `prayer_occurrences` | 365 дней | `RETENTION_DELIVERY_DAYS` |
+| `max_inbox` | обработанные (`done`) события вебхука | 14 дней | `RETENTION_MAX_INBOX_DAYS` |
+| `vk_inbox` | обработанные события ВКонтакте | 14 дней | `RETENTION_VK_INBOX_DAYS` |
+| `video_items` | история видео каналов | 365 дней | `RETENTION_VIDEO_ITEMS_DAYS` |
+| `source_posts` | обработанные посты источников | 180 дней | `RETENTION_SOURCE_POSTS_DAYS` |
+| `operator_events` | события оператора | 180 дней | `RETENTION_EVENTS_DAYS` |
+| `usage_events` | суточные счётчики использования | 400 дней | `RETENTION_USAGE_DAYS` |
+
+Минимальный срок — 7 дней. Незавершённые (`pending`, `retry`, `sending`, `uncertain`) и `failed` доставки не удаляются.
+Проверка без изменений: `docker compose --profile maintenance run --rm --no-deps housekeeping python -m app.maintenance --dry-run`.
+Таймер раз в неделю: `sudo cp deploy/bible-messenger-housekeeping.{service,timer} /etc/systemd/system/ && sudo systemctl enable --now bible-messenger-housekeeping.timer`.
+
+## Формат журналов
+
+По умолчанию — текст. `LOG_FORMAT=json` включает по одному JSON-объекту на строку (`ts`, `level`, `logger`, `message`, `exception`)
+для сборщиков журналов; редактирование секретов применяется в обоих форматах. `/metrics` кэшируется на 10 секунд, поэтому частые опросы не нагружают БД.
+
+
+## Prometheus и Grafana (профиль `monitoring`)
+
+```bash
+echo 'GRAFANA_PASSWORD=придумайте-пароль' >> .env
+make monitoring            # или: docker compose --profile monitoring up -d prometheus grafana
+```
+
+- Prometheus: `http://127.0.0.1:9090`, собирает `/metrics` панели (HTTP Basic: `admin` / `ADMIN_API_KEY`, пароль берётся из окружения при запуске).
+- Правила оповещений: `deploy/monitoring/alerts.yml` — служба не отвечает, очередь доставки отстаёт, неопределённые доставки, остановившиеся и медленные циклы, опаздывающие объявления, бюджет картинок, устаревшая резервная копия, сбои видеоканалов, очередь ВКонтакте.
+- Grafana: `http://127.0.0.1:3000` (логин `admin`), дашборд «BibleMessengerBot» создаётся автоматически.
+- Оба порта слушают только локальный интерфейс; для доступа извне используйте SSH-туннель или обратный прокси с авторизацией.
+- Метрики циклов: `bible_loop_duration_ms`, `bible_loop_errors_total`, `bible_loop_last_ok_age_seconds`.

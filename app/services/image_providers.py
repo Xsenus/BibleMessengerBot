@@ -1,4 +1,4 @@
-"""Fixed official image APIs. No keys or untrusted response bodies in exceptions."""
+"""Фиксированные официальные API генерации картинок; ключи и тела недоверенных ответов в исключения не попадают."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from PIL import Image
+from app.net.transport import routed_client
 from app.services.visual_scene import NEGATIVE
 
 NAMES = ("openai", "gemini", "bfl", "ideogram", "stability")
@@ -39,7 +40,9 @@ KEY_ENV = dict(
 
 
 class GenerationError(Exception):
+    """Обезличенная ошибка генерации: код, признаки «исход неизвестен» (мог быть оплачен) и «можно повторить», время ожидания."""
     def __init__(self, code, uncertain=False, retry=False, retry_after=0):
+        """Запомнить код и признаки повтора и неопределённости."""
         self.code, self.uncertain, self.retry = code, uncertain, retry
         self.retry_after = retry_after
         super().__init__(code)
@@ -47,19 +50,29 @@ class GenerationError(Exception):
 
 @dataclass(frozen=True)
 class Provider:
+    """Провайдер картинок с ключом (ключ скрыт из repr)."""
     name: str
     key: str = field(repr=False)
+    custom: dict | None = field(default=None, repr=False, compare=False)   # настройки провайдера из панели (`x-<slug>`)
 
     @property
     def model(self):
+        """Название модели провайдера."""
+        if self.custom is not None:
+            return (self.custom.get('model') or self.custom['adapter'])[:100]
         return MODELS[self.name]
 
     @property
     def reservation_usd(self):
+        """Conservative submission reserve; unknown custom pricing cannot submit."""
+        if self.custom is not None:
+            from app.services.free_image_providers import reservation_for
+            return reservation_for(self.custom)
         return RESERVES[self.name]
 
 
 def check_status(response):
+    """Преобразовать HTTP-ответ провайдера в понятную ошибку: квота (402 и коды исчерпания), модерация (в том числе 451), авторизация, лимит запросов с временем ожидания, серверная ошибка (исход неизвестен), прочий отказ. Тело ответа в диагностику не попадает."""
     if 200 <= response.status_code < 300:
         return
     status = response.status_code
@@ -100,7 +113,7 @@ def check_status(response):
 
 
 def official_url(url, provider, *, polling=False):
-    """Never forward API credentials to a generated image URL or arbitrary host."""
+    """Проверить, что адрес принадлежит официальному домену провайдера (BFL, Ideogram), HTTPS, без логина и нестандартного порта, чтобы ключ API не ушёл на посторонний адрес."""
     parsed = urlsplit(url)
     host = (parsed.hostname or "").lower()
     valid = (
@@ -122,6 +135,7 @@ def official_url(url, provider, *, polling=False):
 
 
 async def download(client, url, provider):
+    """Скачать готовую картинку по подписанной ссылке без ключа и редиректов (не более 20 МБ) и проверить её."""
     official_url(url, provider)
     # Signed delivery URLs receive no API-key header. Redirects are rejected.
     async with client.stream("GET", url, follow_redirects=False) as response:
@@ -137,7 +151,7 @@ async def download(client, url, provider):
 
 
 def normalize_download(data):
-    """Bound provider PNGs before converting oversized files for storage/Telegram."""
+    """Проверить размеры и формат картинки (PNG, JPEG, WebP, не менее 256 пикселей, до 9 млн пикселей); если файл больше 5 МБ — перекодировать в JPEG без уменьшения разрешения."""
     try:
         with Image.open(BytesIO(data)) as image:
             if (
@@ -166,14 +180,14 @@ def normalize_download(data):
 
 
 async def generate(provider, prompt, *, client=None, accepted=None, resume=None):
-    """One paid submission, or one free poll of an already persisted BFL task."""
+    """Одна платная отправка запроса провайдеру (OpenAI-совместимый путь обрабатывается выше, здесь Gemini, Ideogram, Stability и BFL) либо бесплатный опрос уже принятой задачи BFL. Возвращает (картинка, сведения об использовании, идентификатор запроса); любой неясный сбой помечается как неопределённый, чтобы не дублировать оплату."""
     if not provider.key:
         raise GenerationError("missing_key")
     if len(prompt.encode("utf-8")) > 160000:
         raise GenerationError("prompt_too_large")
     owned = client is None
-    client = client or httpx.AsyncClient(
-        timeout=httpx.Timeout(240, connect=15), follow_redirects=False
+    client = client or routed_client(
+        'images', timeout=httpx.Timeout(240, connect=15), follow_redirects=False
     )
     try:
         try:

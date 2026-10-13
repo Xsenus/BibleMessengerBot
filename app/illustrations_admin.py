@@ -1,4 +1,4 @@
-"""Export queued prompts and import generated images without calling paid APIs."""
+"""Операторская очередь иллюстраций: выгрузка запросов, добавление готовых картинок вручную, статистика и состояние провайдеров — без обращений к платным API."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from app.services import artwork, bible, illustrations
 
 
 def parser():
+    """Собрать разбор команд: `stats`, `providers`, `export`, `add` с параметрами издания, главы, стиха и файла картинки."""
     root = argparse.ArgumentParser(description="Bible verse illustration queue")
     sub = root.add_subparsers(dest="command", required=True)
     sub.add_parser("stats")
@@ -35,6 +36,7 @@ def parser():
 
 
 async def run(args):
+    """Выполнить команду очереди иллюстраций: показать статистику бюджета и провайдеров, выгрузить ожидающие запросы или добавить готовое изображение к стиху или главе."""
     c = await asyncpg.connect(
         normalize_asyncpg_dsn(Settings.from_env(require_bot_token=False).database_url)
     )
@@ -47,16 +49,11 @@ async def run(args):
             configured = image_router.providers(settings)
             health = {(r['provider'], r['key_fingerprint']): dict(r) for r in await c.fetch(
                 'SELECT provider,key_fingerprint,failures,blocked_until,error_code FROM image_provider_health')}
-            usage = await c.fetch("""SELECT provider,COALESCE(sum(reserved_usd),0) AS monthly,
-                count(*) FILTER(WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')) AS daily
-                FROM image_generation_attempts
-                WHERE created_at >= (date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
-                GROUP BY provider""")
-            daily = {r['provider']: r['daily'] for r in usage}
-            credential_usage = {(r['provider'], r['key_fingerprint']): r['daily'] for r in await c.fetch(
-                """SELECT provider,key_fingerprint,count(*) AS daily FROM image_generation_attempts
-                WHERE created_at >= (date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
-                GROUP BY provider,key_fingerprint""")}
+            usage = await image_router.budget_usage(c)
+            daily: dict[str, int] = {}
+            for record in usage:
+                daily[record['provider']] = daily.get(record['provider'], 0) + record['daily']
+            credential_usage = {(r['provider'], r['key_fingerprint']): r['daily'] for r in usage}
             provider_status = []
             for name in settings.provider_order:
                 keys = [p for p in configured if p.name == name]

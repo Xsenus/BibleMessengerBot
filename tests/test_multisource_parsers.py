@@ -4,13 +4,11 @@ import copy
 import hashlib
 from dataclasses import replace
 import pytest
-from app.catalog.models import LicenseInfo
 from app.catalog.audit import OT,NT
 from app.catalog.multisource.types import ImportOptions,safe_id
 from app.catalog.multisource.sources import source_language,language_filter_codes,make_meta
 from app.catalog.multisource.licenses import parse_license_html,ebible_id
-from app.catalog.multisource.parsers import (parse_helloao,parse_getbible,fingerprint,positive,book_code,
-    text_value,verify_records,append_verse,native_audit,CHAPTER_FLOOR,getbible_book)
+from app.catalog.multisource.parsers import (parse_helloao,parse_getbible,fingerprint,positive,native_audit,CHAPTER_FLOOR,getbible_book)
 from app.catalog.policy import decide_license
 from tests.multisource_fixtures import hello_fixture,get_fixture
 

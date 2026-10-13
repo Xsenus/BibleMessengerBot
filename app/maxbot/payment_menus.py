@@ -1,4 +1,4 @@
-"""Refresh delivered main menus after merchant configuration changes, in place."""
+"""Обновление уже доставленных главных меню MAX при подключении или отключении платежей — правкой на месте."""
 from __future__ import annotations
 
 import asyncio
@@ -18,6 +18,7 @@ LOGGER=logging.getLogger(__name__)
 
 
 async def refresh(connection,client,bot_id,stop):
+    """Если состояние платежей изменилось, отредактировать ранее отправленные главные меню (кнопка оплаты появляется или исчезает), пачками по 50; чтения, аудио и чеки не затрагиваются. Недоступные сообщения не блокируют остальные. Возвращает число обновлённых меню."""
     enabled=merchant_available()
     key=f'max:payment-menus:{bot_id}'
     state='enabled' if enabled else 'disabled'
@@ -76,6 +77,7 @@ async def refresh(connection,client,bot_id,stop):
 
 
 async def loop(pool,client,bot_id,stop):
+    """Раз в минуту запускать обновление меню до сигнала остановки; сбои логируются и не останавливают службу."""
     while not stop.is_set():
         try:
             async with pool.acquire() as connection:

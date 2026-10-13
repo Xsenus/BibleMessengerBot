@@ -1,4 +1,4 @@
-"""Dedicated speech worker; synthesis never blocks text delivery or image generation."""
+"""Служба озвучки: синтез речи идёт отдельно и не задерживает ни текст, ни генерацию картинок."""
 import asyncio
 import contextlib
 import logging
@@ -14,6 +14,7 @@ LOGGER=logging.getLogger(__name__)
 
 
 async def heartbeat(pool):
+ """Каждые 20 секунд записывать сигнал жизни службы `speaker`."""
  while True:
   async with pool.acquire() as c:
    await c.execute("INSERT INTO service_heartbeats(service) VALUES('speaker') ON CONFLICT(service) DO UPDATE SET last_seen=now()")
@@ -21,6 +22,7 @@ async def heartbeat(pool):
 
 
 async def worker():
+ """Запустить службу: единственный экземпляр; раз в секунду обновлять профили голосов, привязывать озвучку к карточкам языков, рассылать готовые аудио и синтезировать до трёх очередных заданий."""
  settings=Settings.from_env(require_bot_token=False)
  audio=speech.SpeechSettings.from_env()
  await wait_for_database(settings)

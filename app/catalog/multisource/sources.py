@@ -1,12 +1,9 @@
-"""Three real acquisition adapters, each with separate identifiers and attribution."""
+"""Три реальных адаптера получения изданий (BibleNLP/eBible, getBible, HelloAO) — у каждого свои идентификаторы и атрибуция."""
 from __future__ import annotations
 
-import json
 import os
 import re
 from dataclasses import replace
-from pathlib import Path
-from typing import Any
 
 from app.catalog.audit import audit_corpus
 from app.catalog.models import DownloadedTranslation, LicenseInfo, TranslationMeta
@@ -16,7 +13,7 @@ from app.catalog.multisource.transport import Downloader, HttpStatusError, diges
 from app.catalog.multisource.types import Candidate, Prepared, safe_id
 from app.catalog.profiles import ISO_639_1_TO_3
 from app.catalog.references import pair_verses, parse_reference_lines
-from app.catalog.source import BibleNlpSource, SOURCE_REVISION, _to_date
+from app.catalog.source import BibleNlpSource, SOURCE_REVISION
 
 
 # Source language codes remain distinct: modern/biblical Hebrew and Arabic dialects are not one language.
@@ -26,6 +23,7 @@ LANGUAGE_FAMILIES = ({'ara','arb'}, {'fas','pes'}, {'zho','cmn'}, {'msa','zlm'},
 
 
 def source_language(code: str) -> str:
+    """Привести код языка источника к трёхбуквенному виду; близкие, но разные языки (иврит, диалекты арабского) не склеиваются. Неверный формат — ValueError."""
     if not isinstance(code,str) or not re.fullmatch(r'[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*',code):
         raise ValueError('Invalid source language code')
     primary=code.replace('_','-').split('-')[0].lower()
@@ -33,6 +31,7 @@ def source_language(code: str) -> str:
 
 
 def language_filter_codes(code: str) -> set[str]:
+    """Набор кодов языка для фильтра с учётом семей (например, `ara`/`arb`, `zho`/`cmn`), чтобы выбор находил издания обоих вариантов кода."""
     original=source_language(code)
     for family in LANGUAGE_FAMILIES:
         if original in family:return set(family)
@@ -41,6 +40,7 @@ def language_filter_codes(code: str) -> set[str]:
 
 def make_meta(identifier: str,language: str,title: str,*,name: str='',english_name: str='',license_type: str='',
               license_url: str='',notice: str='',url: str='',direction: str='ltr',short_title: str='',extra=None) -> TranslationMeta:
+    """Собрать описание издания (TranslationMeta) из полей каталога источника: язык, названия, лицензия, примечание о правах, адрес и направление письма."""
     return TranslationMeta(source_language(language),safe_id(identifier),name or language,english_name or name or language,
         str(title),str(title),True,notice,url,0,0,0,0,0,0,0,0,0,
         direction.lower() if direction.lower() in {'ltr','rtl'} else 'ltr',True,short_title,'',None,
@@ -48,24 +48,32 @@ def make_meta(identifier: str,language: str,title: str,*,name: str='',english_na
 
 
 class Source:
+    """Базовый класс адаптера источника: получение каталога, проверка прав и подготовка издания."""
     slug: str
     def __init__(self,downloader: Downloader):
+        """Запомнить загрузчик и подготовить список примечаний о каталоге."""
         self.downloader=downloader
         self.notes: list[str]=[]
     async def catalog(self,refresh: bool) -> list[Candidate]:
+        """Вернуть список кандидатов источника (реализуется в потомках)."""
         raise NotImplementedError
     async def permission(self,candidate: Candidate,refresh: bool) -> Candidate:
+        """Уточнить сведения о правах кандидата; по умолчанию без изменений."""
         return candidate
     async def prepare(self,candidate: Candidate,refresh: bool) -> Prepared:
+        """Скачать и проверить издание, вернув Prepared (реализуется в потомках)."""
         raise NotImplementedError
 
 
 class BibleNlp(Source):
+    """Адаптер BibleNLP/eBible: закреплённая ревизия репозитория, таблицы изданий и лицензий, файлы «один стих в строке»."""
     slug='biblenlp'
     def __init__(self,downloader: Downloader):
+        """Запомнить ревизию по умолчанию и сбросить кэш сетки стихов."""
         super().__init__(downloader);self.revision=SOURCE_REVISION;self.refs=None
 
     async def catalog(self,refresh: bool) -> list[Candidate]:
+        """Получить каталог BibleNLP (последняя ревизия или заданная в BIBLENLP_REVISION, иначе закреплённая) и разобрать таблицы изданий и лицензий."""
         requested=os.getenv('BIBLENLP_REVISION','latest').strip()
         if requested=='latest':
             try:
@@ -87,6 +95,7 @@ class BibleNlp(Source):
                 'BibleNLP Original versification',evidence={'catalog_sha256':digest_file(translations),'license_table_sha256':digest_file(licenses)}) for m in parsed]
 
     async def prepare(self,candidate: Candidate,refresh: bool) -> Prepared:
+        """Скачать файл издания и сетку стихов, сопоставить их, проверить структуру и охват (менее 80% заявленных стихов — карантин) и вернуть Prepared с хешем содержимого."""
         if self.refs is None:
             try:path=await self.downloader.fetch(self.base+'/metadata/vref.txt',refresh=refresh,max_bytes=4*1024**2)
             except HttpStatusError as exc:
@@ -115,10 +124,12 @@ class BibleNlp(Source):
 
 
 class GetBible(Source):
+    """Адаптер getBible v2: JSON-каталог и файлы изданий с собственной (native) нумерацией."""
     slug='getbible'
     base='https://api.getbible.net/v2'
 
     async def catalog(self,refresh: bool) -> list[Candidate]:
+        """Получить каталог getBible, отбрасывая структурно неверные записи (причины попадают в примечания)."""
         data,path=await self.downloader.json(self.base+'/translations.json',refresh=refresh,max_bytes=16*1024**2)
         if not isinstance(data,dict) or not data:raise ValueError('Invalid getBible catalog')
         result=[]
@@ -141,16 +152,19 @@ class GetBible(Source):
         return result
 
     async def prepare(self,candidate: Candidate,refresh: bool) -> Prepared:
+        """Скачать JSON издания и список книг и разобрать их."""
         payload,path=await self.downloader.json(candidate.url,refresh=refresh)
         books,_=await self.downloader.json(f'{self.base}/{candidate.metadata.translation_id}/books.json',refresh=refresh,max_bytes=2*1024**2)
         return parse_getbible(candidate,path,payload,books)
 
 
 class HelloAO(Source):
+    """Адаптер HelloAO: каталог доступных переводов и цельные файлы изданий."""
     slug='helloao'
     base='https://bible.helloao.org/api'
 
     async def catalog(self,refresh: bool) -> list[Candidate]:
+        """Получить каталог HelloAO, отвергая дубликаты идентификаторов и некорректные записи."""
         data,path=await self.downloader.json(self.base+'/available_translations.json',refresh=refresh,max_bytes=16*1024**2)
         rows=data.get('translations')
         if not isinstance(rows,list) or not rows:raise ValueError('Invalid HelloAO catalog')
@@ -173,11 +187,13 @@ class HelloAO(Source):
         return result
 
     async def permission(self,candidate: Candidate,refresh: bool) -> Candidate:
+        """Уточнить лицензию издания по независимым страницам eBible (или заявлению BSB)."""
         return await resolve_hello_license(candidate,self.downloader,refresh)
 
     async def prepare(self,candidate: Candidate,refresh: bool) -> Prepared:
         # Never concatenate thousands of independently updated chapters into a purported whole edition.
         # If the complete endpoint is absent, record a failure and let other sources supply editions.
+        """Скачать цельный файл издания (главы из отдельных файлов не склеиваются) и список книг и разобрать их."""
         payload,path=await self.downloader.json(candidate.url,refresh=refresh)
         books,_=await self.downloader.json(f'{self.base}/{candidate.metadata.translation_id}/books.json',refresh=refresh,max_bytes=2*1024**2)
         return parse_helloao(candidate,path,payload,books)

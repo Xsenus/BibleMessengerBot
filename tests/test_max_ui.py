@@ -7,6 +7,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from app.bot.handlers import command_target_suffix
 from app.bot.ui import main_keyboard
 from app.maxbot.ui import keyboard_attachment, payment_controls
+from app.maxbot.dispatcher import NAVIGATION
 
 
 @pytest.mark.parametrize('enabled',[False,True])
@@ -16,8 +17,9 @@ def test_main_navigation_matches_merchant_availability_in_both_languages(monkeyp
         result = keyboard_attachment(main_keyboard(locale))
         payloads = {b['payload'] for row in result['payload']['buttons'] for b in row}
         expected = {'maxcmd:/next', 'maxcmd:/today', 'maxcmd:/random', 'maxcmd:/search',
-                    'maxcmd:/settings', 'maxcmd:/help', 'maxcmd:/daily'}
+                    'maxcmd:/settings', 'maxcmd:/help', 'maxcmd:/daily', 'maxcmd:/prayerbook'}
         assert payloads == expected | ({'maxcmd:/donate'} if enabled else set())
+        assert {value.removeprefix('maxcmd:') for value in payloads} <= NAVIGATION
 
 
 def test_stale_navigation_can_remove_and_restore_payment_without_losing_other_buttons(monkeypatch):
@@ -25,9 +27,9 @@ def test_stale_navigation_can_remove_and_restore_payment_without_losing_other_bu
     original=keyboard_attachment(main_keyboard('en'))
     hidden=payment_controls(original,enabled=False)
     restored=payment_controls(hidden,enabled=True,locale='en')
-    assert sum(len(row) for row in original['payload']['buttons'])==8
-    assert sum(len(row) for row in hidden['payload']['buttons'])==7
-    assert sum(len(row) for row in restored['payload']['buttons'])==8
+    assert sum(len(row) for row in original['payload']['buttons'])==9
+    assert sum(len(row) for row in hidden['payload']['buttons'])==8
+    assert sum(len(row) for row in restored['payload']['buttons'])==9
     assert restored['payload']['buttons'][-1][0]['text']=='💳 Support'
     assert payment_controls({'type':'inline_keyboard','payload':{'buttons':[[
         {'type':'callback','text':'Pay','payload':'maxpay:100:sbp'}]]}},enabled=False) is None

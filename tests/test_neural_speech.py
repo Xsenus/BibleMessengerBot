@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from app.services import neural_speech as neural, speech,russian_speech
+from app.services import neural_speech as neural, speech
+from app.services import russian_speech
 
 
 def test_profiles_are_distinct_and_neural_chunks_are_lossless():
@@ -58,6 +59,28 @@ async def test_failed_download_never_marks_model_ready(tmp_path, monkeypatch):
             await neural.prepare(client=client)
     assert not neural.complete('rus')
     assert not list(tmp_path.rglob('*.part'))
+
+
+def test_silero_rejects_corrupt_same_size_package_before_import(tmp_path, monkeypatch):
+    data = b'pinned-model'
+    monkeypatch.setattr(russian_speech, 'MODEL', dict(name='model.pt', bytes=len(data),
+        sha256=hashlib.sha256(data).hexdigest()))
+    monkeypatch.setenv('AUDIO_MODELS_PATH', str(tmp_path))
+    root = russian_speech.directory()
+    root.mkdir(parents=True)
+    (root / 'model.pt').write_bytes(b'x' * len(data))
+    assert russian_speech.complete()                  # size alone is insufficient for packaged code
+    assert not russian_speech.complete(verify=True)
+    with pytest.raises(ValueError, match='russian_voice_not_installed'):
+        russian_speech.render('Текст', tmp_path / 'never-created.wav')
+    assert not (tmp_path / 'never-created.wav').exists()
+
+
+def test_absent_local_neural_weights_fail_without_synthesis_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv('AUDIO_MODELS_PATH', str(tmp_path))
+    with pytest.raises(ValueError, match='neural_voice_not_installed'):
+        neural.render('lat', 'In principio erat Verbum.', tmp_path / 'never-created.wav')
+    assert not (tmp_path / 'never-created.wav').exists()
 
 
 @pytest.mark.asyncio

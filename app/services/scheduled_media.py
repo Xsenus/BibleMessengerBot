@@ -1,4 +1,4 @@
-"""Prepare complete scheduled reading bundles before any Telegram submission."""
+"""Подготовка полных пакетов запланированных чтений (картинка, озвучки на всех языках и страницах) до любой отправки в Telegram."""
 from __future__ import annotations
 
 import json
@@ -22,7 +22,7 @@ AUDIO_ELIGIBILITY = """(EXISTS(SELECT 1 FROM reading_cards c WHERE c.audio_id=a.
 
 
 async def prepare(connection, delivery_id, row, edition, sub, chat, day):
-    """Freeze all offered languages/pages, keeping the initial selection intact."""
+    """Заморозить пакет для запланированного чтения: поставить в очередь картинку, срок готовности (не позднее молитвы), синтез озвучки для каждого доступного языка и страницы и, для утра/вечера, запланировать молитву. Начальный выбор языка сохраняется."""
     from app.services import prayers
     delivery=await connection.fetchrow('SELECT * FROM delivery_log WHERE id=$1',delivery_id)
     chunks=message_languages.decoded(delivery['chunks'])
@@ -57,7 +57,7 @@ async def prepare(connection, delivery_id, row, edition, sub, chat, day):
 
 
 async def ready(connection, delivery):
-    """Fail closed: never send a partial bundle or a misleading late reminder."""
+    """Проверить готовность пакета и вернуть код: `ready`, `preparing_media`, `expired` (срок вышел — чтение пропускается), `cancelled`, `source_changed` (текст стиха изменился). Частичный пакет не отправляется, а просроченное чтение не приходит с опозданием."""
     prepared=await connection.fetchrow('SELECT * FROM scheduled_readings WHERE delivery_id=$1',delivery['id'])
     if not prepared:
         return 'ready'

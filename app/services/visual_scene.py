@@ -1,4 +1,4 @@
-"""A free local planner supplies scene descriptions to literal diffusion models."""
+"""Бесплатный локальный планировщик сцен: описывает буквальную картину для диффузионных моделей."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ NEGATIVE = "text, letters, words, numbers, typography, captions, watermarks, log
 
 
 async def describe(prompt, *, client=None):
+    """Через локальную модель (`prayer-ai`) получить описание одной конкретной древней библейской сцены по замороженному отрывку из запроса: отрывок — недоверенные данные, ответ проверяется (80–1600 символов, без разметки и слов о тексте, книгах и надписях), чтобы на картинке не было букв. Возвращает описание со стилевым окончанием."""
     endpoint = os.getenv("PRAYER_AI_URL", "http://prayer-ai:8080")
     url = urlsplit(endpoint)
     if (

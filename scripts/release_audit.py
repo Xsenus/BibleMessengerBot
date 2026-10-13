@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
-"""Record reproducible OFFLINE checks, with unexecuted integration work kept explicit.
-
-Running this script writes runtime-evidence/offline/ and preserves published release reports. It does not sign the package, run
-Docker, silently install dependencies, or turn skipped tests into passed tests.
-"""
+"""Офлайн-аудит релиза: запись воспроизводимых проверок и явный список невыполненных интеграционных проверок."""
 from __future__ import annotations
-import hashlib
+import argparse
 import importlib.util
 import json
 import os
@@ -14,7 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -22,20 +18,21 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE = ROOT / 'runtime-evidence' / 'offline'
-EXCLUDED = {'.git','__pycache__','.pytest_cache','.ruff_cache','.venv','venv','backups','cache','runtime-evidence','work','.serena'}
+EXCLUDED = {'.git','__pycache__','.pytest_cache','.ruff_cache','.venv','venv','backups','cache','runtime-evidence','work','.serena','node_modules'}
 TOKEN = re.compile(r'\b\d{6,14}:[A-Za-z0-9_-]{30,}\b')
 
 
 def project_files() -> list[Path]:
-    """Select distributed source files, not runtime state or bytecode."""
+    """Список файлов проекта для проверки (без рабочих каталогов, кэшей и байт-кода)."""
     return sorted(p for p in ROOT.rglob('*') if p.is_file()
                   and not set(p.relative_to(ROOT).parts).intersection(EXCLUDED))
 
 
 def command(name: str, args: list[str]) -> dict[str,Any]:
-    """Execute once, capture the full log and record a genuine exit code."""
+    """Выполнить команду проверки один раз, сохранить полный журнал и записать реальный код возврата."""
     try:
-        result = subprocess.run(args,cwd=ROOT,text=True,stdout=subprocess.PIPE,
+        result = subprocess.run(args,cwd=ROOT,text=True,encoding='utf-8',errors='replace',stdout=subprocess.PIPE,
+                                env={**os.environ, 'PYTHONUTF8': '1'},
                                 stderr=subprocess.STDOUT,timeout=180,check=False)
         code,output = result.returncode,result.stdout
     except (OSError,subprocess.TimeoutExpired) as exc:
@@ -47,7 +44,7 @@ def command(name: str, args: list[str]) -> dict[str,Any]:
 
 
 def main() -> int:
-    """Run offline validation and explicitly report missing integration prerequisites."""
+    """Запустить офлайн-проверки (компиляция, тесты, синтаксис скриптов, разбор JSON/YAML, поиск токенов) и сохранить отчёт; код возврата 0, если ошибок нет."""
     EVIDENCE.mkdir(parents=True,exist_ok=True)
     checks = [command('COMPILE',[sys.executable,'-m','compileall','-q','app','tests','scripts']),
               command('TESTS',[sys.executable,'-m','pytest','-o','addopts=','-q','-rs',
@@ -88,8 +85,8 @@ def main() -> int:
     checks.append({'name':'BASIC_SECRET_AND_PATH_SCAN','status':'failed' if unsafe else 'passed',
                    'matches':unsafe,'limitation':'A basic pattern scan, not a full security audit.'})
     required=['README.md','VERSION','Dockerfile','docker-compose.yml','.env.example','install.sh',
-              'sql/schema.sql','sql/migrations/002_hardening.sql','sql/migrations/003_multisource.sql','fill_database.sh','app/catalog/multisource/cli.py','docs/MULTISOURCE_IMPORT_RU.md','app/bootstrap.py','app/bot/main.py',
-              'app/worker/main.py','app/web/main.py','docs/LIMITATIONS.md','docs/LANGUAGE-MATRIX.md',
+              'sql/schema.sql','sql/migrations/002_hardening.sql','sql/migrations/003_multisource.sql','fill_database.sh','app/catalog/multisource/cli.py','docs/reference/multisource-import.md','app/bootstrap.py','app/bot/main.py',
+              'app/worker/main.py','app/web/main.py','docs/reference/limitations.md','docs/reference/language-matrix.md',
               'tests/test_postgres_integration.py','tests/test_aiogram_contracts.py']
     missing=[p for p in required if not (ROOT/p).is_file()]
     checks.append({'name':'REQUIRED_FILES','status':'failed' if missing else 'passed','missing':missing})
@@ -109,9 +106,9 @@ def main() -> int:
     if not env['modules']['asyncpg'] or os.getenv('RUN_DB_TESTS')!='1':
         not_executed.insert(0,'Actual PostgreSQL/asyncpg integration: missing asyncpg or RUN_DB_TESTS is not enabled.')
     ok=all(c['status']=='passed' for c in checks)
-    profiles=json.loads((ROOT/'data/language_profiles.json').read_text())
+    profiles=json.loads((ROOT/'data/language_profiles.json').read_text(encoding='utf-8'))
     report={'project':'BibleMessengerBot','version':(ROOT/'VERSION').read_text().strip(),
-            'generated_at_machine_clock':datetime.now(timezone.utc).isoformat(),'release_context_date':'2026-09-22',
+            'generated_at_machine_clock':datetime.now(UTC).isoformat(),'release_context_date':'2026-09-22',
             'status':'OFFLINE_PASS_LIVE_UNVERIFIED' if ok else 'OFFLINE_FAILED',
             'tests':tests,'checks':checks,'environment':env,
             'ui_catalogs':len(list((ROOT/'locales').glob('*.json'))),
@@ -134,9 +131,10 @@ def main() -> int:
     lines += ['', '## Фактическое наполнение', '',
               f"Каталогов UI: {report['ui_catalogs']}. Источников: 3. Профиль all-open не ограничен списком из 56 языков, но фильтрует лицензии и формат. Полностью скачанных изданий в ZIP: **0**. Готового дампа нет.",
               '', 'Установщик должен выполнить реальные интеграционные тесты, импорт и аудит на VPS. До их успешного завершения публикации не запускаются. Это дополнительная проверка на сервере, а не уже выполненная здесь работа. Гарантии отсутствия всех ошибок нет.']
-    (EVIDENCE/'RELEASE-AUDIT.md').write_text('\n'.join(lines)+'\n')
+    (EVIDENCE/'RELEASE-AUDIT.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
     print(json.dumps({'status':report['status'],'tests':tests,'report':str((EVIDENCE/'RELEASE-AUDIT.json').relative_to(ROOT))},ensure_ascii=False,indent=2))
     return 0 if ok else 1
 
 if __name__=='__main__':
+    argparse.ArgumentParser(description=__doc__).parse_args()
     raise SystemExit(main())

@@ -1,4 +1,4 @@
-"""Database bootstrap entry point used by Docker Compose."""
+"""Подготовка базы перед запуском служб: миграции, справочники, необязательный импорт Библии и итоговая проверка целостности."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 async def bootstrap(settings: Settings | None = None) -> dict[str, object]:
+    """Выполнить полный цикл подготовки: дождаться БД, взять эксклюзивную блокировку обслуживания и запустить `bootstrap_locked`. Возвращает отчёт."""
     settings = settings or Settings.from_env(require_bot_token=False)
     await wait_for_database(settings)
     async with maintenance(settings):
@@ -27,7 +28,7 @@ async def bootstrap(settings: Settings | None = None) -> dict[str, object]:
 
 
 async def bootstrap_locked(settings: Settings) -> dict[str,object]:
-    """Run the entire upgrade/import/readiness operation under the maintenance guard."""
+    """Внутри блокировки обслуживания: применить схему, загрузить справочники, при необходимости импортировать издания и обязательно проверить БД. Ошибкой завершается, если не получено ни одного издания или проверка не пройдена."""
     await apply_schema(settings)
 
     connection = await asyncpg.connect(normalize_asyncpg_dsn(settings.database_url), timeout=30)
@@ -64,6 +65,7 @@ async def bootstrap_locked(settings: Settings) -> dict[str,object]:
 
 
 def main() -> None:
+    """Точка входа `python -m app.bootstrap`: настроить журнал, выполнить подготовку и напечатать отчёт JSON."""
     configure_logging()
     print(json.dumps(asyncio.run(bootstrap()), ensure_ascii=False, indent=2))
 

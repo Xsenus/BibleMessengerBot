@@ -1,4 +1,4 @@
-"""Select editions by language profile, coverage, and explicit license policy."""
+"""Выбор изданий по профилю языков, покрытию и лицензионной политике."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from app.catalog.profiles import preferred_ids, profile_languages
 
 @dataclass(frozen=True, slots=True)
 class SelectionItem:
+    """Кандидат: описание издания, решение по лицензии и оценка пригодности."""
     metadata: TranslationMeta
     decision: LicenseDecision
     score: tuple[int, int, int, int, str]
@@ -19,6 +20,7 @@ class SelectionItem:
 
 @dataclass(slots=True)
 class SelectionResult:
+    """Итог выбора: выбранные, отклонённые, недостающие языки и кандидаты по языкам."""
     selected: list[SelectionItem]
     rejected: list[SelectionItem]
     missing_languages: list[str]
@@ -26,6 +28,7 @@ class SelectionResult:
 
 
 def score_translation(metadata: TranslationMeta) -> tuple[int, int, int, int, str]:
+    """Оценка издания для сортировки: покрытие (полная Библия лучше), предпочтительный идентификатор из профиля, число стихов, сертификация и идентификатор для стабильного порядка."""
     preferred = preferred_ids(metadata.language_code)
     identifier = metadata.translation_id.lower()
     preference_score = 0
@@ -62,6 +65,7 @@ def select_translations(
     allow_restricted: bool = False,
     allow_unknown: bool = False,
 ) -> SelectionResult:
+    """Выбрать издания из каталога: оставить язык профиля, проверить лицензию, отсортировать по оценке и взять лучшие `max_editions_per_language` (для `all-open` — все допустимые). Возвращает также отклонённые и языки, для которых ничего не нашлось."""
     target_languages = profile_languages(profile)
     target_set = set(target_languages) if target_languages is not None else None
     accepted_by_language: dict[str, list[SelectionItem]] = defaultdict(list)
@@ -82,7 +86,7 @@ def select_translations(
             rejected.append(item)
 
     selected: list[SelectionItem] = []
-    for language_code, items in accepted_by_language.items():
+    for _language_code, items in accepted_by_language.items():
         items.sort(key=lambda item: item.score, reverse=True)
         if profile == "all-open":
             selected.extend(items)

@@ -1,4 +1,4 @@
-"""MAX cards, original-message edits and MP3 using shared approved media assets."""
+"""Отправка в MAX: карточки, правка исходных сообщений и MP3 с теми же проверками допустимых материалов, что и в Telegram."""
 from __future__ import annotations
 
 import hashlib
@@ -17,7 +17,7 @@ from app.services.formatting import escape
 
 
 async def audio_caption(connection, card, locale):
-    """Name the exact language/page's source rather than send an anonymous MP3."""
+    """Подпись к аудио: «🔊 Озвучка» и названия до трёх глав/стихов, которые озвучены (а не безымянный MP3)."""
     from app.services import bible
     edition = await bible.find_translation(connection, card['selected_translation_id'])
     if not edition:
@@ -35,7 +35,7 @@ async def audio_caption(connection, card, locale):
 
 
 def image_upload(data: bytes, mime: str) -> tuple[bytes, str, str]:
-    """MAX lacks WebP uploads; transcode approved bytes without altering the DB asset."""
+    """Подготовить картинку для MAX: WebP не поддерживается, поэтому он перекодируется в JPEG (в БД оригинал не меняется); допустимы PNG и JPEG. Возвращает (байты, расширение, MIME)."""
     if mime == 'image/webp':
         with Image.open(io.BytesIO(data)) as source:
             buffer = io.BytesIO()
@@ -47,17 +47,21 @@ def image_upload(data: bytes, mime: str) -> tuple[bytes, str, str]:
 
 
 class MaxSender:
-    """Use positive local message checkpoints and bot-scoped MAX upload tokens."""
+    """Отправитель сообщений MAX: локальные контрольные точки сообщений и загрузка медиа с токенами, привязанными к боту."""
 
     def __init__(self, client: MaxClient, bot_id: int, connection: Any):
+        """Запомнить клиент MAX, ID бота и соединение с БД."""
         self.client, self.bot_id, self.connection = client, bot_id, connection
 
     async def media(self, kind: str, identifier: int) -> dict:
+        """Получить вложение для картинки или аудио: каждый раз проверяется, что материал одобрен (карантин не обходится кэшем); при отсутствии кэша файл загружается в MAX и вложение сохраняется в `max_media`."""
         if type(identifier) is not int or identifier <= 0:
             raise SendError('rejected')
         # Check asset approval on every reuse: a cached token cannot revive quarantine.
         if kind == 'image':
-            asset = await self.connection.fetchrow("SELECT image_data,mime_type FROM verse_illustrations WHERE id=$1 AND status='ready'", identifier)
+            asset = await self.connection.fetchrow("SELECT image_data,mime_type FROM verse_illustrations WHERE id=$1 AND status='ready' AND quarantined_at IS NULL", identifier)
+        elif kind == 'asset':
+            asset = await self.connection.fetchrow("SELECT data AS image_data,mime_type FROM media_assets WHERE id=$1", identifier)
         else:
             asset = await self.connection.fetchrow("SELECT audio_data FROM reading_audio WHERE id=$1 AND state='ready'", identifier)
         if not asset:
@@ -65,12 +69,12 @@ class MaxSender:
         cached = await self.connection.fetchval('SELECT payload FROM max_media WHERE bot_id=$1 AND kind=$2 AND asset_id=$3', self.bot_id, kind, identifier)
         if cached:
             return json.loads(cached) if isinstance(cached, str) else cached
-        if kind == 'image':
+        if kind in {'image', 'asset'}:
             data, suffix, mime = image_upload(bytes(asset['image_data']), asset['mime_type'])
         else:
             data, suffix, mime = bytes(asset['audio_data']), 'mp3', 'audio/mpeg'
         try:
-            payload = await self.client.upload(kind, data, f'reading-{identifier}.{suffix}', mime)
+            payload = await self.client.upload('image' if kind == 'asset' else kind, data, f'reading-{identifier}.{suffix}', mime)
         except MaxAPIError as error:
             # Media preparation has not sent a visible message yet. A safe retry
             # does not repeat a delivered reading or another paid generation.
@@ -81,6 +85,7 @@ class MaxSender:
         return payload
 
     async def welcome_media(self, expected_digest: str) -> dict:
+        """Вложение с картинкой приветствия: проверяет хеш файла, загружает один раз и кэширует."""
         from app.bot.ui import WELCOME_PATH
         data = WELCOME_PATH.read_bytes()
         digest = hashlib.sha256(data).hexdigest()
@@ -100,7 +105,7 @@ class MaxSender:
 
     async def send(self, chat_id: int, text: str | dict, thread_id: int | None = None,
                    *, reply_markup: Any = None) -> int:
-        """A lost send ACK is uncertain; retrying a fixed original edit is safe."""
+        """Отправить или отредактировать часть сообщения в MAX: тексты, картинки, карточки языков, клавиатура и аудио-ответ на исходное чтение. Потерянное подтверждение отправки — неопределённый исход, а повтор правки безопасен. Возвращает локальный ID сообщения."""
         editing = isinstance(text, dict) and text.get('kind') == 'rich_edit'
         try:
             if thread_id is not None:
@@ -119,6 +124,9 @@ class MaxSender:
                 if kind in {'rich', 'rich_edit'} and chunk.get('card_id'):
                     from app.services.message_languages import outgoing
                     chunk, reply_markup = await outgoing(self.connection, chat_id, chunk)
+                from app.services.illustrations import without_quarantined_image
+                chunk = await without_quarantined_image(self.connection, chunk)
+                kind = chunk.get('kind')
                 if kind == 'max_audio':
                     # Authorization of the card/message happens again at send time.
                     card = await self.connection.fetchrow('''SELECT * FROM reading_cards
@@ -133,12 +141,14 @@ class MaxSender:
                     keyboard = keyboard_attachment(None, locale=locale, navigation=navigation)
                     if keyboard:
                         attachments.append(keyboard)
-                elif kind in {'rich', 'rich_edit', 'photo', 'max_text', 'max_welcome'}:
+                elif kind in {'rich', 'rich_edit', 'photo', 'asset_photo', 'max_text', 'max_welcome'}:
+                    if kind == 'asset_photo':
+                        attachments.append({'type': 'image', 'payload': await self.media('asset', chunk.get('asset_id'))})
                     if kind == 'max_welcome':
                         attachments.append({'type': 'image', 'payload': await self.welcome_media(chunk.get('asset_sha256'))})
                     if chunk.get('image_id'):
                         attachments.append({'type': 'image', 'payload': await self.media('image', chunk['image_id'])})
-                    content = chunk.get('caption', '') if kind == 'photo' else chunk.get('text')
+                    content = chunk.get('caption', '') if kind in {'photo', 'asset_photo'} else chunk.get('text')
                     if not isinstance(content, str):
                         raise SendError('rejected')
                     if chunk.get('card_id') and chunk.get('audio_id'):

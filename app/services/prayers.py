@@ -1,7 +1,9 @@
-"""Local, free AI selects prayer intentions from date-checked primary news feeds."""
+"""Молитва дня: локальная бесплатная модель (или правила по ключевым словам) выбирает темы прошений по свежим новостям ООН, а формулировки меняются по датам."""
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -17,18 +19,117 @@ from app.services.formatting import escape, plain_text
 from app.services.locks import chat_lock, lock_key
 from app.services.scheduling import on_date
 
+LOGGER = logging.getLogger(__name__)
+
+# Темы прошений. Для каждой темы — несколько формулировок на русском и английском:
+# вариант выбирается по дате, поэтому одна и та же тема не звучит одинаково изо дня в день.
 INTENTIONS = {
- 'peace': ('Принеси мир туда, где звучит оружие, и укрепи тех, кто ищет примирения.', 'Bring peace where weapons sound, and strengthen those seeking reconciliation.'),
- 'health': ('Поддержи больных и дай силы врачам и всем, кто заботится о ближних.', 'Support the sick and strengthen doctors and everyone caring for others.'),
- 'shelter': ('Помоги людям, лишившимся дома, обрести безопасность, пищу и заботу.', 'Help those who have lost their homes find safety, food and care.'),
- 'children': ('Огради детей от страха и насилия, даруй им заботу и надежду.', 'Protect children from fear and violence, and give them care and hope.'),
- 'justice': ('Дай мудрость тем, кто принимает решения, и защити достоинство каждого человека.', 'Give wisdom to those making decisions, and protect every person’s dignity.'),
- 'environment': ('Укрепи пострадавших от стихийных бедствий и научи нас беречь Твоё творение.', 'Strengthen those affected by disasters and teach us to care for Your creation.'),
- 'gratitude': ('Научи нас замечать добро и отвечать на нужду ближнего делом и милосердием.', 'Teach us to notice goodness and respond to our neighbours’ needs with kindness and action.'),
+ 'peace': (
+  ('Принеси мир туда, где звучит оружие, и укрепи тех, кто ищет примирения.',
+   'Утешь пострадавших от войн и насилия и открой путь к справедливому миру.',
+   'Останови вражду между народами и дай силы тем, кто защищает мирных людей.'),
+  ('Bring peace where weapons sound, and strengthen those seeking reconciliation.',
+   'Comfort those hurt by war and violence, and open a way to a just peace.',
+   'Stop enmity between peoples and strengthen those who protect civilians.')),
+ 'health': (
+  ('Поддержи больных и дай силы врачам и всем, кто заботится о ближних.',
+   'Исцели страдающих от болезней и защити людей там, где вспышки эпидемий.',
+   'Дай терпение больным, мудрость врачам и доступ к лечению всем нуждающимся.'),
+  ('Support the sick and strengthen doctors and everyone caring for others.',
+   'Heal those who suffer from illness and protect people where outbreaks spread.',
+   'Give patience to the sick, wisdom to doctors and access to care for all in need.')),
+ 'shelter': (
+  ('Помоги людям, лишившимся дома, обрести безопасность, пищу и заботу.',
+   'Согрей беженцев и вынужденных переселенцев и дай им надёжный кров.',
+   'Огради странников и мигрантов от опасности и подари им гостеприимство.'),
+  ('Help those who have lost their homes find safety, food and care.',
+   'Warm refugees and displaced families and give them a safe shelter.',
+   'Protect travellers and migrants from danger and grant them welcome.')),
+ 'children': (
+  ('Огради детей от страха и насилия, даруй им заботу и надежду.',
+   'Сохрани детей, оказавшихся в беде, и верни им детство, безопасность и радость.',
+   'Укрепи семьи, воспитывающие детей в трудное время, и дай детям будущее.'),
+  ('Protect children from fear and violence, and give them care and hope.',
+   'Keep safe children in distress and restore their childhood, security and joy.',
+   'Strengthen families raising children in hard times, and give children a future.')),
+ 'justice': (
+  ('Дай мудрость тем, кто принимает решения, и защити достоинство каждого человека.',
+   'Защити права слабых и невинно задержанных и укрепи справедливый суд.',
+   'Научи правителей служить правде и не оставляй без защиты униженных.'),
+  ('Give wisdom to those making decisions, and protect every person’s dignity.',
+   'Defend the rights of the weak and the wrongly detained, and uphold fair justice.',
+   'Teach leaders to serve truth and do not leave the humiliated unprotected.')),
+ 'environment': (
+  ('Укрепи пострадавших от стихийных бедствий и научи нас беречь Твоё творение.',
+   'Утешь тех, кто потерял всё из-за наводнений, пожаров и землетрясений.',
+   'Дай нам бережно относиться к земле и помогать тем, кого коснулись перемены климата.'),
+  ('Strengthen those affected by disasters and teach us to care for Your creation.',
+   'Comfort those who lost everything to floods, fires and earthquakes.',
+   'Teach us to treat the earth with care and to help those touched by a changing climate.')),
+ 'hunger': (
+  ('Накорми голодных, поддержи земледельцев и пробуди в нас щедрость к нуждающимся.',
+   'Пошли хлеб тем, кто страдает от голода, и открой сердца для делящихся пищей.'),
+  ('Feed the hungry, support farmers and awaken generosity toward those in need.',
+   'Send bread to those who suffer hunger and open hearts of those who share food.')),
+ 'education': (
+  ('Благослови учителей и учеников и открой каждому ребёнку дорогу к знанию.',
+   'Помоги тем, у кого отняли возможность учиться, и укрепи тех, кто их учит.'),
+  ('Bless teachers and students and open the way to learning for every child.',
+   'Help those denied the chance to study and strengthen those who teach them.')),
+ 'work': (
+  ('Поддержи тех, кто потерял работу или живёт в нужде, и дай мудрость в трудах и заботе о бедных.',
+   'Укрепи людей, которые трудятся ради семьи, и помоги выйти из нищеты.'),
+  ('Support those who lost work or live in need, and give wisdom in labour and care for the poor.',
+   'Strengthen people who labour for their families and help them out of poverty.')),
+ 'aid': (
+  ('Благослови гуманитарных работников, спасателей и добровольцев и сохрани их в пути.',
+   'Дай силы тем, кто спешит на помощь пострадавшим, и защити их от опасности.'),
+  ('Bless humanitarian workers, rescuers and volunteers and keep them safe on their way.',
+   'Strengthen those who hurry to help the afflicted and protect them from danger.')),
+ 'gratitude': (
+  ('Научи нас замечать добро и отвечать на нужду ближнего делом и милосердием.',
+   'Сделай нас благодарными за каждый день и готовыми разделить радость с другими.'),
+  ('Teach us to notice goodness and respond to our neighbours’ needs with kindness and action.',
+   'Make us thankful for each day and ready to share joy with others.')),
 }
 
+# Подстроки заголовков (в нижнем регистре, ru + en) для отбора тем без нейросети.
+KEYWORDS = {
+ 'peace': ('war', 'conflict', 'ceasefire', 'attack', 'strike', 'hostilit', 'violence', 'peacekeep', 'security council',
+           'войн', 'конфликт', 'перемири', 'обстрел', 'насили', 'вооружён', 'вооружен', 'миротвор', 'ракет', 'теракт'),
+ 'health': ('health', 'disease', 'outbreak', 'virus', 'vaccin', 'cholera', 'malaria', 'hospital', 'epidemic', 'pandemic',
+            'здоров', 'болезн', 'вирус', 'вакцин', 'эпидеми', 'больниц', 'холер', 'малярии'),
+ 'shelter': ('refugee', 'displace', 'shelter', 'migrant', 'flee', 'homeless', 'asylum',
+             'беженц', 'перемещ', 'убежищ', 'мигрант', 'бездомн', 'эвакуац'),
+ 'children': ('child', 'girls', 'unicef', 'orphan', 'youth', 'дет', 'ребен', 'ребён', 'юнисеф', 'сирот', 'молодеж', 'молодёж'),
+ 'justice': ('rights', 'justice', 'court', 'tribunal', 'hostage', 'torture', 'discriminat', 'corruption', 'detain',
+             'права', 'правосуд', ' суд', 'пытк', 'заложник', 'дискримин', 'коррупц', 'задержан'),
+ 'environment': ('climate', 'flood', 'earthquake', 'hurricane', 'drought', 'wildfire', 'storm', 'disaster', 'cyclone',
+                 'tsunami', 'environment', 'климат', 'наводнен', 'землетряс', 'ураган', 'засух', 'пожар', 'шторм',
+                 'бедств', 'катастроф', 'окружающ', 'стихи'),
+ 'hunger': ('hunger', 'famine', 'food', 'malnutrition', 'harvest', 'starv', 'wfp',
+            'голод', 'продовольств', 'питани', 'недоедан', 'урожа'),
+ 'education': ('education', 'school', 'teacher', 'literacy', 'students', 'образован', 'школ', 'учител', 'обучен', 'студент'),
+ 'work': ('poverty', 'economy', 'economic', 'jobs', 'labour', 'labor', 'unemploy', 'debt', 'trade',
+          'бедност', 'нищет', 'экономик', 'занятост', 'безработ', 'долг', 'торговл'),
+ 'aid': ('humanitarian', 'relief', 'rescue', 'volunteer', 'aid ', ' aid', 'гуманитар', 'спасател', 'волонтёр', 'волонтер', 'помощь'),
+}
 
-COMPOSITION_VERSION = 2
+OPENINGS = (
+ ('Господи, услышь нашу молитву.', 'Господи, прими нашу молитву.', 'Господи Боже, милостиво услышь нас.'),
+ ('Lord, hear our prayer.', 'Lord, receive our prayer.', 'Merciful God, hear us.'),
+)
+CLOSINGS = (
+ ('Даруй нам мир в сердце и силы помогать друг другу. Аминь.',
+  'Укрепи нашу веру и сделай нас добрыми к людям рядом. Аминь.',
+  'Наполни нас надеждой и научи действовать с любовью. Аминь.'),
+ ('Give us peace in our hearts and strength to help one another. Amen.',
+  'Strengthen our faith and make us kind to those near us. Amen.',
+  'Fill us with hope and teach us to act with love. Amen.'),
+)
+
+
+COMPOSITION_VERSION = 3
 COMMON_PRAYER = {
  'ru': 'Благодарим Тебя за Твои дары. Благослови наших близких, храни их здоровье и поддержи в трудностях. Укрепи нашу церковь в вере, любви и служении. Даруй мир людям и народам, помоги разрешать конфликты без насилия и примирять враждующих.',
  'en': 'We thank You for Your gifts. Bless our loved ones, protect their health and support them in hardship. Strengthen our church in faith, love and service. Grant peace to people and nations, help resolve conflicts without violence and bring reconciliation.',
@@ -36,7 +137,7 @@ COMMON_PRAYER = {
 
 
 def with_common_prayer(text, locale):
-    """Fixed petitions cannot be omitted by AI or lost during a news outage."""
+    """Гарантировать наличие обязательных прошений (о близких, здоровье, церкви, дарах, мире и конфликтах): их нельзя потерять ни из-за нейросети, ни из-за недоступных новостей; «Аминь» остаётся в конце."""
     common = COMMON_PRAYER['ru' if locale=='ru' else 'en']
     if common in text:
         return text
@@ -48,6 +149,7 @@ def with_common_prayer(text, locale):
 
 
 def reminder(prayer_at, locale='ru', *, timezone_name='UTC', now=None):
+    """Напоминание перед молитвой: сколько минут осталось и местное время (например, «До совместной молитвы — 38 минут (09:38)»), а в момент молитвы — приглашение остановиться."""
     remaining=math.ceil((prayer_at-(now or datetime.now(UTC))).total_seconds()/60)
     clock=prayer_at.astimezone(ZoneInfo(timezone_name)).strftime('%H:%M')
     if locale=='ru':
@@ -60,6 +162,7 @@ def reminder(prayer_at, locale='ru', *, timezone_name='UTC', now=None):
 
 
 async def nearby_time(connection, sub, day):
+    """Время молитвы, связанное с подпиской: для утра/вечера — его собственное, для остальных режимов — ближайшее время молитвы того же чата в течение часа после чтения."""
     if sub['mode'] in {'morning_verse','evening_verse'}:
         return on_date(day,sub['send_time'],sub['timezone'])
     candidates=await connection.fetch("SELECT * FROM subscriptions WHERE telegram_chat_id=$1 AND is_enabled AND mode IN ('morning_verse','evening_verse')",sub['telegram_chat_id'])
@@ -71,8 +174,19 @@ async def nearby_time(connection, sub, day):
     return None
 
 
+# Окно свежести новостей. Строгая «сегодняшняя дата по местному времени» оставляла утреннюю молитву
+# в часовых поясах далеко к востоку от Нью-Йорка почти без новостей, и бот каждый день падал
+# на одну и ту же общую молитву. Берём публикации за последние 18 часов (но не из будущего).
+NEWS_WINDOW = timedelta(hours=18)
+
+
 def parse_feed(data, day, timezone_name, *, now=None):
-    """Headlines are untrusted source data; require a real, current publication date."""
+    """Разобрать RSS ООН: заголовки — недоверенные данные, нужна настоящая свежая дата публикации.
+
+    Принимаются только записи, опубликованные не раньше чем NEWS_WINDOW назад и не позже
+    чем через 5 минут от «сейчас»; ссылки — только https://news.un.org без учётных данных.
+    Параметр ``day`` оставлен для совместимости: он задаёт верхнюю границу даты.
+    """
     if len(data)>512_000 or b'<!DOCTYPE' in data.upper() or b'<!ENTITY' in data.upper():
         raise ValueError('news_feed_invalid')
     current=now or datetime.now(UTC)
@@ -84,7 +198,8 @@ def parse_feed(data, day, timezone_name, *, now=None):
             title=plain_text(item.findtext('title') or '').strip()
             link=item.findtext('link') or ''
             url=urlsplit(link)
-            if not published.tzinfo or published>current+timedelta(minutes=5) or published.astimezone(zone).date()!=day:
+            if (not published.tzinfo or published>current+timedelta(minutes=5) or current-published>NEWS_WINDOW
+                    or published.astimezone(zone).date()>day):
                 continue
             if url.scheme!='https' or url.hostname!='news.un.org' or url.username or len(link)>1000:
                 continue
@@ -96,6 +211,7 @@ def parse_feed(data, day, timezone_name, *, now=None):
 
 
 async def fetch_news(day, timezone_name, locale, *, client=None, now=None):
+    """Загрузить заголовки UN News (русская лента, при её пустоте — английская) с ограничением размера; ошибки логируются, результат — свежие записи или пустой список."""
     feeds=('ru','en') if locale=='ru' else ('en',)
     owned=client is None
     client=client or httpx.AsyncClient(timeout=20,follow_redirects=False)
@@ -113,8 +229,11 @@ async def fetch_news(day, timezone_name, locale, *, client=None, now=None):
                 items=parse_feed(bytes(data),day,timezone_name,now=now)
                 if items:
                     return items
-            except (httpx.HTTPError,ValueError,ET.ParseError):
+            except (httpx.HTTPError,ValueError,ET.ParseError) as error:
+                # Раньше сбой ленты проходил молча и бот тихо переходил на общий текст — теперь он виден в журнале.
+                LOGGER.warning('UN News feed %s unavailable: %s', language, type(error).__name__)
                 continue
+        LOGGER.info('No fresh UN News items for %s in %s', day, timezone_name)
         return []
     finally:
         if owned:
@@ -122,7 +241,7 @@ async def fetch_news(day, timezone_name, locale, *, client=None, now=None):
 
 
 async def intentions(news, *, client=None):
-    """Only a local model is allowed. No key, billing or paid fallback exists."""
+    """Спросить локальную модель, какие темы (до трёх из фиксированного списка) подходят к заголовкам; заголовки — недоверенные данные, ответ строго проверяется (ValueError при неверном), адрес модели разрешён только локальный."""
     endpoint=os.getenv('PRAYER_AI_URL','http://prayer-ai:8080')
     url=urlsplit(endpoint)
     if url.scheme!='http' or url.hostname not in {'prayer-ai','127.0.0.1','localhost'} or url.username or url.query or url.fragment:
@@ -147,37 +266,103 @@ async def intentions(news, *, client=None):
             await client.aclose()
 
 
-def compose(chosen, locale):
-    index=0 if locale=='ru' else 1
-    start='Господи, услышь нашу молитву.' if locale=='ru' else 'Lord, hear our prayer.'
-    end='Даруй нам мир в сердце и силы помогать друг другу. Аминь.' if locale=='ru' else 'Give us peace in our hearts and strength to help one another. Amen.'
-    return with_common_prayer(' '.join([start,*[INTENTIONS[key][index] for key in chosen if key not in {'peace','gratitude'}],end]),locale)
+def _pick(options, seed):
+    """Детерминированно выбрать вариант по строке-«зерну» (одна дата → один и тот же результат)."""
+    digest = int(hashlib.sha256(seed.encode()).hexdigest(), 16)
+    return options[digest % len(options)]
+
+
+def classify(news, limit=3):
+    """Подобрать темы прошений по заголовкам без нейросети (запасной и дополняющий путь).
+
+    Считаем, в скольких заголовках встречается ключевое слово каждой темы; темы с наибольшим
+    числом совпадений идут первыми. Заголовки — данные: они только сопоставляются с фиксированным
+    списком подстрок и никогда не попадают в текст молитвы.
+    """
+    scores = {}
+    for item in news:
+        title = ' ' + str(item.get('title', '')).lower() + ' '
+        for key, words in KEYWORDS.items():
+            if any(word in title for word in words):
+                scores[key] = scores.get(key, 0) + 1
+    order = list(INTENTIONS)
+    return sorted(scores, key=lambda key: (-scores[key], order.index(key)))[:limit]
+
+
+def fallback_intentions(day, count=2):
+    """Темы на день без новостей: ротация по дате, чтобы текст не повторялся ежедневно."""
+    keys = sorted(INTENTIONS)
+    first = int(hashlib.sha256(f'fallback|{day}'.encode()).hexdigest(), 16) % len(keys)
+    return [keys[(first + step * 3) % len(keys)] for step in range(count)]
+
+
+def compose(chosen, locale, day=None):
+    """Собрать короткую молитву из выбранных тем.
+
+    Начало, конец и формулировка каждой темы выбираются по дате ``day`` (если не задана —
+    по сегодняшней дате UTC), поэтому одинаковый набор тем в разные дни звучит по-разному.
+    Обязательные прошения COMMON_PRAYER добавляются ровно один раз.
+    """
+    index = 0 if locale == 'ru' else 1
+    seed = str(day or datetime.now(UTC).date())
+    start = _pick(OPENINGS[index], 'open|' + seed)
+    end = _pick(CLOSINGS[index], 'close|' + seed)
+    petitions = [_pick(INTENTIONS[key][index], f'{key}|{seed}') for key in dict.fromkeys(chosen) if key in INTENTIONS]
+    return with_common_prayer(' '.join([start, *petitions, end]), locale)
 
 
 async def brief(connection, day, timezone_name, slot, locale):
-    locale='ru' if locale=='ru' else 'en'
-    existing=await connection.fetchrow('SELECT * FROM prayer_briefs WHERE local_date=$1 AND timezone=$2 AND slot=$3 AND locale=$4',day,timezone_name,slot,locale)
+    """Вернуть (создав при необходимости) текст молитвы на дату/пояс/слот/язык.
+
+    Порядок выбора тем: 1) локальная нейросеть по сегодняшним заголовкам ООН; 2) если она недоступна
+    или вернула меньше двух тем — отбор по ключевым словам заголовков; 3) если свежих новостей нет —
+    ротация тем по дате. Результат сохраняется в ``prayer_briefs`` и общий для одинаковых параметров.
+    Ранее сохранённые тексты старой версии пересобираются из сохранённого снимка новостей.
+    """
+    locale = 'ru' if locale == 'ru' else 'en'
+    existing = await connection.fetchrow('SELECT * FROM prayer_briefs WHERE local_date=$1 AND timezone=$2 AND slot=$3 AND locale=$4', day, timezone_name, slot, locale)
     if existing:
-        if existing.get('composition_version',1)<COMPOSITION_VERSION:
-            return await connection.fetchrow('UPDATE prayer_briefs SET prayer_text=$2,composition_version=$3 WHERE id=$1 RETURNING *',
-                existing['id'],with_common_prayer(existing['prayer_text'],locale),COMPOSITION_VERSION)
+        if existing.get('composition_version', 1) < COMPOSITION_VERSION:
+            snapshot = existing.get('news_snapshot') or []
+            snapshot = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+            chosen = classify(snapshot) or fallback_intentions(day)
+            generator = 'rules:keywords-v1' if classify(snapshot) else 'template:no_current_news'
+            return await connection.fetchrow('UPDATE prayer_briefs SET prayer_text=$2,generator=$3,composition_version=$4 WHERE id=$1 RETURNING *',
+                existing['id'], compose(chosen, locale, day), generator, COMPOSITION_VERSION)
         return existing
-    news=[]
-    chosen=['peace','gratitude']
-    generator='template:no_current_news'
+    news = []
+    chosen = []
+    generator = 'template:no_current_news'
     try:
-        news=await fetch_news(day,timezone_name,locale)
+        news = await fetch_news(day, timezone_name, locale)
+    except (httpx.HTTPError, ValueError, KeyError, IndexError, ET.ParseError):
+        generator = 'template:news_unavailable'
+    if news:
+        try:
+            chosen = await intentions(news)
+            generator = 'local:qwen3-0.6b:intentions-v1'
+        except (httpx.HTTPError, ValueError, KeyError, IndexError):
+            generator = 'rules:keywords-v1'
+        if len(chosen) < 2:
+            # Нейросеть не ответила или назвала одну тему: добираем темы по ключевым словам заголовков.
+            extra = [key for key in classify(news) if key not in chosen]
+            chosen = (chosen + extra)[:3]
+            if extra and generator.startswith('local:'):
+                generator += '+rules'
+            elif extra:
+                generator = 'rules:keywords-v1'
+    if not chosen:
+        chosen = fallback_intentions(day)
         if news:
-            chosen=await intentions(news)
-            generator='local:qwen3-0.6b:intentions-v1'
-    except (httpx.HTTPError,ValueError,KeyError,IndexError,ET.ParseError):
-        generator='template:news_or_ai_unavailable'
+            generator = 'template:news_without_topics'
+    LOGGER.info('Prayer %s/%s/%s composed by %s from %d headlines, topics=%s', day, slot, locale, generator, len(news), chosen)
     return await connection.fetchrow('''INSERT INTO prayer_briefs(local_date,timezone,slot,locale,prayer_text,generator,news_snapshot,composition_version)
         VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8) ON CONFLICT(local_date,timezone,slot,locale) DO UPDATE SET locale=EXCLUDED.locale RETURNING *''',
-        day,timezone_name,slot,locale,compose(chosen,locale),generator,json.dumps(news,ensure_ascii=False),COMPOSITION_VERSION)
+        day, timezone_name, slot, locale, compose(chosen, locale, day), generator, json.dumps(news, ensure_ascii=False), COMPOSITION_VERSION)
 
 
 def invitation(prepared, locale, clock):
+    """Оформить приглашение на молитву: заголовок, короткое вступление и текст молитвы (источники новостей не показываются)."""
     is_ru=locale=='ru'
     title='🕊 Давайте помолимся вместе' if is_ru else '🕊 Let us pray together'
     intro='Оставим на минуту суету и обратим сердце к Богу. Можно произнести эти слова или помолиться своими.' if is_ru else 'Pause for a moment and turn your heart to God. Use these words or pray in your own words.'
@@ -185,7 +370,7 @@ def invitation(prepared, locale, clock):
 
 
 async def prepare_due(connection, *, now=None):
-    """Prepare invitations in advance; media and a late reading never delay prayer."""
+    """Заранее (за 30 минут) подготовить приглашения на молитву: проверить актуальность подписки и чата, составить или найти текст молитвы и поставить задание в очередь; просроченные и отменённые события закрываются."""
     from app.worker.delivery import insert_payload
     from app.services import bible
     current=now or datetime.now(UTC)
@@ -227,7 +412,7 @@ async def prepare_due(connection, *, now=None):
 
 
 async def plan(connection, *, now=None):
-    """Prayer still happens if reading was missed or enabled after the hour."""
+    """Запланировать молитву на ближайший день для включённых утренних и вечерних подписок (молитва придёт, даже если чтение пропущено или подписка включена после начала часа)."""
     from app.services import artwork, bible, devotionals
     from app.services.scheduling import next_occurrence
     current=now or datetime.now(UTC)
@@ -254,10 +439,10 @@ async def plan(connection, *, now=None):
 
 
 async def artwork_for_send(connection, delivery):
-    """Use prepared artwork if available, without spending or waiting at prayer time."""
+    """К моменту отправки подставить в приглашение готовую картинку (без новых платных запросов и ожидания) и актуальный текст молитвы."""
     progress=json.loads(delivery['progress']) if isinstance(delivery['progress'],str) else delivery['progress']
     image=await connection.fetchval("""SELECT i.id FROM prayer_occurrences p JOIN verse_illustrations i ON i.id=p.image_id
-        WHERE p.id=$1 AND i.status='ready'""",progress.get('occurrence_id'))
+        WHERE p.id=$1 AND i.status='ready' AND i.quarantined_at IS NULL""",progress.get('occurrence_id'))
     parts=json.loads(delivery['chunks']) if isinstance(delivery['chunks'],str) else delivery['chunks']
     prepared=await connection.fetchrow('''SELECT b.*,c.ui_language FROM prayer_occurrences p
         JOIN subscriptions s ON s.id=p.subscription_id JOIN telegram_chats c ON c.telegram_chat_id=s.telegram_chat_id

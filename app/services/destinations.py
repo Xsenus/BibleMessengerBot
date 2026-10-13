@@ -1,4 +1,4 @@
-"""Atomic per-chat preferences and cancellation of outdated queued content."""
+"""Атомарные настройки каждого чата и отмена устаревшего содержимого в очереди."""
 from __future__ import annotations
 import json
 from typing import Any
@@ -10,7 +10,7 @@ from app.services.scheduling import next_reading, validate_timezone
 
 
 async def ensure_resolved(connection: Any, chat_id: int) -> None:
-    """Do not abandon ambiguous or partly delivered payloads during a settings change."""
+    """Не менять настройки, пока есть неопределённые или частично доставленные задания: `pending_review` (нужно решение оператора) или `busy` (идёт доставка)."""
     if await connection.fetchval("SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND mode<>'illustration_edit' AND (status IN ('uncertain','sending') OR (status='failed' AND next_chunk>0)))",chat_id):
         raise UserError('pending_review')
     if await connection.fetchval("SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND mode<>'illustration_edit' AND status IN ('pending','retry') AND next_chunk>0)",chat_id):
@@ -18,7 +18,7 @@ async def ensure_resolved(connection: Any, chat_id: int) -> None:
 
 
 async def cancel_queued(connection: Any, chat_id: int) -> None:
-    """Cancel only known-unsent/retry jobs; preserve the delivery history."""
+    """Отменить задания, которые заведомо не отправлены (ожидают или на повторе), сохранив историю."""
     await connection.execute("""UPDATE delivery_log SET status='cancelled',updated_at=now(),
         error_code='configuration_changed' WHERE telegram_chat_id=$1 AND mode<>'illustration_edit' AND status IN ('pending','retry')""",chat_id)
 
@@ -27,7 +27,7 @@ async def configure_chat(connection: Any, chat_id: int, *, actor_id: int | None,
                          ui_language: str | None = None, translation_id: int | None = None,
                          timezone_name: str | None = None, message_thread_id: int | None = None,
                          set_thread: bool = False) -> Any:
-    """Update one destination and its subscriptions, not other chats of that admin."""
+    """Изменить настройки одного чата атомарно: язык интерфейса, издание, часовой пояс, тема форума. Отменяет устаревшие задания, увеличивает ревизию чата и подписок, при смене издания сбрасывает прогресс, отключает несовместимые режимы (тема дня для чужой нумерации, планы без нужных книг), пересчитывает время запусков и пишет событие в журнал."""
     if ui_language is not None and ui_language not in available_ui():
         raise UserError('unknown_language')
     if timezone_name is not None:

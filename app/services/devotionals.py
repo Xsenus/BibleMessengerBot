@@ -1,4 +1,4 @@
-"""Stable, edition-native morning/evening choices with a frozen daily plan."""
+"""Стабильный выбор утреннего и вечернего чтения для издания с замороженным планом на день."""
 
 from __future__ import annotations
 
@@ -46,6 +46,7 @@ DEVOTIONAL_BOOKS = frozenset(
 
 
 def thematic_candidates(candidates, blocked):
+    """Отфильтровать кандидатов: убрать недавно использованные, предпочесть книги для размышления (Псалмы, Притчи, Евангелия, Послания)."""
     available = [r for r in candidates if coordinates(r) not in blocked]
     preferred = [r for r in available if r["book_code"] in DEVOTIONAL_BOOKS]
     return preferred or available
@@ -53,6 +54,7 @@ def thematic_candidates(candidates, blocked):
 
 @lru_cache(maxsize=1)
 def themes():
+    """Темы утра и вечера (`data/devotional_themes.json`), кэшируются."""
     return json.loads(
         (Path(__file__).resolve().parents[2] / "data/devotional_themes.json").read_text(
             encoding="utf-8"
@@ -61,6 +63,7 @@ def themes():
 
 
 def theme_for(day: date, slot: str):
+    """Тема дня и слота: смена акцента по дням недели и по неделям года."""
     if slot not in SLOTS:
         raise ValueError("Unknown devotional slot")
     # Every week rotates the weekday's emphasis; leap day has its own ordinal.
@@ -70,16 +73,19 @@ def theme_for(day: date, slot: str):
 
 
 def rank(seed: str, row) -> bytes:
+    """Детерминированный «вес» стиха по зерну — для стабильной сортировки кандидатов."""
     return hashlib.sha256(
         f"{seed}:{row['book_code']}:{row['chapter']}:{row['verse']}".encode()
     ).digest()
 
 
 def coordinates(row):
+    """Координаты стиха (книга, глава, стих)."""
     return row["book_code"], row["chapter"], row["verse"]
 
 
 async def selection(connection, edition, chat_id: int, day: date, slot: str):
+    """Выбрать и сохранить чтение на день и слот под блокировкой чата (утро резервируется раньше вечера, поэтому порядок вызовов не меняет выбор). Исключаются стихи за последние 30 дней и стих дня; подбор идёт по ключевым словам темы из реального текста издания (для Синодального — из выверенных блоков), иначе берётся любой подходящий стих. Результат и снимок строк чтения записываются в `daily_verse_selections`."""
     if slot not in SLOTS:
         raise ValueError("Unknown devotional slot")
     # Always reserve morning first, so call order cannot change the two choices.
@@ -189,6 +195,7 @@ async def selection(connection, edition, chat_id: int, day: date, slot: str):
 
 
 async def selected_verse(connection, edition, chat_id, day, slot):
+    """Вернуть замороженное чтение дня: проверяет, что текст стиха и строки снимка не изменились (иначе — требуется проверка оператора); старые планы без снимка получают устойчивую замену и снимок. Возвращает (чтение, запись выбора)."""
     chosen = await selection(connection, edition, chat_id, day, slot)
     row = await connection.fetchrow(
         """SELECT book_code,chapter,verse,verse_end,text FROM verses

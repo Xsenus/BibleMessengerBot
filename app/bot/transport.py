@@ -1,4 +1,4 @@
-"""aiogram adapter. Ambiguous API outcomes are never silently retried."""
+"""Адаптер aiogram для отправки. Неопределённые исходы API никогда не повторяются автоматически."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from aiogram.types import (
 )
 
 from app.services.errors import SendError
+from app.services.platforms import is_bridged
 from app.services.formatting import plain_text, utf16_length
 from app.services.rate_limit import wait_send_slot
 
@@ -30,16 +31,17 @@ LOGGER = logging.getLogger(__name__)
 
 
 class TelegramSender:
-    """Send through the shared limiter without logging bot tokens or payload text."""
+    """Отправитель сообщений Telegram через общий ограничитель скорости; токен бота и текст сообщений в журнал не попадают."""
 
     def __init__(self, bot: Any, connection: Any, settings: Any) -> None:
+        """Запомнить бота, соединение с БД (для ограничителя и кэша файлов) и настройки."""
         self.bot, self.connection, self.settings = bot, connection, settings
 
     async def send(
         self, chat_id: int, text: Any, thread_id: int | None = None, *, reply_markup: Any = None
     ) -> int:
-        """Map definitive Telegram rejections separately from uncertain transport failures."""
-        if getattr(self.bot,'platform',None)=='max':
+        """Отправить одну часть (текст, фото или «богатое» сообщение) и вернуть ID сообщения. Для MAX делегирует отправителю MAX. Ошибки разделяются: ограничение скорости (`retry` со временем ожидания), запрет (`forbidden`), отказ (`rejected`) и неясный сетевой сбой (`uncertain`); правка сообщения при сбое безопасно повторяется."""
+        if is_bridged(getattr(self.bot,'platform',None)):
             return await self.bot.sender(self.connection).send(chat_id,text,thread_id,reply_markup=reply_markup)
         await wait_send_slot(
             self.connection,
@@ -49,8 +51,13 @@ class TelegramSender:
         )
         try:
             if isinstance(text, dict):
+                if text.get('kind') == 'photo':
+                    from app.services.illustrations import without_quarantined_image
+                    text = await without_quarantined_image(self.connection, text)
                 if text.get("kind") in {"rich", "rich_edit"}:
                     message = await self._rich(chat_id, text, thread_id, reply_markup)
+                elif text.get("kind") == "asset_photo":
+                    message = await self._asset_photo(chat_id, text, thread_id, reply_markup)
                 else:
                     message = await self._photo(chat_id, text, thread_id, reply_markup)
             else:
@@ -77,9 +84,12 @@ class TelegramSender:
             raise SendError("uncertain") from None
 
     async def _rich(self, chat_id, chunk, thread_id, markup):
+        """Отправить или отредактировать «богатое» сообщение с картинкой и озвучкой. Проверяет данные и размер, использует сохранённые file_id Telegram (при устаревшем идентификаторе повторяет с загрузкой файла), привязывает сообщение к языковой карточке и сохраняет новые file_id в БД."""
         if chunk.get('card_id') is not None:
             from app.services.message_languages import outgoing
             chunk,markup = await outgoing(self.connection,chat_id,chunk)
+        from app.services.illustrations import without_quarantined_image
+        chunk = await without_quarantined_image(self.connection, chunk)
         text, identifier = chunk.get("text"), chunk.get("image_id")
         editing = chunk["kind"] == "rich_edit"
         target = chunk.get("message_id")
@@ -101,13 +111,14 @@ class TelegramSender:
             audio = await self.connection.fetchrow("SELECT * FROM reading_audio WHERE id=$1 AND state='ready'",chunk['audio_id'])
         audio_cached = audio and audio['telegram_bot_id']==self.bot.id and audio['telegram_file_id']
         async def remember_audio():
+            """Запомнить, что озвучка карточки показана пользователю (для учёта доставленных треков)."""
             if chunk.get('card_id') is not None:
                 from app.services.speech import acknowledged
                 await acknowledged(self.connection,chunk['card_id'],audio['id'] if audio else None)
         image = cached = None
         if identifier is not None:
             image = await self.connection.fetchrow(
-                "SELECT mime_type,telegram_file_id,telegram_bot_id,image_data FROM verse_illustrations WHERE id=$1 AND status='ready'",
+                "SELECT mime_type,telegram_file_id,telegram_bot_id,image_data FROM verse_illustrations WHERE id=$1 AND status='ready' AND quarantined_at IS NULL",
                 identifier,
             )
             if not image:
@@ -115,6 +126,7 @@ class TelegramSender:
             cached = image["telegram_file_id"] if image["telegram_bot_id"] == self.bot.id else None
 
         async def perform(use_cache):
+            """Один вызов API: собрать HTML с картинкой/аудио и либо отредактировать существующее сообщение, либо отправить новое; `use_cache` разрешает использовать file_id вместо загрузки файла."""
             media = []
             if image is not None:
                 suffix = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[
@@ -206,6 +218,7 @@ class TelegramSender:
         return sent
 
     async def _photo(self, chat_id: int, chunk: dict, thread_id: int | None, markup: Any) -> Any:
+        """Отправить картинку с подписью (до 1024 символов): берёт file_id из кэша или загружает байты, при отказе по кэшу повторяет с файлом, затем сохраняет file_id и историю показов."""
         identifier, caption = chunk.get("image_id"), chunk.get("caption")
         if (
             chunk.get("kind") != "photo"
@@ -218,7 +231,7 @@ class TelegramSender:
         image = await self.connection.fetchrow(
             """SELECT mime_type,telegram_file_id,telegram_bot_id,
             CASE WHEN telegram_bot_id=$2 AND telegram_file_id IS NOT NULL THEN NULL ELSE image_data END AS image_data
-            FROM verse_illustrations WHERE id=$1 AND status='ready' """,
+            FROM verse_illustrations WHERE id=$1 AND status='ready' AND quarantined_at IS NULL """,
             identifier,
             self.bot.id,
         )
@@ -243,8 +256,10 @@ class TelegramSender:
             if not cached:
                 raise
             data = await self.connection.fetchval(
-                "SELECT image_data FROM verse_illustrations WHERE id=$1", identifier
+                "SELECT image_data FROM verse_illustrations WHERE id=$1 AND status='ready' AND quarantined_at IS NULL", identifier
             )
+            if data is None:
+                raise SendError('rejected') from None
             sent = await self.bot.send_photo(
                 photo=BufferedInputFile(bytes(data), filename=f"verse-{identifier}.{suffix}"),
                 **kwargs,
@@ -266,4 +281,38 @@ class TelegramSender:
             await record_view(self.connection, chat_id, identifier)
         except Exception as error:
             LOGGER.warning("Illustration view history deferred (%s)", type(error).__name__)
+        return sent
+
+    async def _asset_photo(self, chat_id: int, chunk: dict, thread_id: int | None, markup: Any) -> Any:
+        """Отправить общую картинку (объявление, копия поста) с подписью: сначала по сохранённому file_id, при его
+        устаревании — загрузкой файла; новый file_id запоминается в `media_assets`."""
+        identifier, caption = chunk.get("asset_id"), chunk.get("caption", "")
+        if (type(identifier) is not int or identifier <= 0 or not isinstance(caption, str)
+                or utf16_length(plain_text(caption)) > 1024):
+            raise SendError("rejected")
+        asset = await self.connection.fetchrow(
+            """SELECT mime_type,telegram_file_id,telegram_bot_id,
+            CASE WHEN telegram_bot_id=$2 AND telegram_file_id IS NOT NULL THEN NULL ELSE data END AS data
+            FROM media_assets WHERE id=$1""", identifier, self.bot.id)
+        if not asset:
+            raise SendError("rejected")
+        cached = asset["telegram_file_id"] if asset["telegram_bot_id"] == self.bot.id else None
+        suffix = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[asset["mime_type"]]
+        kwargs = dict(chat_id=chat_id, caption=caption or None, parse_mode="HTML", message_thread_id=thread_id,
+                      reply_markup=markup, request_timeout=20)
+        try:
+            sent = await self.bot.send_photo(
+                photo=cached or BufferedInputFile(bytes(asset["data"]), filename=f"asset-{identifier}.{suffix}"), **kwargs)
+        except TelegramBadRequest:
+            if not cached:
+                raise
+            data = await self.connection.fetchval("SELECT data FROM media_assets WHERE id=$1", identifier)
+            sent = await self.bot.send_photo(photo=BufferedInputFile(bytes(data), filename=f"asset-{identifier}.{suffix}"), **kwargs)
+        if sent.photo:
+            try:
+                await self.connection.execute(
+                    "UPDATE media_assets SET telegram_file_id=$2,telegram_bot_id=$3 WHERE id=$1",
+                    identifier, sent.photo[-1].file_id, self.bot.id)
+            except Exception as error:
+                LOGGER.warning("Asset file cache deferred (%s)", type(error).__name__)
         return sent

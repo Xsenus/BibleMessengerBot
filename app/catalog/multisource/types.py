@@ -1,10 +1,9 @@
-"""Bounded configuration and interchange records for source adapters."""
+"""Настройки импорта и записи обмена между источниками текстов, с жёсткими ограничениями."""
 from __future__ import annotations
 
 import os
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from app.catalog.audit import CorpusAudit
@@ -15,6 +14,7 @@ Record = tuple[str, int, int, str, bool, int]
 
 
 def safe_id(value: str) -> str:
+    """Проверить идентификатор из внешнего источника (буквы, цифры, `_`, `-`, до 100 символов) и вернуть его; иначе ValueError."""
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}", value):
         raise ValueError("Invalid upstream identifier")
     return value
@@ -22,6 +22,7 @@ def safe_id(value: str) -> str:
 
 @dataclass(frozen=True)
 class ImportOptions:
+    """Параметры импорта: источники, профиль языков, фильтры языков и изданий, лимиты кэша, размера файла и диска, таймауты, число попыток, частота запросов и разрешение замены."""
     sources: tuple[str, ...] = ("biblenlp", "getbible", "helloao")
     profile: str = "all-open"
     languages: tuple[str, ...] = ()
@@ -38,6 +39,7 @@ class ImportOptions:
     allow_replace: bool = False
 
     def __post_init__(self) -> None:
+        """Проверить допустимость всех параметров (уникальные известные источники, профиль, диапазоны лимитов, коды языков, формат `источник:id`)."""
         if not self.sources or len(set(self.sources)) != len(self.sources) or set(self.sources) - SOURCE_NAMES.keys():
             raise ValueError("BIBLE_SOURCES must be a unique comma-separated subset of biblenlp,getbible,helloao")
         if self.profile not in {"core", "extended", "all-open", "none"}:
@@ -60,8 +62,10 @@ class ImportOptions:
             safe_id(identifier)
 
     @classmethod
-    def from_env(cls, **changes: Any) -> "ImportOptions":
+    def from_env(cls, **changes: Any) -> ImportOptions:
+        """Собрать параметры из переменных окружения (BIBLE_SOURCES, BIBLE_PROFILE, IMPORT_*, DOWNLOAD_TIMEOUT_SECONDS и др.); `changes` переопределяют значения."""
         def csv(name: str, default: str = "") -> tuple[str, ...]:
+            """Прочитать переменную со списком через запятую в кортеж без пустых элементов."""
             return tuple(s.strip() for s in os.getenv(name, default).split(",") if s.strip())
         values: dict[str, Any] = dict(
             sources=csv("BIBLE_SOURCES", "biblenlp,getbible,helloao"),
@@ -81,6 +85,7 @@ class ImportOptions:
 
 @dataclass(frozen=True)
 class Candidate:
+    """Издание-кандидат от одного источника: описание, адрес файла, ревизия, система нумерации и дополнительные данные."""
     source: str
     metadata: TranslationMeta
     url: str
@@ -91,15 +96,18 @@ class Candidate:
 
     @property
     def key(self) -> str:
+        """Ключ кандидата `источник:идентификатор`."""
         return f"{self.source}:{self.metadata.translation_id}"
 
     @property
     def source_name(self) -> str:
+        """Человекочитаемое название источника."""
         return SOURCE_NAMES[self.source]
 
 
 @dataclass
 class Prepared:
+    """Подготовленное к записи издание: файл, сетка стихов, записи, результат аудита, хеш содержимого, названия книг и диагностика."""
     candidate: Candidate
     downloaded: DownloadedTranslation
     references: list[VerseReference]

@@ -1,18 +1,18 @@
-"""Structural corpus evidence, not a claim of theological or textual proofreading."""
+"""Структурное доказательство целостности корпуса. Это проверка структуры, а не богословская или текстовая вычитка."""
 from __future__ import annotations
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from typing import Any
 from app.catalog.models import TranslationMeta, VerseReference
 
-OT = 'GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH EST JOB PSA PRO ECC SNG ISA JER LAM EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP HAG ZEC MAL'.split()
-NT = 'MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV'.split()
+OT = ['GEN', 'EXO', 'LEV', 'NUM', 'DEU', 'JOS', 'JDG', 'RUT', '1SA', '2SA', '1KI', '2KI', '1CH', '2CH', 'EZR', 'NEH', 'EST', 'JOB', 'PSA', 'PRO', 'ECC', 'SNG', 'ISA', 'JER', 'LAM', 'EZK', 'DAN', 'HOS', 'JOL', 'AMO', 'OBA', 'JON', 'MIC', 'NAM', 'HAB', 'ZEP', 'HAG', 'ZEC', 'MAL']
+NT = ['MAT', 'MRK', 'LUK', 'JHN', 'ACT', 'ROM', '1CO', '2CO', 'GAL', 'EPH', 'PHP', 'COL', '1TH', '2TH', '1TI', '2TI', 'TIT', 'PHM', 'HEB', 'JAS', '1PE', '2PE', '1JN', '2JN', '3JN', 'JUD', 'REV']
 CORE = set(OT + NT)
 
 
 @dataclass(frozen=True)
 class CorpusAudit:
-    """Measured physical coverage and reasons why an edition is incomplete."""
+    """Результат измерения изданий: реальное покрытие (книги, главы, стихи), полнота Нового Завета и 66 книг, пропущенные книги и главы, предупреждения и разбивка по книгам."""
     coverage: str
     books: int
     chapters: int
@@ -32,13 +32,13 @@ class CorpusAudit:
     verification_scope: str = 'Structural comparison with the pinned source grid, not independent proofreading'
 
     def as_dict(self) -> dict[str, Any]:
-        """Return JSON-serializable audit evidence."""
+        """Вернуть данные аудита словарём, пригодным для записи в JSON."""
         return asdict(self)
 
 
 def audit_corpus(metadata: TranslationMeta, references: list[VerseReference],
                  records: list[tuple[str, int, int, str, bool, int]]) -> CorpusAudit:
-    """Measure actual books/chapters; never trust a catalog's 'full' flag alone."""
+    """Измерить фактическое содержимое издания по сравнению с эталонной сеткой стихов и описанием каталога: покрытие (`full`, `nt`, `ot`, `partial`), пропущенные главы и книги, расхождения с каталогом. Метка «полная Библия» из каталога сама по себе не принимается на веру."""
     expected: dict[str, set[int]] = defaultdict(set)
     actual: dict[str, set[int]] = defaultdict(set)
     visible_counts: dict[str, int] = defaultdict(int)
@@ -54,7 +54,7 @@ def audit_corpus(metadata: TranslationMeta, references: list[VerseReference],
     missing_chapters = [f'{b} {c}' for b in sorted(actual) for c in sorted(expected[b] - actual[b])]
     missing_core = sorted(CORE - actual_set)
     nt_complete = set(NT) <= actual_set and all(expected[b] <= actual[b] for b in NT)
-    full = CORE <= actual_set and all(expected[b] <= actual[b] for b in CORE)
+    full = actual_set >= CORE and all(expected[b] <= actual[b] for b in CORE)
     ot_complete = set(OT) <= actual_set and all(expected[b] <= actual[b] for b in OT)
     coverage = 'full' if full else 'nt' if nt_complete and not actual_set.intersection(OT) else 'ot' if ot_complete and not actual_set.intersection(NT) else 'partial'
     warnings: list[str] = []

@@ -1,5 +1,6 @@
 """Real isolated PostgreSQL: shared paid work, calendar ageing, archive and follow-ups."""
 
+from tests.bot_patch import patch_bot
 import asyncio
 import os
 from decimal import Decimal
@@ -12,7 +13,7 @@ import pytest
 from app.bot import handlers
 from app.bot.commands import parse_command
 from app.bot.transport import TelegramSender
-from app.services import artwork, bible, illustrations,readings
+from app.services import artwork, illustrations,readings
 from app.services.destinations import configure_chat
 from app.worker.delivery import decoded, process_delivery
 from tests.test_devotional_artwork import jpeg
@@ -163,7 +164,7 @@ async def test_late_images_keep_old_targets_but_reject_changed_source(
 async def test_random_handler_is_fast_then_cached_and_ack_advances_rotation(db, monkeypatch):
     provider(monkeypatch)
     c, settings, edition, chat, row = await setup(db)
-    monkeypatch.setattr(handlers, "destination", AsyncMock(return_value=chat))
+    patch_bot(monkeypatch, "destination", AsyncMock(return_value=chat))
     monkeypatch.setattr(readings, "choose", AsyncMock(return_value=row))
     message = SimpleNamespace(
         from_user=SimpleNamespace(id=101),

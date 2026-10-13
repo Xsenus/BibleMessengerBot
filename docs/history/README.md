@@ -27,4 +27,4 @@
 
 | 1.15.0 | [Отчёт](1.15.0/RELEASE-AUDIT.md) и [JSON](1.15.0/RELEASE-AUDIT.json). |
 
-Актуальные руководства находятся в родительском каталоге `docs/`. Проверки текущей подготовки и их границы: [VALIDATION.md](../VALIDATION.md). История изменений: [CHANGELOG.md](../../CHANGELOG.md).
+Актуальные руководства находятся в родительском каталоге `docs/`. Проверки текущей подготовки и их границы: [VALIDATION.md](../operations/validation.md). История изменений: [CHANGELOG.md](../../CHANGELOG.md).

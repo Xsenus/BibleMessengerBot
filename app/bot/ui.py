@@ -1,4 +1,4 @@
-"""Compact private-chat navigation, with the same commands as Telegram's menu."""
+"""Компактная навигация личного чата (нижняя клавиатура) и вводные тексты: приветствие, подсказка меню, справка."""
 # ruff: noqa: RUF001  # Russian interface text intentionally uses Cyrillic characters.
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.types import FSInputFile, KeyboardButton, ReplyKeyboardMarkup
 
 from app.services.formatting import escape, plain_text, utf16_length
+from app.services.features import support_enabled
+from app.services.platforms import is_bridged
 from app.services.i18n import available_ui, tr
 from app.services.rate_limit import wait_send_slot
 
@@ -19,31 +21,59 @@ LOGGER = logging.getLogger(__name__)
 WELCOME_PATH = Path(__file__).resolve().parents[2] / 'assets' / 'brand' / 'welcome.png'
 
 
-BUTTONS = (
+_BASE_BUTTONS = (
     ('next', '📖'), ('today', '🌅'), ('random', '🎲'),
     ('search', '🔎'), ('settings', '⚙️'), ('help', '❔'),
-    ('daily', '🔔'), ('donate', '⭐'),
+    ('daily', '🔔'), ('prayerbook', '🙏'),
 )
+BUTTONS_WITH_SUPPORT = (*_BASE_BUTTONS, ('donate', '⭐'))
+
+
+def active_buttons():
+    """Кнопки главной клавиатуры: «Поддержать» показывается только при включённом разделе поддержки."""
+    return BUTTONS_WITH_SUPPORT if support_enabled() else _BASE_BUTTONS
+
+
+BUTTONS = BUTTONS_WITH_SUPPORT  # все возможные кнопки (для распознавания подписей)
 LABELS = {
     'ru': {'next': 'Читать дальше', 'today': 'Стих дня', 'help': 'Помощь'},
     'en': {'next': 'Continue reading', 'today': 'Verse of the day', 'help': 'Help'},
 }
 
 
+SUPPORT_RU = (
+    '<b>Добровольная поддержка</b>\n'
+    '/donate — поддержать сервер и развитие Telegram Stars\n'
+    '/donations — история поддержки · /terms — условия\n'
+    '/paysupport текст — вопрос по платежу или запрос возврата\n'
+    'Библия бесплатна; поддержка разовая и добровольная.\n\n'
+)
+SUPPORT_EN = (
+    '<b>Voluntary support</b>\n'
+    '/donate — support hosting and development with Telegram Stars\n'
+    '/donations — support history · /terms — terms\n'
+    '/paysupport your message — payment issue or refund request\n'
+    'The Bible is free; support is optional and one-time.\n\n'
+)
+
+
 def button_label(locale: str, command: str, emoji: str) -> str:
+    """Подпись кнопки нижней клавиатуры: эмодзи + название команды на языке пользователя."""
     if command == 'hide_keyboard':
         return f"{emoji} " + ('Скрыть кнопки' if locale == 'ru' else 'Hide buttons')
     if command == 'donate':
         return f"{emoji} " + ('Поддержать' if locale == 'ru' else 'Support')
+    if command == 'prayerbook':
+        return f"{emoji} " + ('Молитвослов' if locale == 'ru' else 'Prayer book')
     if command == 'daily':
         return f"{emoji} " + ('Стих каждый день' if locale == 'ru' else 'Daily verse')
     return f"{emoji} {LABELS.get(locale, {}).get(command, tr(locale, command))}"
 
 
 def main_keyboard(locale: str, *, collapsible=True) -> ReplyKeyboardMarkup:
-    """Allow clients to collapse navigation; offer explicit removal too."""
+    """Нижняя клавиатура главных действий по две кнопки в ряд; клиент может её свернуть, а при `collapsible` есть кнопка «Скрыть кнопки»."""
     buttons = [KeyboardButton(text=button_label(locale, command, emoji))
-               for command, emoji in BUTTONS]
+               for command, emoji in active_buttons()]
     placeholder = {'ru': 'Выберите действие или введите /search …',
                    'en': 'Choose an action or enter /search …'}.get(locale, tr(locale, 'choose'))
     return ReplyKeyboardMarkup(
@@ -56,16 +86,18 @@ def main_keyboard(locale: str, *, collapsible=True) -> ReplyKeyboardMarkup:
 
 @lru_cache(maxsize=1)
 def _button_commands() -> dict[str, str]:
+    """Словарь «подпись кнопки → команда» для всех языков интерфейса (кэшируется)."""
     return {button_label(locale, command, emoji): '/' + command
             for locale in available_ui() for command, emoji in (*BUTTONS, ('hide_keyboard', '⌨️'))}
 
 
 def keyboard_command(text: str) -> str | None:
-    """Accept only exact known labels, never parse destinations from free text."""
+    """Вернуть команду для нажатой кнопки, если текст в точности совпал с известной подписью; произвольный текст в команды не превращается."""
     return _button_commands().get(text)
 
 
 def welcome_text(locale: str, edition_title: str | None = None) -> str:
+    """Текст приветствия на языке пользователя; в конце — название выбранного издания или сообщение, что издание ещё не готово."""
     if locale == 'ru':
         text = (
             '📖 <b>Библия — рядом каждый день</b>\n\n'
@@ -98,15 +130,15 @@ def welcome_text(locale: str, edition_title: str | None = None) -> str:
 
 @lru_cache(maxsize=4)
 def _image_digest(path: Path, size: int, modified_ns: int) -> str:
-    """Hash immutable deployed art once; a replaced file gets a fresh cache key."""
+    """Хеш файла картинки приветствия (кэшируется по пути, размеру и времени изменения): заменённая картинка получает новый ключ кэша."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 async def send_welcome(bot: Any, connection: Any, settings: Any, chat_id: int,
                        text: str, markup: ReplyKeyboardMarkup,
                        *, image_path: Path | None = None) -> bool:
-    """Send one welcome photo, reusing Telegram's file_id; False means text fallback."""
-    if getattr(bot,'platform',None)=='max':
+    """Отправить приветствие одним фото (повторно используется file_id Telegram). Возвращает False, если нужно отправить обычный текст: подпись длиннее лимита, нет файла или фото не отправилось."""
+    if is_bridged(getattr(bot,'platform',None)):
         await bot.queue_welcome(connection,settings,chat_id,text,markup)
         return True
     path = image_path or WELCOME_PATH
@@ -142,6 +174,7 @@ async def send_welcome(bot: Any, connection: Any, settings: Any, chat_id: int,
 
 
 def menu_hint(locale: str) -> str:
+    """Короткая подсказка «с чего начать» после нажатия неизвестной кнопки или текста."""
     if locale == 'ru':
         return ('📖 <b>С чего начнём?</b>\n\nВыберите действие на клавиатуре внизу. '
                 'Чтобы найти слова в Библии, отправьте <code>/search любовь</code>.\n\n'
@@ -156,6 +189,7 @@ def menu_hint(locale: str) -> str:
 
 
 def search_prompt(locale: str) -> str:
+    """Подсказка по поиску и чтению по адресу (примеры «Иоанна 3:16», `/search любовь`)."""
     if locale == 'ru':
         return ('🔎 <b>Найти слова в Библии</b>\n\n'
             'Отправьте адрес главы или стиха:\n'
@@ -173,6 +207,7 @@ def search_prompt(locale: str) -> str:
 
 
 def onboarding_help(locale: str) -> str | None:
+    """Подробная справка по командам для русского и английского; для других языков None (используется общий список)."""
     if locale == 'ru':
         return (
             '❔ <b>Ваше чтение Библии</b>\n\n'
@@ -198,11 +233,7 @@ def onboarding_help(locale: str) -> str | None:
             '<code>/thread 123 @group</code> — тема форума\n'
             '<code>/reset confirm</code> — сбросить прогресс и приостановить подписки\n'
             '/topics — темы для изданий с совместимой нумерацией\n\n'
-            '<b>Добровольная поддержка</b>\n'
-            '/donate — поддержать сервер и развитие Telegram Stars\n'
-            '/donations — история поддержки · /terms — условия\n'
-            '/paysupport текст — вопрос по платежу или запрос возврата\n'
-            'Библия бесплатна; поддержка разовая и добровольная.\n\n'
+            + (SUPPORT_RU if support_enabled() else '') +
             'Скрыть кнопки: /hide_keyboard. Вернуть: /menu. Голос чтения: /voice'
         )
     if locale == 'en':
@@ -230,11 +261,7 @@ def onboarding_help(locale: str) -> str | None:
             '<code>/thread 123 @group</code> — choose a forum topic\n'
             '<code>/reset confirm</code> — reset progress and pause subscriptions\n'
             '/topics — themes for editions with compatible numbering\n\n'
-            '<b>Voluntary support</b>\n'
-            '/donate — support hosting and development with Telegram Stars\n'
-            '/donations — support history · /terms — terms\n'
-            '/paysupport your message — payment issue or refund request\n'
-            'The Bible is free; support is optional and one-time.\n\n'
+            + (SUPPORT_EN if support_enabled() else '') +
             'Hide buttons: /hide_keyboard. Restore buttons: /menu. Russian voices: /voice'
         )
     return None

@@ -3,11 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import replace
-from datetime import datetime,timezone,timedelta
+from datetime import datetime,timedelta, UTC
 from email.utils import format_datetime
 import httpx
 import pytest
-from app.catalog.multisource.transport import Downloader,DownloadError,DiskLimitError,HttpStatusError,validate_url,retry_seconds,write_json
+from app.catalog.multisource.transport import DownloadError,DiskLimitError,HttpStatusError,validate_url,retry_seconds,write_json
 from tests.multisource_fixtures import Bytes,response,downloader
 
 URL='https://bible.helloao.org/api/fixture/complete.simple.json'
@@ -33,7 +33,7 @@ def test_retry_after_numeric_and_date_bounds():
     # Directly imported function is deliberately not monkeypatched.
     assert retry_seconds('0',1)==0
     assert retry_seconds('999',1)==120
-    assert 0<=retry_seconds(format_datetime(datetime.now(timezone.utc)+timedelta(seconds=20)),1)<=20
+    assert 0<=retry_seconds(format_datetime(datetime.now(UTC)+timedelta(seconds=20)),1)<=20
     assert retry_seconds('nonsense',1)==2
 
 async def test_cache_hash_and_corruption_redownload(tmp_path):

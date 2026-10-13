@@ -1,4 +1,4 @@
-"""Deterministic chapter distribution across the requested number of deliveries."""
+"""Детерминированное распределение глав по дням плана чтения."""
 from __future__ import annotations
 from typing import Any
 from app.services.errors import UserError
@@ -8,7 +8,7 @@ PLANS = {'bible-90': (90, None), 'bible-180': (180, None), 'bible-365': (365, No
 
 
 async def validate_plan(connection: Any, translation: Any, plan_code: str) -> None:
-    """Reject unavailable plan content before accepting a schedule."""
+    """Проверить, что план доступен для издания: код известен, издание структурно полное (66 книг или Новый Завет) и глав достаточно; иначе UserError."""
     if plan_code not in PLANS:
         raise UserError('invalid')
     duration, scope = PLANS[plan_code]
@@ -23,7 +23,7 @@ async def validate_plan(connection: Any, translation: Any, plan_code: str) -> No
 
 
 def plan_window(total_chapters: int, duration: int, completed_days: int) -> tuple[int, int]:
-    """Return a zero-based half-open chapter range; no overlaps or lost chapters."""
+    """Диапазон глав на выбранный день плана (индексы от нуля, правая граница не включена): без пересечений и потерянных глав; после окончания плана пустой."""
     if total_chapters < 1 or duration < 1 or completed_days < 0:
         raise ValueError('Invalid plan counters')
     if total_chapters < duration:

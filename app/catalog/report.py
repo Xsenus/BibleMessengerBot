@@ -1,4 +1,4 @@
-"""Catalog selection reporting used by CLI and admin UI."""
+"""Отчёт о выборе изданий для командной строки и панели оператора."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from app.catalog.selector import SelectionResult
 
 
 def selection_summary(result: SelectionResult) -> dict[str, Any]:
+    """Сводка выбора: число выбранных изданий и языков, недостающие языки, число отклонённых с причинами и список выбранных с покрытием, лицензией и объёмом."""
     selected_languages = Counter(item.metadata.language_code for item in result.selected)
     rejected_reasons = Counter(item.decision.reason for item in result.rejected)
     return {

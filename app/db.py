@@ -1,25 +1,26 @@
-"""PostgreSQL pool and checksum-tracked, serialized additive migrations."""
+"""Пул соединений PostgreSQL и применение миграций схемы (каждая миграция выполняется один раз, с контролем контрольной суммы)."""
 from __future__ import annotations
 import asyncio
 import hashlib
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
+from collections.abc import AsyncIterator
 from app.config import Settings
 from app.services.locks import lock_key
 if TYPE_CHECKING:
-    import asyncpg
+    pass
 
 _pool: Any = None
 
 
 def normalize_asyncpg_dsn(dsn: str) -> str:
-    """Accept the SQLAlchemy prefix without otherwise rewriting credentials."""
+    """Привести строку подключения к виду, который понимает asyncpg: заменить префикс SQLAlchemy `postgresql+asyncpg://` на `postgresql://`, остальное (логин, пароль) не трогая."""
     return dsn.replace('postgresql+asyncpg://','postgresql://',1)
 
 
 async def create_pool(settings: Settings) -> Any:
-    """Create one bounded pool per process. No DB module is needed for pure tests."""
+    """Вернуть единственный на процесс пул соединений (создаётся при первом вызове, до 10 соединений, тайм-аут команды 120 с). Модуль asyncpg импортируется лениво, чтобы чистые тесты обходились без БД."""
     import asyncpg
     global _pool
     if _pool is None:
@@ -30,7 +31,7 @@ async def create_pool(settings: Settings) -> Any:
 
 
 async def close_pool() -> None:
-    """Close all process connections on shutdown."""
+    """Закрыть пул соединений процесса при остановке службы; повторный вызов безопасен."""
     global _pool
     if _pool is not None:
         await _pool.close()
@@ -39,34 +40,55 @@ async def close_pool() -> None:
 
 @asynccontextmanager
 async def acquire(settings: Settings) -> AsyncIterator[Any]:
-    """Lease a pool connection for a bounded operation."""
+    """Контекстный менеджер: взять соединение из пула на время короткой операции и вернуть его обратно."""
     pool = await create_pool(settings)
     async with pool.acquire() as connection:
         yield connection
 
 
 async def wait_for_database(settings: Settings, attempts: int = 60, delay: float = 2) -> None:
-    """Bound startup retries; never log a credential-containing connection error."""
+    """Дождаться готовности PostgreSQL: до `attempts` попыток с паузой `delay` секунд. Текст ошибки подключения не выводится, чтобы пароль не попал в журнал."""
     import asyncpg
     for attempt in range(attempts):
         try:
             connection = await asyncpg.connect(normalize_asyncpg_dsn(settings.database_url),timeout=5)
             await connection.close()
             return
-        except (OSError, asyncio.TimeoutError, asyncpg.PostgresError):
+        except (TimeoutError, OSError, asyncpg.PostgresError):
             if attempt + 1 < attempts:
                 await asyncio.sleep(delay)
     raise RuntimeError(f'PostgreSQL not ready after {attempts} attempts')
 
 
 def migration_files(schema_path: Path | None = None) -> list[Path]:
-    """The unchanged baseline schema plus sequential upgrade scripts."""
+    """Список SQL-файлов для применения по порядку: базовая схема `sql/schema.sql`, затем миграции из `sql/migrations/` по имени файла."""
     base = schema_path or Path(__file__).resolve().parents[1] / 'sql' / 'schema.sql'
     return [base, *sorted((base.parent / 'migrations').glob('*.sql'))]
 
 
+async def migration_status(settings: Settings, schema_path: Path | None = None) -> dict[str, Any]:
+    """Предварительная проверка миграций без изменений: какие уже применены, какие ожидают, какие применённые файлы изменены."""
+    import asyncpg
+    connection = await asyncpg.connect(normalize_asyncpg_dsn(settings.database_url),timeout=30)
+    try:
+        exists = await connection.fetchval("SELECT to_regclass('schema_migrations') IS NOT NULL")
+        known = {r['name']: r['sha256'] for r in await connection.fetch('SELECT name,sha256 FROM schema_migrations')} if exists else {}
+    finally:
+        await connection.close()
+    applied, pending, modified = [], [], []
+    for path in migration_files(schema_path):
+        digest = hashlib.sha256(path.read_text(encoding='utf-8').encode()).hexdigest()
+        if path.name not in known:
+            pending.append(path.name)
+        elif known[path.name] != digest:
+            modified.append(path.name)
+        else:
+            applied.append(path.name)
+    return {'status': 'failed' if modified else 'pending' if pending else 'ok', 'applied': len(applied), 'pending': pending, 'modified': modified}
+
+
 async def apply_schema(settings: Settings, schema_path: Path | None = None) -> None:
-    """Apply each migration exactly once, rejecting changes to applied SQL."""
+    """Применить все ещё не применённые миграции под общей блокировкой. Каждая миграция выполняется в своей транзакции, её SHA-256 записывается в `schema_migrations`; если уже применённый файл изменён — выбрасывается ошибка."""
     import asyncpg
     connection = await asyncpg.connect(normalize_asyncpg_dsn(settings.database_url),timeout=30)
     try:
@@ -93,14 +115,14 @@ async def apply_schema(settings: Settings, schema_path: Path | None = None) -> N
 
 
 async def acquire_runtime_guard(connection: Any) -> None:
-    """Refuse runtime startup while an exclusive schema/corpus maintenance operation runs."""
+    """Взять разделяемую блокировку обслуживания: рабочие службы запускаются только если сейчас не идёт эксклюзивная миграция или импорт корпуса."""
     if not await connection.fetchval('SELECT pg_try_advisory_lock_shared($1)',lock_key('maintenance',1)):
         raise RuntimeError('Database maintenance is active; runtime startup is blocked')
 
 
 @asynccontextmanager
 async def maintenance(settings: Settings) -> AsyncIterator[Any]:
-    """Fail closed instead of mutating editions while bot/worker/admin are serving users."""
+    """Контекстный менеджер эксклюзивного обслуживания (миграции, импорт изданий). Если бот, воркер или админка уже работают, сразу отказывает, чтобы не менять данные под пользователями."""
     import asyncpg
     connection = await asyncpg.connect(normalize_asyncpg_dsn(settings.database_url),timeout=30)
     try:

@@ -1,4 +1,4 @@
-"""Private native support menu, checkout links, receipts and refund tickets."""
+"""Меню платежей картой/СБП в MAX (и Telegram): условия, оплата по ссылке, квитанции и обращения по возврату."""
 # ruff: noqa: RUF001
 from __future__ import annotations
 
@@ -14,11 +14,13 @@ from app.services.errors import UserError
 
 
 def buttons(rows):
+    """Собрать inline-клавиатуру из строк пар (подпись, данные кнопки)."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=text, callback_data=payload) for text, payload in row] for row in rows])
 
 
 async def support(dispatcher, message, parsed):
+    """Обработать платёжные команды в личном чате: `/terms` (условия), `/paysupport` (сохранить обращение или показать контакт), `/donations` (последние квитанции), `/refund` (возврат оформляется обращением, не автоматически), `/donate` (выбор суммы 100–10000 ₽ и способа — карта или СБП). Если магазин не подключён, сообщает, что оплата недоступна."""
     if message.chat.type != 'private':
         raise UserError('private_only')
     settings = MerchantSettings.from_env()
@@ -96,6 +98,7 @@ async def support(dispatcher, message, parsed):
 
 
 async def checkout(dispatcher, message, rubles=None, method=None, *, retry_id=None):
+    """Создать платёж на выбранную сумму и способ (или повторить прежний заказ по `retry_id`) и отправить ссылку на оплату; уже подтверждённый или отменённый заказ получает соответствующее сообщение."""
     if message.chat.type != 'private':
         raise UserError('private_only')
     config = MerchantSettings.from_env()

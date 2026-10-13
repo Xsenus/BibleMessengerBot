@@ -1,11 +1,12 @@
 """Runtime regressions: lost lock sessions, unavailable plans, and authentication."""
 from __future__ import annotations
 
+from tests.bot_patch import patch_bot
 import asyncio
 import re
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -61,6 +62,9 @@ async def test_lost_singleton_connection_stops_polling(monkeypatch):
         await asyncio.Future()
     monkeypatch.setattr(main, 'branding_loop', branding_loop)
     monkeypatch.setattr(main, 'reconciliation_loop', branding_loop)
+    monkeypatch.setattr(main.features, 'refresh_loop', branding_loop)
+    monkeypatch.setattr(main.net_store, 'refresh_loop', branding_loop)
+    monkeypatch.setattr(main.net_store, 'refresh', AsyncMock())
 
     with pytest.raises(ConnectionError, match='lost lock session'):
         await main.main()
@@ -139,8 +143,8 @@ async def test_liveness_does_not_mask_missing_database(monkeypatch):
 async def test_status_resolution_commands_are_copyable_in_private_and_group_chat(monkeypatch, chat_id):
     from app.bot import handlers
     from app.bot.commands import parse_command
-    monkeypatch.setattr(handlers, 'settings_text', AsyncMock(return_value='fixture'))
-    monkeypatch.setattr(handlers, 'list_subscriptions', AsyncMock(return_value=[]))
+    patch_bot(monkeypatch, 'settings_text', AsyncMock(return_value='fixture'))
+    patch_bot(monkeypatch, 'list_subscriptions', AsyncMock(return_value=[]))
     connection = SimpleNamespace(fetch=AsyncMock(side_effect=[[{
         'id': 7, 'status': 'uncertain', 'next_chunk': 0, 'total': 1,
     }],[]]))
@@ -162,7 +166,7 @@ def test_container_start_probe_accounts_for_kernel_rounding(tmp_path, monkeypatc
     (tmp_path / '1' / 'stat').write_text('1 (name with ) parentheses) ' + ' '.join(fields))
     (tmp_path / 'stat').write_text('cpu 1 2 3\nbtime 1000\n')
     monkeypatch.setattr(healthcheck.os, 'sysconf', lambda name: 100, raising=False)
-    assert healthcheck.container_started_at(tmp_path) == datetime.fromtimestamp(1003.5, timezone.utc)
+    assert healthcheck.container_started_at(tmp_path) == datetime.fromtimestamp(1003.5, UTC)
 
 
 @pytest.mark.asyncio

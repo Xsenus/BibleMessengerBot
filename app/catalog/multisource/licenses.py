@@ -1,4 +1,4 @@
-"""Edition-level evidence. A repository's software license is never the Bible's license."""
+"""Лицензионные доказательства на уровне издания. Лицензия программы в репозитории — не лицензия текста Библии."""
 from __future__ import annotations
 import re
 from dataclasses import replace
@@ -12,22 +12,27 @@ from app.catalog.multisource.transport import Downloader, digest_file
 
 
 class LicenseHTML(HTMLParser):
+    """Разборщик HTML страницы лицензии: собирает видимый текст и ссылки, пропуская скрипты и стили."""
     def __init__(self):
+        """Подготовить списки текстовых фрагментов и ссылок и счётчик скрытых блоков."""
         super().__init__(convert_charrefs=True)
         self.chunks=[];self.links=[];self.hidden=0
     def handle_starttag(self,tag,attrs):
+        """Начало тега: учесть вход в скрытый блок (script/style) и собрать ссылки."""
         if tag in {'script','style'}:self.hidden+=1
         if tag=='a':
             href=dict(attrs).get('href')
             if href:self.links.append(href)
     def handle_endtag(self,tag):
+        """Конец тега: выйти из скрытого блока."""
         if tag in {'script','style'} and self.hidden:self.hidden-=1
     def handle_data(self,data):
+        """Текстовый фрагмент вне скрытых блоков добавить в список."""
         if not self.hidden and data.strip():self.chunks.append(data.strip())
 
 
 def parse_license_html(text: str) -> tuple[str,str,str]:
-    """Accept exact standalone PD labels or an official CC URL, not generic prose."""
+    """Определить лицензию по странице: принимаются только точная метка Public Domain или официальная ссылка Creative Commons, а не обычный текст. Запретительные условия и противоречия помечаются для ручной проверки; заметка о правах ограничивается безопасным размером. Возвращает (тип, адрес лицензии, текст прав)."""
     parser=LicenseHTML();parser.feed(text)
     urls={url:_url_identifier(url) for url in parser.links if _url_identifier(url)}
     ids=set(urls.values())
@@ -57,6 +62,7 @@ def parse_license_html(text: str) -> tuple[str,str,str]:
 
 
 def ebible_id(row: dict) -> str | None:
+    """Найти идентификатор издания на ebible.org в адресах строки каталога; иначе None."""
     for key in ('licenseUrl','website'):
         parsed=urlsplit(str(row.get(key,'')))
         if parsed.hostname in {'ebible.org','www.ebible.org'}:
@@ -66,7 +72,7 @@ def ebible_id(row: dict) -> str | None:
 
 
 async def resolve_hello_license(candidate: Candidate,downloader: Downloader,refresh: bool) -> Candidate:
-    """Independent eBible page lookup, so HelloAO does not require GitHub availability."""
+    """Уточнить лицензию издания HelloAO по странице eBible (независимо от GitHub), а для Berean Standard Bible — по официальному заявлению о передаче в общественное достояние; иначе кандидат остаётся «неизвестным» и политика его заблокирует."""
     identifier=ebible_id(candidate.raw)
     if identifier:
         url=f'https://ebible.org/find/show.php?id={identifier}'

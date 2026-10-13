@@ -39,3 +39,6 @@ build/
 dist/
 *.egg-info/
 TEST-RESULTS*
+
+admin-ui/node_modules/
+app/web/static/panel/

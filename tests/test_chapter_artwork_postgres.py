@@ -1,3 +1,4 @@
+from tests.bot_patch import patch_bot
 import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -90,13 +91,15 @@ async def test_failed_generation_due_to_daily_cap_preserves_bound_chapter(db,mon
 async def test_only_whole_chapter_addresses_use_chapter_artwork(db,monkeypatch,command):
     provider(monkeypatch)
     c,settings,edition,chat,_=await setup(db)
-    monkeypatch.setattr(handlers,'destination',AsyncMock(return_value=chat))
+    patch_bot(monkeypatch, 'destination',AsyncMock(return_value=chat))
     message=SimpleNamespace(from_user=SimpleNamespace(id=101),chat=SimpleNamespace(id=101,type='private'),message_id=100,message_thread_id=None)
     text,_=await handlers.run_command(c,None,settings,message,parse_command(command))
     assert '<b>[1]</b>' in text and '<b>[2]</b>' in text
     whole=':' not in command
     assert isinstance(text,illustrations.ChapterText)==whole
     assert await c.fetchval("SELECT count(*) FROM verse_illustrations WHERE artwork_scope='chapter'")==int(whole)
+    # Явный диапазон получает собственную картинку-диапазон, но не картинку главы.
+    assert await c.fetchval("SELECT count(*) FROM verse_illustrations WHERE artwork_scope='range'")==int(not whole and command.endswith('1:1–2'))
 
 
 async def test_sequential_subscription_queues_chapter_and_advances_only_after_ack(db,monkeypatch):

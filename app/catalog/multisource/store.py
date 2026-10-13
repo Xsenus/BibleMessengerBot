@@ -1,4 +1,4 @@
-"""One atomic edition write; source aliases never overwrite subscriptions or merge approximate texts."""
+"""Атомарная запись одного издания: алиасы источников не затирают подписки и не склеивают приблизительно похожие тексты."""
 from __future__ import annotations
 import hashlib
 import json
@@ -13,10 +13,11 @@ from app.services.locks import lock_key
 
 
 class UpdateHeld(RuntimeError):
-    """A changed upstream edition is not silently substituted for a reader's selected text."""
+    """Изменённое издание источника не подменяет молча текст, выбранный читателями: обновление задерживается до решения оператора."""
 
 
 async def database_fingerprint(connection: Any, translation_id: int, numbering: str) -> str:
+    """Посчитать SHA-256 содержимого издания в БД по тем же правилам, что и для файла (порядок книг, глав, стихов), чтобы сравнивать записанное с проверенным."""
     h=hashlib.sha256();h.update(('BibleMessenger-content-v1\n'+numbering+'\n').encode())
     query='''SELECT book_code,chapter,verse,text,is_range_continuation FROM verses
         WHERE translation_id=$1
@@ -28,6 +29,7 @@ async def database_fingerprint(connection: Any, translation_id: int, numbering: 
 
 
 async def record_source(connection: Any, prepared: Prepared, translation_id: int) -> None:
+    """Записать или обновить сведения об источнике издания: адреса, хеши, ревизию, систему нумерации и доказательства лицензии."""
     candidate=prepared.candidate
     evidence={**candidate.evidence,'license':asdict(candidate.metadata.license) if candidate.metadata.license else None,
         'decision':asdict(decide_license(candidate.metadata)),'copyright_notice':candidate.metadata.copyright_notice}
@@ -46,10 +48,13 @@ async def record_source(connection: Any, prepared: Prepared, translation_id: int
 
 
 class PostgresStore:
+    """Хранилище PostgreSQL для подготовленных изданий."""
     def __init__(self,connection: Any,*,batch_size: int=2000,allow_replace: bool=False):
+        """Запомнить соединение, размер пачки вставки и разрешение заменять существующие издания."""
         self.connection=connection;self.batch_size=batch_size;self.allow_replace=allow_replace
 
     async def save(self,prepared: Prepared) -> dict[str,Any]:
+        """Сохранить издание в одной транзакции: повторно проверить лицензию, найти прежнее издание и сравнить хеши (без изменений — `already_present`; изменённый текст — задержка, если замена не разрешена или издание уже используется), распознать точный дубликат другого источника, импортировать записи, названия книг и после COPY проверить хеш записанных строк (иначе откат)."""
         c=self.connection;m=prepared.candidate.metadata;candidate=prepared.candidate
         decision=decide_license(m)
         if not decision.allowed:raise ValueError('License was rejected at persistence boundary')

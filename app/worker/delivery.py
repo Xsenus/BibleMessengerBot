@@ -1,8 +1,8 @@
-"""Durable SQL outbox: frozen payload, per-message acknowledgement, final progress."""
+"""Надёжная очередь отправки в SQL: неизменяемое содержимое, подтверждение каждой части сообщения и фиксация прогресса чтения только после полной доставки."""
 from __future__ import annotations
 import hashlib
 import json
-from datetime import datetime,timezone,timedelta
+from datetime import datetime,timedelta, UTC
 from typing import Any
 from zoneinfo import ZoneInfo
 from app.services import bible
@@ -15,15 +15,19 @@ from app.services.plans import PLANS,plan_window,validate_plan
 from app.services.scheduling import next_reading
 
 
+# Задания, которые не отменяются при смене настроек чата (разовые сообщения администраторов и уведомления).
+IMMUTABLE_MODES = frozenset({'broadcast', 'announcement', 'source_post', 'video_notice'})
+
+
 def decoded(value: Any) -> Any:
-    """asyncpg returns JSON as text unless a codec is configured."""
+    """Привести значение JSON-столбца к Python-объекту: asyncpg без специального кодека отдаёт JSON строкой."""
     return json.loads(value) if isinstance(value,str) else value
 
 
 async def insert_payload(connection: Any, chat: Any, translation: Any, text: str,
                          key: str, mode: str, progress: dict[str,Any], *,
                          subscription: Any = None, max_length: int = 3900, image_id: int | None = None, frozen_chunks=None) -> int:
-    """Persist content and references atomically before the first send request."""
+    """Записать задание в `delivery_log` одной вставкой до первой отправки: части текста (с языковыми карточками), ссылки на картинку, ревизии подписки и чата. Повторная вставка с тем же ключом не создаёт дубль и возвращает идентификатор существующего задания."""
     chunks = frozen_chunks if frozen_chunks is not None else illustrations.chunks(text,image_id,max_length)
     if frozen_chunks is None:
         from app.services.message_languages import prepare
@@ -36,7 +40,7 @@ async def insert_payload(connection: Any, chat: Any, translation: Any, text: str
         VALUES($1,$2,$3,$4,$5,$6,'pending',$7,$8::jsonb,$9::jsonb,$10,$11,$12,$13)
         ON CONFLICT(telegram_chat_id,payload_key) DO NOTHING RETURNING id''',
         subscription['id'] if subscription else None,chat['telegram_chat_id'],translation['id'],mode,key,
-        subscription['next_run_at'] if subscription else datetime.now(timezone.utc),text[:1000],
+        subscription['next_run_at'] if subscription else datetime.now(UTC),text[:1000],
         json.dumps(chunks,ensure_ascii=False),json.dumps(progress),subscription['revision'] if subscription else None,
         chat['revision'],chat['ui_language'],chat['message_thread_id'])
     if identifier is None:
@@ -45,13 +49,13 @@ async def insert_payload(connection: Any, chat: Any, translation: Any, text: str
 
 
 async def prepare_subscription(connection: Any, subscription_id: int, max_length: int = 3900, *, lead_seconds: int = 0) -> int | None:
-    """Freeze one due occurrence, using its original local date, not a retry date."""
+    """Подготовить наступающую отправку подписки (стих дня, тема, утро/вечер, последовательное чтение, план): под блокировкой чата выбрать и отрисовать текст по исходной местной дате, записать задание и, для чтений со стихом, поставить подготовку картинки и озвучки. Возвращает идентификатор задания или None, если готовить нечего."""
     row = await connection.fetchrow('SELECT telegram_chat_id FROM subscriptions WHERE id=$1',subscription_id)
     if not row:
         return None
     async with chat_lock(connection,row['telegram_chat_id']),connection.transaction():
         sub = await connection.fetchrow('SELECT * FROM subscriptions WHERE id=$1 FOR UPDATE',subscription_id)
-        if not sub or not sub['is_enabled'] or sub['completed'] or not sub['next_run_at'] or sub['next_run_at']>datetime.now(timezone.utc)+timedelta(seconds=lead_seconds):
+        if not sub or not sub['is_enabled'] or sub['completed'] or not sub['next_run_at'] or sub['next_run_at']>datetime.now(UTC)+timedelta(seconds=lead_seconds):
             return None
         chat = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1',sub['telegram_chat_id'])
         if not chat or not chat['is_active']:
@@ -126,7 +130,7 @@ async def prepare_subscription(connection: Any, subscription_id: int, max_length
 
 async def enqueue_next(connection: Any, chat: Any, translation: Any, request_id: str,
                        max_length: int = 3900) -> int:
-    """Manual reading is per destination and advances only after confirmed delivery."""
+    """Поставить в очередь ручное «следующее чтение» чата: следующая глава после сохранённой, с защитой от повторного запроса (по ключу запроса) и от второго незавершённого задания. Прогресс сдвигается только после подтверждённой доставки."""
     chat_id = chat['telegram_chat_id']
     async with chat_lock(connection,chat_id),connection.transaction():
         chat = await connection.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=$1',chat_id)
@@ -158,7 +162,7 @@ async def enqueue_next(connection: Any, chat: Any, translation: Any, request_id:
 
 
 async def commit_progress(connection: Any, delivery: Any) -> None:
-    """Called inside the acknowledgement transaction; no progress before all chunks."""
+    """Зафиксировать прогресс чтения внутри транзакции подтверждения последней части: для ручного чтения — сохранённая глава чата, для подписки — следующая глава или день плана, время следующего запуска или завершение подписки."""
     progress = decoded(delivery['progress'])
     if progress.get('kind')=='manual' and progress.get('book'):
         await connection.execute('''INSERT INTO chat_reading_progress(telegram_chat_id,translation_id,book_code,chapter)
@@ -179,19 +183,20 @@ async def commit_progress(connection: Any, delivery: Any) -> None:
 
 
 class SqlCheckpoints:
-    """SQL adapter used while holding the destination advisory lock."""
+    """SQL-реализация контрольных точек отправки; используется, пока удерживается блокировка чата."""
     def __init__(self, connection: Any) -> None:
+        """Запомнить соединение с БД, в котором выполняются контрольные точки."""
         self.connection = connection
 
     async def begin(self, envelope: Envelope) -> bool:
-        """Mark ambiguity before starting network I/O, never afterwards."""
+        """Пометить часть как `sending` до сетевого запроса (чтобы неясный исход был виден после сбоя). Возвращает False, если другой процесс уже взял эту часть."""
         result = await self.connection.execute('''UPDATE delivery_log SET status='sending',sending_chunk=next_chunk,
             attempt_count=attempt_count+1,updated_at=now() WHERE id=$1 AND next_chunk=$2 AND status IN ('pending','retry')''',
             envelope.id,envelope.next_chunk)
         return result=='UPDATE 1'
 
     async def acknowledge(self, envelope: Envelope, message_id: int) -> None:
-        """Commit message ID, chunk offset, final state and reading progress together."""
+        """Записать подтверждение Telegram одной транзакцией: идентификатор сообщения, смещение части, итоговый статус и прогресс чтения; привязать сообщение к картинке и языковой карточке."""
         async with self.connection.transaction():
             delivery = await self.connection.fetchrow('SELECT * FROM delivery_log WHERE id=$1 FOR UPDATE',envelope.id)
             if delivery['status']!='sending' or delivery['sending_chunk']!=envelope.next_chunk:
@@ -214,7 +219,7 @@ class SqlCheckpoints:
                 await self.connection.execute("UPDATE illustration_requests SET state='delivered' WHERE delivery_id=$1 AND telegram_message_id=$2",envelope.id,message_id)
 
     async def fail(self, envelope: Envelope, kind: str, retry_after: float) -> None:
-        """Known rejection is retryable; ambiguity blocks automation until reviewed."""
+        """Обработать отказ отправки: известные временные ошибки переводят задание на повтор (до 10 раз), неясный исход — в `uncertain` (ждёт решения человека), прочее — в `failed`; при блокировке бота чат отключается, подписка при сбое приостанавливается."""
         async with self.connection.transaction():
             row = await self.connection.fetchrow('SELECT * FROM delivery_log WHERE id=$1 FOR UPDATE',envelope.id)
             failures = row['consecutive_failures']+1
@@ -222,7 +227,7 @@ class SqlCheckpoints:
             status = 'retry' if (editing and kind in {'retry','forbidden','uncertain'}) or kind=='retry' and failures<=10 else 'uncertain' if kind=='uncertain' else 'failed'
             if editing and status=='retry':
                 retry_after=max(retry_after,min(3600,3*2**min(failures,11)))
-            retry_at = datetime.now(timezone.utc)+timedelta(seconds=max(retry_after,3)) if status=='retry' else None
+            retry_at = datetime.now(UTC)+timedelta(seconds=max(retry_after,3)) if status=='retry' else None
             await self.connection.execute('''UPDATE delivery_log SET status=$2,error_code=$3,error_message=$3,
                 retry_at=$4,consecutive_failures=$5,sending_chunk=CASE WHEN $2='uncertain' THEN sending_chunk ELSE NULL END,
                 updated_at=now() WHERE id=$1''',envelope.id,status,kind,retry_at,failures)
@@ -236,7 +241,7 @@ class SqlCheckpoints:
 
 
 async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> str:
-    """Cancel stale snapshots rather than sending old-language content after a change."""
+    """Обработать одно задание под блокировкой чата: проверить актуальность настроек (устаревшие снимки отменяются, чтобы не отправить текст на прежнем языке), срок молитвы (3 минуты), готовность картинки и озвучки и отправить следующую часть. Возвращает короткий код результата."""
     hint = await connection.fetchrow('SELECT telegram_chat_id FROM delivery_log WHERE id=$1',delivery_id)
     if not hint:
         return 'absent'
@@ -245,7 +250,7 @@ async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> st
             s.revision AS current_subscription_revision,s.is_enabled FROM delivery_log d
             JOIN telegram_chats c ON c.telegram_chat_id=d.telegram_chat_id LEFT JOIN subscriptions s ON s.id=d.subscription_id
             WHERE d.id=$1''',delivery_id)
-        if row['status'] not in {'pending','retry'} or row['retry_at'] and row['retry_at']>datetime.now(timezone.utc):
+        if row['status'] not in {'pending','retry'} or row['retry_at'] and row['retry_at']>datetime.now(UTC):
             return 'not_due'
         if not row['is_active'] or row['subscription_id'] and not row['is_enabled']:
             return 'paused'
@@ -273,17 +278,27 @@ async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> st
                     await connection.execute("UPDATE illustration_requests SET state='cancelled' WHERE id=$1",request['id'])
                     await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='source_changed',updated_at=now() WHERE id=$1",delivery_id)
                 return 'source_changed'
-        valid = editing or row['chat_revision']==row['current_chat_revision'] and (
+        valid = editing or row['mode'] in IMMUTABLE_MODES or row['chat_revision']==row['current_chat_revision'] and (
             not row['subscription_id'] or row['subscription_revision']==row['current_subscription_revision'])
         if not valid:
             await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='stale_configuration',updated_at=now() WHERE id=$1",delivery_id)
             return 'stale'
-        if row['scheduled_for']>datetime.now(timezone.utc):
+        if row['scheduled_for']>datetime.now(UTC):
             return 'not_due'
         from app.services import scheduled_media, prayers
-        if row['mode']=='prayer' and datetime.now(timezone.utc)>row['scheduled_for']+timedelta(minutes=3):
+        if row['mode']=='prayer' and datetime.now(UTC)>row['scheduled_for']+timedelta(minutes=3):
             await connection.execute("UPDATE delivery_log SET status='skipped',error_code='prayer_expired',updated_at=now() WHERE id=$1",delivery_id)
             return 'expired'
+        if row['mode']=='broadcast':
+            # Рассылка ждёт общую картинку (создана при поиске администратора), но не дольше установленного срока.
+            from app.services import broadcast
+            state=await broadcast.media_state(connection,row)
+            if state=='wait':
+                await connection.execute("UPDATE delivery_log SET retry_at=now()+interval '30 seconds' WHERE id=$1 AND status IN ('pending','retry')",delivery_id)
+                return 'waiting_media'
+            if state=='strip':
+                await broadcast.strip_image(connection,row)
+                row=dict(row,chunks=(await connection.fetchval('SELECT chunks FROM delivery_log WHERE id=$1',delivery_id)))
         readiness=await scheduled_media.ready(connection,row)
         if readiness!='ready':
             return readiness
@@ -296,7 +311,7 @@ async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> st
 
 
 async def recover_ambiguous(connection: Any) -> int:
-    """Only run after acquiring the singleton-worker lock, never using an arbitrary lease."""
+    """После старта воркера разобрать задания, застрявшие в `sending` при падении: правки картинок повторяются, обычные отправки помечаются `uncertain`, их подписки приостанавливаются. Возвращает число неопределённых заданий."""
     async with connection.transaction():
         await connection.execute("""UPDATE delivery_log SET status='retry',sending_chunk=NULL,
             retry_at=now(),error_code='edit_interrupted',updated_at=now()
@@ -307,7 +322,7 @@ async def recover_ambiguous(connection: Any) -> int:
 
 
 async def resolve_uncertain(connection: Any, delivery_id: int, chat_id: int, actor_id: int, action: str) -> None:
-    """Explicit human decision: sent, retry-duplicate-risk, or cancel; caller verifies chat admin."""
+    """Решение оператора по неопределённой доставке: `sent` (сообщение дошло), `retry-duplicate-risk` (повторить с риском дубля) или `cancel`. Действие записывается в журнал; права администратора проверяет вызывающий код."""
     if action not in {'sent','retry-duplicate-risk','cancel'}:
         raise UserError('invalid')
     async with chat_lock(connection,chat_id),connection.transaction():

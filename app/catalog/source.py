@@ -1,4 +1,4 @@
-"""Remote BibleNLP/eBible catalog and corpus downloader."""
+"""Загрузчик каталога и корпуса BibleNLP/eBible с устойчивым локальным кэшем (закреплённая ревизия репозитория)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import json
 import logging
 import re
 import tempfile
-from datetime import date, datetime, timezone
+from datetime import date, datetime, UTC
 from pathlib import Path
 from typing import Any
 
@@ -31,10 +31,12 @@ VREF_URL = f"{RAW_BASE}/metadata/vref.txt"
 
 
 def _to_bool(value: str) -> bool:
+    """Строку из каталога (`1`, `true`, `yes`, `y`) привести к логическому значению."""
     return value.strip().lower() in {"1", "true", "yes", "y"}
 
 
 def _to_int(value: str) -> int:
+    """Строку привести к целому; пустая или неверная — 0."""
     try:
         return int(value or 0)
     except ValueError:
@@ -42,6 +44,7 @@ def _to_int(value: str) -> int:
 
 
 def _to_date(value: str) -> date | None:
+    """Разобрать дату `ГГГГ-ММ-ДД` (по первым 10 символам); пустую или неверную — None."""
     value = value.strip()
     if not value:
         return None
@@ -52,10 +55,12 @@ def _to_date(value: str) -> date | None:
 
 
 def _safe_name(value: str) -> str:
+    """Безопасное имя файла: недопустимые символы заменяются на `_`."""
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._") or "file"
 
 
 def _sha256(path: Path) -> str:
+    """SHA-256 файла (читается блоками по 1 МБ)."""
     digest = hashlib.sha256()
     with path.open("rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
@@ -64,7 +69,7 @@ def _sha256(path: Path) -> str:
 
 
 class BibleNlpSource:
-    """Fetches metadata and verse files with a durable local cache."""
+    """Получает таблицы изданий, лицензий и файлы стихов BibleNLP с долговременным кэшем и контрольными суммами."""
 
     def __init__(
         self,
@@ -73,6 +78,7 @@ class BibleNlpSource:
         timeout_seconds: int = 180,
         client: httpx.AsyncClient | None = None,
     ) -> None:
+        """Создать каталог кэша для закреплённой ревизии и HTTP-клиент с таймаутами; список файлов корпуса загружается лениво."""
         self.cache_dir = cache_dir / SOURCE_REVISION
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._owns_client = client is None
@@ -86,14 +92,17 @@ class BibleNlpSource:
         )
         self._corpus_index: dict[str, str] | None = None
 
-    async def __aenter__(self) -> "BibleNlpSource":
+    async def __aenter__(self) -> BibleNlpSource:
+        """Вход в контекст — возвращает сам объект."""
         return self
 
     async def __aexit__(self, *_: object) -> None:
+        """Выход из контекста: закрыть собственный HTTP-клиент."""
         if self._owns_client:
             await self.client.aclose()
 
     async def _request(self, url: str, *, attempts: int = 4) -> httpx.Response:
+        """GET с повторами: при 429/5xx и сетевых сбоях ждёт (учитывая Retry-After, до 20 с) и повторяет; после исчерпания попыток — RuntimeError."""
         error: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:
@@ -111,7 +120,7 @@ class BibleNlpSource:
         raise RuntimeError(f"Failed to download {url}: {error}")
 
     async def _exists(self, url: str) -> bool:
-        """Check a large raw file without downloading its full body."""
+        """Проверить существование большого файла без скачивания (HEAD, а если не поддерживается — GET первого байта)."""
         try:
             response = await self.client.head(url)
             if response.status_code == 200:
@@ -131,6 +140,7 @@ class BibleNlpSource:
         refresh: bool = False,
         max_bytes: int = 128 * 1024 * 1024,
     ) -> Path:
+        """Скачать файл в кэш (или вернуть проверенную копию по сохранённой SHA-256): с лимитом размера, повторами и атомарной записью через временный файл. Несовпадение контрольной суммы кэша — ошибка."""
         target = self.cache_dir / _safe_name(cache_name)
         sidecar = target.with_suffix(target.suffix + '.sha256')
         if target.exists() and target.stat().st_size > 0 and not refresh:
@@ -176,6 +186,7 @@ class BibleNlpSource:
         raise RuntimeError(f'Could not fetch pinned source: {type(error).__name__}')
 
     async def fetch_catalog(self, *, refresh: bool = True) -> list[TranslationMeta]:
+        """Загрузить таблицы изданий и лицензий (параллельно), разобрать их и проверить, что каталог не пуст и идентификаторы уникальны."""
         translations_path, licenses_path = await asyncio.gather(
             self.fetch_bytes_cached(
                 TRANSLATIONS_URL,
@@ -198,6 +209,7 @@ class BibleNlpSource:
         return catalog
 
     async def fetch_references(self, *, refresh: bool = False) -> Path:
+        """Загрузить эталонную сетку стихов `vref.txt`."""
         return await self.fetch_bytes_cached(
             VREF_URL,
             "vref.txt",
@@ -207,6 +219,7 @@ class BibleNlpSource:
 
     @staticmethod
     def _parse_licenses(text: str) -> dict[str, LicenseInfo]:
+        """Разобрать таблицу лицензий (TSV) в словарь «идентификатор → LicenseInfo» с вариантами написания `-`/`_`."""
         rows = csv.DictReader(io.StringIO(text), delimiter="\t")
         result: dict[str, LicenseInfo] = {}
         for row in rows:
@@ -237,6 +250,7 @@ class BibleNlpSource:
         text: str,
         licenses: dict[str, LicenseInfo],
     ) -> list[TranslationMeta]:
+        """Разобрать таблицу изданий (CSV) в список TranslationMeta, сопоставив лицензии; небезопасные идентификаторы отвергаются."""
         rows = csv.DictReader(io.StringIO(text))
         result: list[TranslationMeta] = []
         for row in rows:
@@ -293,6 +307,7 @@ class BibleNlpSource:
         return result
 
     async def _load_corpus_index(self) -> dict[str, str]:
+        """Загрузить (один раз) индекс файлов `corpus/*.txt` из дерева репозитория GitHub."""
         if self._corpus_index is not None:
             return self._corpus_index
 
@@ -316,6 +331,7 @@ class BibleNlpSource:
 
     @staticmethod
     def corpus_candidates(metadata: TranslationMeta) -> list[str]:
+        """Возможные пути файла издания по соглашению об именах (`corpus/язык-id.txt` с вариантами `-`/`_`)."""
         language = metadata.language_code
         translation = metadata.translation_id
         project_variants = list(
@@ -330,6 +346,7 @@ class BibleNlpSource:
         return [f"corpus/{language}-{project}.txt" for project in project_variants]
 
     async def resolve_corpus_path(self, metadata: TranslationMeta) -> str:
+        """Найти путь файла издания: сначала по соглашению об именах (без обращения к API), затем по индексу репозитория; нет файла — FileNotFoundError."""
         candidates = self.corpus_candidates(metadata)
         # Most files follow the documented naming convention, so avoid the API call first.
         for path in candidates:
@@ -353,6 +370,7 @@ class BibleNlpSource:
         *,
         refresh: bool = False,
     ) -> DownloadedTranslation:
+        """Скачать файл издания в кэш и вернуть DownloadedTranslation с адресом и SHA-256."""
         corpus_path = await self.resolve_corpus_path(metadata)
         source_url = f"{RAW_BASE}/{corpus_path}"
         date_suffix = metadata.source_date.isoformat() if metadata.source_date else "undated"
@@ -371,10 +389,11 @@ class BibleNlpSource:
         )
 
     def cache_status(self) -> dict[str, Any]:
+        """Сводка по кэшу: путь, число файлов и размер."""
         files = [item for item in self.cache_dir.iterdir() if item.is_file()]
         return {
             "path": str(self.cache_dir),
             "files": len(files),
             "bytes": sum(item.stat().st_size for item in files),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
         }

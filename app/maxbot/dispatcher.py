@@ -1,4 +1,4 @@
-"""Dispatch validated MAX events through shared Bible commands and permissions."""
+"""Диспетчер событий MAX: проверенные события превращаются в общие команды и проверки прав, как в Telegram."""
 # ruff: noqa: RUF001
 from __future__ import annotations
 
@@ -11,23 +11,29 @@ from aiogram.types import CallbackQuery, Chat, Message
 
 from app.bot import handlers
 from app.bot.commands import MANAGEMENT, parse_command
-from app.maxbot.bridge import ReplyContext, user_model
+from app.bot.ui import BUTTONS
+from app.maxbot.bridge import user_model
+from app.platforms.bridge import ReplyContext
 from app.maxbot.identities import lookup, register, remember_message
 from app.services import bible, passage
+from app.services.features import support_enabled
 from app.services.errors import UserError
 from app.services.i18n import initial_ui, tr
 from app.services.locks import chat_lock
 from app.worker.delivery import insert_payload
 
-NAVIGATION = {'/next','/today','/random','/search','/settings','/help','/daily','/donate','/start','/menu'}
+NAVIGATION = {'/' + name for name, _emoji in BUTTONS} | {'/start', '/menu'}
 
 
 class MaxDispatcher:
+    """Связывает события вебхука MAX с общими обработчиками: регистрирует пользователей и чаты, превращает сообщения и нажатия в сообщения/запросы aiogram и вызывает те же обработчики."""
     def __init__(self, bridge, pool, settings):
+        """Запомнить мост, пул БД и настройки; создать переменную контекста для текущего чата события."""
         self.bridge, self.pool, self.settings = bridge, pool, settings
         self.destination_context = ContextVar('max_destination_context',default=None)
 
     async def _context(self, user, external_chat, chat_type, locale):
+        """Зарегистрировать пользователя и чат MAX (внутренние идентификаторы) и вернуть модели пользователя и чата для обработчиков."""
         async with self.pool.acquire() as connection:
             actor, chat = await register(connection, user=user, external_chat_id=external_chat,
                                           chat_type=chat_type, timezone=self.settings.default_timezone,
@@ -37,6 +43,7 @@ class MaxDispatcher:
         return user_model(user,actor,locale),model
 
     async def _message_id(self, chat, mid):
+        """Получить внутренний числовой ID для сообщения MAX (нужен для последующих правок); неизвестное сообщение — запрет."""
         async with self.pool.acquire() as connection:
             identifier = await remember_message(connection, self.bridge.id, chat, mid)
         if identifier is None:
@@ -44,10 +51,12 @@ class MaxDispatcher:
         return identifier
 
     async def _response(self, chat, text, markup=None):
+        """Поставить в очередь ответ пользователю в указанный чат."""
         async with self.pool.acquire() as connection:
             await self.bridge.queue_response(connection,self.settings,chat.id,text,markup)
 
     async def _command(self, message):
+        """Выполнить команду из сообщения: проверить упоминание бота и явную цель `chat:ID` (для управляющих команд), перенаправить платёжные команды, `/thread` (недоступна в MAX), `/help`, `/chats` (список групп и каналов пользователя) и остальное передать общему `command_handler`."""
         try:
             parsed = parse_command(message.text or '')
         except UserError:
@@ -69,6 +78,9 @@ class MaxDispatcher:
                 raise UserError('forbidden')
             message = message.model_copy(update={'text':' '.join([*tokens[:-1],str(target)])})
             parsed = parse_command(message.text or '')
+        if parsed.name in {'donate','donations','paysupport','terms','refund'} and not support_enabled():
+            await self._response(message.chat,'Этот раздел временно недоступен.')
+            return
         if parsed.name in {'donate','donations','paysupport','terms','refund'} or (parsed.name=='start' and parsed.arguments==('donate',)):
             from app.maxbot.payments import support
             await support(self, message, parsed)
@@ -107,6 +119,7 @@ class MaxDispatcher:
         await handlers.command_handler(message,self.bridge,self.pool,self.settings)
 
     async def dispatch(self, event, event_key):
+        """Обработать одно событие: установить контекст ответов (ключи идемпотентности), выполнить `_dispatch`, а ошибку пользователя показать сообщением в том же чате."""
         token = self.bridge.reply_context.set(ReplyContext(event_key))
         destination_token = self.destination_context.set(None)
         try:
@@ -123,6 +136,7 @@ class MaxDispatcher:
             self.bridge.reply_context.reset(token)
 
     async def _dispatch(self, event):
+        """Разобрать событие по типу: остановка/удаление бота (чат отключается), смена названия или прав, запуск и добавление бота (приветствие или проверка прав), новое сообщение (команда, адрес или подсказка) и нажатие кнопки."""
         kind = event['update_type']
         locale = initial_ui(event.get('user_locale'))
         if kind in {'bot_stopped','bot_removed','dialog_removed'}:
@@ -170,6 +184,14 @@ class MaxDispatcher:
             content = (incoming.get('body') or {}).get('text')
             if not source_user or source_user.get('is_bot') or not content:
                 return
+            recipient_info = incoming.get('recipient') or {}
+            if recipient_info.get('chat_type') in {'chat', 'channel'} and not content.startswith('/'):
+                # Сообщения групп и каналов MAX — кандидаты в источники контента (если источник включён).
+                from app.services.chat_sources import ingest_post
+                async with self.pool.acquire() as connection:
+                    await ingest_post(connection, 'max', recipient_info['chat_id'], incoming['body']['mid'], content, {},
+                                      posted_at=(incoming.get('timestamp') or 0) // 1000 or None)
+                return
             recipient = incoming['recipient']
             chat_type = {'dialog':'private','chat':'group','channel':'channel'}[recipient['chat_type']]
             actor, chat = await self._context(source_user,recipient['chat_id'],chat_type,locale)
@@ -192,6 +214,7 @@ class MaxDispatcher:
             await self.callback(event,locale)
 
     async def callback(self, event, locale):
+        """Обработать нажатие кнопки на сообщении бота: навигация (`maxcmd:`), оплата (`maxpay:`, `maxretry:`), языки (`lc:`), настройки (`v1:`) и озвучка (`maxaudio:`, ставит аудио в очередь для своей карточки); чужие и неизвестные нажатия отклоняются."""
         raw = event['callback']
         original = event.get('message')
         if not original or raw['user'].get('is_bot'):

@@ -1,4 +1,4 @@
-"""Single active scheduler with independent preparation and bounded concurrent sends."""
+"""Основной воркер доставки: один активный экземпляр, подготовка и отправка работают независимо."""
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +7,8 @@ import signal
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 
+from app.net.telegram import RoutedSession
+from app.net import store as net_store
 from app.services.platform_sender import PlatformTransports
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
@@ -17,17 +19,18 @@ from app.worker.scheduler import prepare_loop, send_loop
 
 
 async def heartbeat(owner):
-    """Check the singleton's owning session even during slow preparation/sends."""
+    """Каждые 15 секунд записывать сигнал жизни `worker` через соединение-владельца блокировки (так видно, что именно он жив)."""
     while True:
         await owner.execute("INSERT INTO service_heartbeats(service) VALUES('worker') ON CONFLICT(service) DO UPDATE SET last_seen=now()")
         await asyncio.sleep(15)
 
 
 async def worker() -> None:
+    """Запустить воркер: обработать сигналы остановки, взять блокировку единственного воркера, разобрать неопределённые отправки после падения и запустить циклы подготовки, отправки и сигнала жизни; при остановке дать текущим отправкам завершиться."""
     settings = Settings.from_env()
     await wait_for_database(settings)
     pool = await create_pool(settings)
-    bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode='HTML'))
+    bot = Bot(settings.bot_token, session=RoutedSession('telegram'), default=DefaultBotProperties(parse_mode='HTML'))
     transports = PlatformTransports(bot, settings)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -44,10 +47,12 @@ async def worker() -> None:
             await acquire_runtime_guard(owner)
             if not await owner.fetchval('SELECT pg_try_advisory_lock($1)', lock_key('singleton-worker', 1)):
                 raise RuntimeError('Another delivery worker is already running for this database')
+            await net_store.refresh(owner)
             await recover_ambiguous(owner)
             sender = asyncio.create_task(send_loop(pool, transports.sender, stop))
             shutdown = asyncio.create_task(stop.wait())
-            tasks = [asyncio.create_task(heartbeat(owner)), asyncio.create_task(prepare_loop(pool, settings)), sender, shutdown]
+            tasks = [asyncio.create_task(heartbeat(owner)), asyncio.create_task(prepare_loop(pool, settings)), sender, shutdown,
+                     asyncio.create_task(net_store.refresh_loop(pool))]
             try:
                 done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
