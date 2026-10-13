@@ -6,6 +6,7 @@ import shutil
 import subprocess
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.skipif(os.name == 'nt', reason='POSIX deployment tests run on Linux')
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,6 +91,24 @@ def test_no_migrations_preserves_disabled_platforms(tmp_path):
     assert result.returncode == 0, result.stderr
     assert not any('stop' in call or 'start' in call for call in calls)
     assert [call[-1] for call in calls if 'up' in call] == ['worker']
+
+
+def test_shared_image_is_built_once_before_preflight(tmp_path):
+    result, calls = invoke(tmp_path, FAKE_CHECK='0')
+    assert result.returncode == 0, result.stderr
+    builds = [(i, call) for i, call in enumerate(calls) if 'build' in call]
+    assert len(builds) == 1 and builds[0][1][-2:] == ['build', 'bootstrap']
+    prepare = next(i for i, call in enumerate(calls) if 'app.neural_audio_admin' in call)
+    assert builds[0][0] < prepare
+
+
+def test_bootstrap_image_covers_every_buildable_service():
+    services = yaml.safe_load((ROOT / 'docker-compose.yml').read_text(encoding='utf-8'))['services']
+    bootstrap = services['bootstrap']
+    for name, service in services.items():
+        if 'build' in service:
+            assert service['build'] == bootstrap['build'], name
+            assert service['image'] == bootstrap['image'], name
 
 
 def test_standard_update_entrypoint_keeps_max_web_in_migration_guard(tmp_path):

@@ -24,7 +24,8 @@ finish() {
 trap finish EXIT
 
 echo '1/4 Сборка образа…'
-"${compose[@]}" build
+# Every app service shares bootstrap's image; parallel exports to the same tag can stall.
+"${compose[@]}" build bootstrap
 "${compose[@]}" run --rm --no-deps bootstrap python -m app.neural_audio_admin prepare
 
 echo '2/4 Проверка миграций (ничего не меняет)…'
