@@ -15,6 +15,8 @@ fi
 [[ -f $cert_file && -d $cert_root/webroot ]] || { echo 'Prepare the IP certificate first.' >&2; exit 1; }
 exec 9>"$cert_root/renew.lock"
 flock -n 9 || { echo 'Certificate maintenance is already running.' >&2; exit 1; }
+mkdir -p "$cert_root/webroot/.well-known/acme-challenge"
+chmod 755 "$cert_root/webroot/.well-known" "$cert_root/webroot/.well-known/acme-challenge"
 
 container=bible-max-acme
 owner_label=io.bible-messenger.role
