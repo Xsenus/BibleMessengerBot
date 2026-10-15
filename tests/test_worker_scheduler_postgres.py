@@ -39,7 +39,7 @@ async def test_queue_prioritizes_prayer_and_excludes_busy_future_retry_and_inact
     assert [r['id'] for r in await due_jobs(c, [], 1)] == [prayer]
 
 
-async def test_incomplete_due_bundle_is_dispatchable_while_future_bundle_prepares(db):
+async def test_incomplete_due_bundle_is_dispatchable_before_media_ready(db):
     c, settings, path = db
     _, identifier, _ = await setup(c, path, future=False)
     assert [r['id'] for r in await due_jobs(c, [], 4)] == [identifier]
