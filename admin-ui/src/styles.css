@@ -36,3 +36,6 @@ code { background: var(--line); padding: 1px 5px; border-radius: 4px; }
 .helpbody { margin-top: 8px; }
 .helpbody ol, .helpbody ul { margin: 6px 0 6px 18px; padding: 0; }
 .check { margin: 6px 0; line-height: 1.6; }
+.backup-table { overflow-x: auto; }
+.backup-table th { white-space: nowrap; }
+.backup-table td:nth-child(3) { overflow-wrap: anywhere; min-width: 180px; }

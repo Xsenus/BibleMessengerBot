@@ -14,12 +14,13 @@ import Gallery from './pages/Gallery.jsx';
 import Audit from './pages/Audit.jsx';
 import Reports from './pages/Reports.jsx';
 import Network from './pages/Network.jsx';
+import Backups from './pages/Backups.jsx';
 
 const PAGES = [
   ['overview', 'Состояние', Overview], ['announcements', 'Объявления', Announcements],
   ['sources', 'Источники', Sources], ['videos', 'Видео', Videos], ['images', 'Генераторы картинок', ImageProviders], ['gallery', 'Картинки', Gallery],
   ['chats', 'Чаты и пользователи', Chats], ['deliveries', 'Доставки', Deliveries], ['reports', 'Отчёты', Reports], ['audit', 'Журнал', Audit], ['admins', 'Администраторы', Admins],
-  ['network', 'Сеть и прокси', Network], ['settings', 'Настройки', Settings],
+  ['network', 'Сеть и прокси', Network], ['backups', 'Резервные копии', Backups], ['settings', 'Настройки', Settings],
 ];
 
 function Login({ onDone }) {
