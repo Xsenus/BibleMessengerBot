@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Existing IP certificate only. Never modify firewall rules or the VPN listener.
+# Existing MAX IP and optional admin domain certificates. Never change VPN rules.
 set -Eeuo pipefail
 cd -- "${MAX_CERT_PROJECT_DIR:-$(dirname -- "${BASH_SOURCE[0]}")}"
 project_dir=$PWD
@@ -50,12 +50,18 @@ for attempt in {1..15}; do
 done
 curl -fsS --max-time 2 http://127.0.0.1/max-edge-health >/dev/null
 
+cert_names=(bible-max-ip)
+if [[ -f $cert_root/letsencrypt/renewal/bible-admin-domain.conf ]]; then
+    cert_names+=(bible-admin-domain)
+fi
+for cert_name in "${cert_names[@]}"; do
 docker run --rm --memory 256m --cpus 0.5 \
     -v "$cert_root/webroot:/var/www/certbot" \
     -v "$cert_root/letsencrypt:/etc/letsencrypt" \
     -v "$cert_root/acme-work:/var/lib/letsencrypt" \
     -v "$cert_root/acme-logs:/var/log/letsencrypt" \
-    "$certbot_image" renew --non-interactive --cert-name bible-max-ip "${dry_run[@]}"
+    "$certbot_image" renew --non-interactive --cert-name "$cert_name" "${dry_run[@]}"
+done
 
 # Dry-run never installs a staging certificate or reloads a live TLS service.
 if [[ ${#dry_run[@]} -gt 0 ]]; then
@@ -63,6 +69,9 @@ if [[ ${#dry_run[@]} -gt 0 ]]; then
     exit 0
 fi
 openssl x509 -in "$cert_file" -checkend 86400 -noout
+if [[ ${#cert_names[@]} -gt 1 ]]; then
+    openssl x509 -in "$cert_root/letsencrypt/live/bible-admin-domain/cert.pem" -checkend 86400 -noout
+fi
 
 # Reload on every successful normal run, even if the preceding reload failed.
 # This also retries installation when Certbot says the cert is not yet due.
