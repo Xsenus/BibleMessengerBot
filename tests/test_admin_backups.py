@@ -5,8 +5,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from botocore.stub import Stubber
 
 from app.services.admin_backups import public
+from app.services import cloud_backup
 from app.web.api_backups import BackupResponse
 
 
@@ -39,3 +41,22 @@ async def test_file_response_removes_dump_and_unlocks_on_disconnect(tmp_path):
     with pytest.raises(ConnectionError):
         await response({'type':'http', 'method':'POST', 'headers':[]}, receive, send)
     assert not directory.exists() and not lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_parallel_cloud_clients_do_not_inherit_unsafe_shared_default_session(monkeypatch):
+    settings = cloud_backup.CloudSettings('https://s3.fixture.invalid', 'fixture', 'access', 'secret', '12' * 32)
+    shared = cloud_backup.boto3.session.Session(aws_access_key_id='access', aws_secret_access_key='secret', region_name='nl')
+    def contaminated(**kwargs):
+        raise RuntimeError('Shared default session must not reach independent clients')
+    shared.events.register('before-parameter-build.s3.HeadObject', contaminated)
+    monkeypatch.setattr(cloud_backup.boto3, 'DEFAULT_SESSION', shared)
+    clients = await asyncio.gather(asyncio.to_thread(settings.client), asyncio.to_thread(settings.client))
+    try:
+        for client in clients:
+            with Stubber(client) as stub:
+                stub.add_response('head_object', {'ContentLength':123}, {'Bucket':'fixture', 'Key':'snapshot'})
+                assert client.head_object(Bucket='fixture', Key='snapshot')['ContentLength'] == 123
+    finally:
+        for client in clients:
+            client.close()

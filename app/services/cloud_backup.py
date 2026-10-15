@@ -62,8 +62,8 @@ class CloudSettings:
         return bool(self.endpoint and self.bucket)
 
     def client(self):
-        """Создать клиент S3 (подпись v4, адресация по пути, повторы, тайм-ауты)."""
-        return boto3.client(
+        """Создать клиент S3 с отдельной Session для безопасной работы в параллельных потоках, SigV4, повторами и тайм-аутами."""
+        return boto3.session.Session().client(
             "s3",
             endpoint_url=self.endpoint,
             region_name=self.region,
