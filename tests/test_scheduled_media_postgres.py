@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.services import bible, illustrations, message_languages, prayers, speech
+from app.services import artwork, bible, illustrations, message_languages, prayers, scheduled_media, speech
 from app.services.errors import SendError
 from app.services.subscriptions import create_or_update_subscription, set_enabled
 from app.worker.delivery import decoded, prepare_subscription, process_delivery
@@ -58,18 +58,72 @@ async def test_future_bundle_prepares_all_languages_without_send_or_paid_calls(d
     assert await prepare_subscription(c,sub['id'],lead_seconds=86400) is None
 
 
-async def test_missing_photo_or_any_language_blocks_initial_submission(db):
+async def test_future_bundle_waits_for_photo_and_all_languages(db):
     c,_,path=db
-    _,identifier,card=await setup(c,path,future=False)
-    await make_due(c,identifier)
-    sender=AsyncMock()
-    assert await process_delivery(c,identifier,sender)=='preparing_media'
+    _,identifier,card=await setup(c,path)
+    delivery=await c.fetchrow('SELECT * FROM delivery_log WHERE id=$1',identifier)
+    assert await scheduled_media.ready(c,delivery)=='preparing_media'
     await finish(c,identifier,audio=False)
-    assert await process_delivery(c,identifier,sender)=='preparing_media'
+    assert await scheduled_media.ready(c,delivery)=='preparing_media'
     source=await c.fetchval('SELECT audio_id FROM reading_cards WHERE id=$1',card)
     await speech.process(c,source,generator=AsyncMock(return_value=(b'ID3'+b'x'*700,3,'fixture','fixture')))
-    assert await process_delivery(c,identifier,sender)=='preparing_media'
+    assert await scheduled_media.ready(c,delivery)=='preparing_media'
+
+
+@pytest.mark.parametrize('mode',['morning_verse','evening_verse','verse_of_day','topic_of_day'])
+@pytest.mark.parametrize('photo_ready',[False,True])
+async def test_due_reminder_sends_once_despite_unfinished_media(db,mode,photo_ready):
+    c,_,path=db
+    _,identifier,card_id=await setup(c,path,mode=mode,future=False)
+    await make_due(c,identifier)
+    if photo_ready:
+        await finish(c,identifier,audio=False)
+    sender=AsyncMock();sender.send.return_value=777
+    assert await process_delivery(c,identifier,sender)=='sent'
+    assert await process_delivery(c,identifier,sender)=='not_due'
+    sender.send.assert_awaited_once()
+    outgoing,_=await message_languages.outgoing(c,101,dict(kind='rich',card_id=card_id))
+    assert bool(outgoing['image_id'])==photo_ready
+    assert outgoing['audio_id'] is None
+    assert 'SYNTHETIC NOT SCRIPTURE' in outgoing['text']
+    if mode in {'morning_verse','evening_verse'}:
+        assert 'совместной молитвы' in outgoing['text']
+    assert await c.fetchval('SELECT error_code FROM scheduled_readings WHERE delivery_id=$1',identifier)=='media_pending_at_send'
+    assert await c.fetchval('SELECT telegram_message_id FROM reading_cards WHERE id=$1',card_id)==777
+    assert await c.fetchval('SELECT count(*) FROM image_generation_attempts')==0
+
+
+async def test_due_reading_rejects_changed_source_even_when_media_missing(db):
+    c,_,path=db
+    _,identifier,_=await setup(c,path,future=False)
+    await make_due(c,identifier)
+    prepared=await c.fetchrow('SELECT * FROM scheduled_readings WHERE delivery_id=$1',identifier)
+    image=await c.fetchrow('SELECT * FROM verse_illustrations WHERE id=$1',prepared['image_id'])
+    # The frozen primary verse must still match before falling back to text.
+    await c.execute("UPDATE verses SET text=text||' changed' WHERE translation_id=$1 AND book_code=$2 AND chapter=$3 AND verse=$4",image['translation_id'],image['book_code'],image['chapter'],image['verse'])
+    sender=AsyncMock()
+    assert await process_delivery(c,identifier,sender)=='source_changed'
     sender.send.assert_not_awaited()
+
+
+async def test_late_image_edits_the_original_scheduled_reminder(db):
+    c,_,path=db
+    _,identifier,card_id=await setup(c,path,future=False)
+    await make_due(c,identifier)
+    sender=AsyncMock();sender.send.return_value=777
+    assert await process_delivery(c,identifier,sender)=='sent'
+    await finish(c,identifier,audio=False)
+    source=await c.fetchval('SELECT audio_id FROM reading_cards WHERE id=$1',card_id)
+    assert await speech.process(c,source,generator=AsyncMock(return_value=(b'ID3'+b'x'*700,3,'fixture','fixture')))=='ready'
+    assert await artwork.dispatch_requests(c)==1
+    edit=await c.fetchrow("SELECT * FROM delivery_log WHERE mode='illustration_edit'")
+    part=decoded(edit['chunks'])[0]
+    assert part['kind']=='rich_edit' and part['message_id']==777 and part['card_id']==card_id
+    assert await process_delivery(c,edit['id'],sender)=='sent'
+    outgoing,_=await message_languages.outgoing(c,101,dict(kind='rich_edit',card_id=card_id,message_id=777))
+    assert outgoing['image_id'] and outgoing['audio_id']
+    assert await c.fetchval('SELECT telegram_message_id FROM reading_cards WHERE id=$1',card_id)==777
+    assert await artwork.dispatch_requests(c)==0
 
 
 async def test_ready_bundle_sends_once_and_language_switch_reuses_ready_audio(db):

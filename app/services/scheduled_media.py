@@ -1,4 +1,4 @@
-"""Подготовка полных пакетов запланированных чтений (картинка, озвучки на всех языках и страницах) до любой отправки в Telegram."""
+"""Заранее готовить медиа чтений; в назначенное время отправлять текст и готовые вложения, не теряя напоминания из-за генерации."""
 from __future__ import annotations
 
 import json
@@ -57,13 +57,14 @@ async def prepare(connection, delivery_id, row, edition, sub, chat, day):
 
 
 async def ready(connection, delivery):
-    """Проверить готовность пакета и вернуть код: `ready`, `preparing_media`, `expired` (срок вышел — чтение пропускается), `cancelled`, `source_changed` (текст стиха изменился). Частичный пакет не отправляется, а просроченное чтение не приходит с опозданием."""
+    """Проверить исходник и срок чтения: до отправки ждать полный пакет, в назначенное время разрешить текст с готовыми медиа. Поздняя картинка добавляется обычной правкой карточки; устаревший текст и просроченные чтения не отправляются."""
     prepared=await connection.fetchrow('SELECT * FROM scheduled_readings WHERE delivery_id=$1',delivery['id'])
     if not prepared:
         return 'ready'
     if prepared['state'] in {'expired','cancelled'}:
         return prepared['state']
-    if datetime.now(UTC)>=prepared['deadline_at']:
+    current=datetime.now(UTC)
+    if current>=prepared['deadline_at']:
         from app.worker.delivery import commit_progress
         async with connection.transaction():
             await connection.execute("UPDATE scheduled_readings SET state='expired',error_code='media_deadline',updated_at=now() WHERE delivery_id=$1",delivery['id'])
@@ -71,7 +72,7 @@ async def ready(connection, delivery):
             await connection.execute("INSERT INTO operator_events(action,details) VALUES('scheduled_media_expired',jsonb_build_object('delivery_id',$1::bigint))",delivery['id'])
             await commit_progress(connection,delivery)
         return 'expired'
-    image=await connection.fetchrow("SELECT * FROM verse_illustrations WHERE id=$1 AND status='ready'",prepared['image_id'])
+    image=await connection.fetchrow('SELECT * FROM verse_illustrations WHERE id=$1',prepared['image_id'])
     chunks=json.loads(delivery['chunks']) if isinstance(delivery['chunks'],str) else delivery['chunks']
     cards=[part['card_id'] for part in chunks if isinstance(part,dict) and part.get('card_id')]
     if not image or not cards:
@@ -82,19 +83,23 @@ async def ready(connection, delivery):
         await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='source_changed' WHERE id=$1",delivery['id'])
         await connection.execute("UPDATE scheduled_readings SET state='cancelled',error_code='source_changed' WHERE delivery_id=$1",delivery['id'])
         return 'source_changed'
+    complete=image['status']=='ready' and image['quarantined_at'] is None
     for identifier in cards:
         card=await connection.fetchrow('SELECT * FROM reading_cards WHERE id=$1',identifier)
         if card['request_id']:
             request=await connection.fetchrow('SELECT * FROM illustration_requests WHERE id=$1',card['request_id'])
-            if request and not await illustrations.valid_request_source(connection,request,image=image):
+            if request and not await illustrations.valid_request_source(connection,request,image=image,require_ready=False):
                 await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='source_changed' WHERE id=$1",delivery['id'])
                 await connection.execute("UPDATE scheduled_readings SET state='cancelled',error_code='source_changed' WHERE delivery_id=$1",delivery['id'])
                 return 'source_changed'
         counts=await connection.fetchrow('''SELECT count(*) AS total,count(*) FILTER(WHERE a.state='ready') AS ready
             FROM reading_card_tracks t JOIN reading_audio a ON a.id=t.audio_id WHERE t.card_id=$1''',identifier)
         if not counts['total'] or counts['total']!=counts['ready']:
-            return 'preparing_media'
+            complete=False
+    if not complete and current<delivery['scheduled_for']:
+        return 'preparing_media'
+    image_id=image['id'] if image['status']=='ready' and image['quarantined_at'] is None else None
     async with connection.transaction():
-        await connection.execute('UPDATE reading_cards SET image_id=$2 WHERE id=ANY($1::bigint[])',cards,image['id'])
-        await connection.execute("UPDATE scheduled_readings SET state='ready',error_code=NULL,updated_at=now() WHERE delivery_id=$1",delivery['id'])
+        await connection.execute('UPDATE reading_cards SET image_id=$2 WHERE id=ANY($1::bigint[])',cards,image_id)
+        await connection.execute("UPDATE scheduled_readings SET state='ready',error_code=$2,updated_at=now() WHERE delivery_id=$1",delivery['id'],None if complete else 'media_pending_at_send')
     return 'ready'

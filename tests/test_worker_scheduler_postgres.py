@@ -39,10 +39,10 @@ async def test_queue_prioritizes_prayer_and_excludes_busy_future_retry_and_inact
     assert [r['id'] for r in await due_jobs(c, [], 1)] == [prayer]
 
 
-async def test_incomplete_bundle_is_skipped_then_background_marks_it_ready(db):
+async def test_incomplete_due_bundle_is_dispatchable_while_future_bundle_prepares(db):
     c, settings, path = db
     _, identifier, _ = await setup(c, path, future=False)
-    assert not await due_jobs(c, [], 4)
+    assert [r['id'] for r in await due_jobs(c, [], 4)] == [identifier]
     await finish(c, identifier)
     await prepare_once(c, settings)
     assert [r['id'] for r in await due_jobs(c, [], 4)] == [identifier]

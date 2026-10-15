@@ -99,12 +99,12 @@ async def source_row(connection, image):
         image['translation_id'], image['book_code'], image['chapter'], image['verse'])
 
 
-async def valid_request_source(connection, request, *, image=None, edition=None):
-    """Проверить перед правкой сообщения, что текст стиха и каждый замороженный стих запроса не изменились с момента постановки в очередь."""
+async def valid_request_source(connection, request, *, image=None, edition=None, require_ready=True):
+    """Проверить исходный стих и замороженный отрывок запроса; для правки фото также требовать готовую разрешённую картинку. `require_ready=False` проверяет только текст перед своевременной отправкой без медиа."""
     from app.services import bible
 
     image = image or await connection.fetchrow('SELECT * FROM verse_illustrations WHERE id=$1',request['image_id'])
-    if not image or image['status']!='ready' or image.get('quarantined_at'):
+    if not image or (require_ready and (image['status']!='ready' or image.get('quarantined_at'))):
         return False
     edition = edition or await bible.find_translation(connection,image['translation_id'])
     if not edition:
