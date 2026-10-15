@@ -128,6 +128,8 @@ jobs:
         run: |
           cp .env.example .env
           docker compose --profile '*' config --quiet
+      - name: Reproduce private checkout permissions
+        run: find app -type f -exec chmod 600 {} +
       - name: Build (and scan) image
         uses: docker/build-push-action@v7
         with:
@@ -139,6 +141,7 @@ jobs:
       - name: Container database and admin smoke test
         run: |
           docker run --rm --network host -e DATABASE_URL -e BIBLE_PROFILE bible-messenger-bot:ci python -m app.cli seed --profile none
+          docker run --rm --network host --user 0:0 --cap-drop ALL --security-opt no-new-privileges -e DATABASE_URL -e BIBLE_PROFILE bible-messenger-bot:ci python -m app.backup_admin status
           docker run -d --name biblebot-ci-admin --network host -e DATABASE_URL -e BIBLE_PROFILE -e ADMIN_API_KEY bible-messenger-bot:ci uvicorn app.web.main:app --host 127.0.0.1 --port 18080
           trap 'docker logs biblebot-ci-admin; docker rm -f biblebot-ci-admin' EXIT
           for attempt in $(seq 1 60); do

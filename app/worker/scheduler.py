@@ -57,7 +57,7 @@ async def prepare_loop(pool, settings):
 
 
 async def due_jobs(connection, busy_chats, limit):
-    """Выбрать готовые к отправке задания: не более одного на свободный чат, молитвы первыми; задания с неготовыми медиа не блокируют остальные."""
+    """Выбрать наступившие задания: не более одного на свободный чат, молитвы первыми; незавершённая генерация не отменяет напоминание."""
     return await connection.fetch('''SELECT id,telegram_chat_id FROM (
         SELECT DISTINCT ON (d.telegram_chat_id) d.id,d.telegram_chat_id,d.mode,d.scheduled_for
         FROM delivery_log d JOIN telegram_chats c ON c.telegram_chat_id=d.telegram_chat_id
@@ -67,7 +67,7 @@ async def due_jobs(connection, busy_chats, limit):
         AND (d.retry_at IS NULL OR d.retry_at<=now()) AND c.is_active
         AND (d.subscription_id IS NULL OR s.is_enabled)
         AND NOT (d.telegram_chat_id=ANY($1::bigint[]))
-        AND (r.delivery_id IS NULL OR r.state='ready' OR (r.state='preparing' AND r.deadline_at<=now()))
+        AND (r.delivery_id IS NULL OR r.state IN ('ready','preparing'))
         ORDER BY d.telegram_chat_id,(d.mode='prayer') DESC,d.scheduled_for,d.id
         ) candidates ORDER BY (mode='prayer') DESC,scheduled_for,id LIMIT $2''', list(busy_chats), limit)
 

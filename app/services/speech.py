@@ -34,7 +34,7 @@ EDGE_VOICES = {
  'ind':'id-ID-ArdiNeural','vie':'vi-VN-NamMinhNeural','ces':'cs-CZ-AntoninNeural',
  'ron':'ro-RO-EmilNeural','swe':'sv-SE-MattiasNeural','fas':'fa-IR-FaridNeural',
 }
-LOCAL_VOICES = {'grc':'grc','lat':'la','hbo':'he','heb':'he','zho':'cmn','cmn':'cmn'}
+LOCAL_VOICES = {'ell':'el','grc':'grc','lat':'la','hbo':'he','heb':'he','zho':'cmn','cmn':'cmn'}
 
 
 @dataclass(frozen=True)
