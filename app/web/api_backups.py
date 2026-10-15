@@ -40,6 +40,7 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
     """Подключить каталог и скачивание только с X-Admin-Key; одна загрузка за раз ограничивает место на диске."""
     router = APIRouter(prefix='/api/admin/backups', dependencies=[Depends(auth)])
     download_lock = asyncio.Lock()
+    probe_slots = asyncio.Semaphore(3)
 
     async def connection():
         """Выдать соединение для короткого чтения квитанций; скачивание не удерживает его."""
@@ -48,6 +49,43 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             yield conn
 
     Conn = Depends(connection)
+
+    async def receipt(identifier: int) -> dict:
+        """Прочитать квитанцию БД и освободить соединение до сетевых запросов."""
+        pool = await pool_factory()
+        async with pool.acquire() as conn:
+            record = await conn.fetchrow("SELECT * FROM cloud_backup_receipts WHERE id=$1 AND kind='database'", identifier)
+        if not record:
+            raise HTTPException(404, 'Резервная копия не найдена')
+        return dict(record)
+
+    def cloud_settings() -> cloud_backup.CloudSettings:
+        """Не запускать проверки или скачивание без S3 и корректного ключа шифрования."""
+        try:
+            settings = cloud_backup.CloudSettings.from_env()
+            if not settings.enabled:
+                raise ValueError('disabled')
+            cloud_backup.encryption_bytes(settings.encryption_key)
+            return settings
+        except ValueError:
+            raise HTTPException(503, 'Облачное хранилище или ключ расшифровки не настроены') from None
+
+    @router.get('/{identifier}/availability')
+    async def availability(identifier: int = ApiPath(ge=1, le=9223372036854775807)) -> dict:
+        """Обновить наличие файла отдельно от быстрого списка, максимум три HEAD одновременно; не выдавать сетевые ошибки за удаление архива."""
+        record = await receipt(identifier)
+        settings = cloud_settings()
+        status = 'available'
+        try:
+            async with probe_slots:
+                await run_in_threadpool(admin_backups.probe, record, settings)
+        except ClientError as error:
+            status = 'missing' if error.response.get('Error', {}).get('Code') in {'404','NoSuchKey','NotFound'} else 'unavailable'
+        except ValueError:
+            status = 'invalid'
+        except Exception:
+            status = 'unavailable'
+        return {'id': identifier, 'status': status}
 
     @router.get('')
     async def backups(limit: int = Query(30, ge=1, le=100), offset: int = Query(0, ge=0, le=1000000),
@@ -68,18 +106,8 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
     @router.post('/{identifier}/download')
     async def download(identifier: int = ApiPath(ge=1, le=9223372036854775807)) -> BackupResponse:
         """Проверить квитанцию и архив, затем передать .dump. Никогда не восстанавливать рабочую БД и не раскрывать подписанные URL/ключи при ошибках."""
-        pool = await pool_factory()
-        async with pool.acquire() as conn:
-            record = await conn.fetchrow("SELECT * FROM cloud_backup_receipts WHERE id=$1 AND kind='database'", identifier)
-        if not record:
-            raise HTTPException(404, 'Резервная копия не найдена')
-        try:
-            settings = cloud_backup.CloudSettings.from_env()
-            if not settings.enabled:
-                raise ValueError('disabled')
-            cloud_backup.encryption_bytes(settings.encryption_key)
-        except ValueError:
-            raise HTTPException(503, 'Облачное хранилище или ключ расшифровки не настроены') from None
+        record = await receipt(identifier)
+        settings = cloud_settings()
         if download_lock.locked():
             raise HTTPException(409, 'Другая копия уже скачивается. Дождитесь завершения и повторите.')
         await download_lock.acquire()

@@ -57,12 +57,13 @@ if [[ -f $cert_root/letsencrypt/renewal/bible-admin-domain.conf ]]; then
     cert_names+=(bible-admin-domain)
 fi
 for cert_name in "${cert_names[@]}"; do
+# Timer уже задаёт jitter; две задержки Certbot могут превысить тайм-аут службы.
 docker run --rm --memory 256m --cpus 0.5 \
     -v "$cert_root/webroot:/var/www/certbot" \
     -v "$cert_root/letsencrypt:/etc/letsencrypt" \
     -v "$cert_root/acme-work:/var/lib/letsencrypt" \
     -v "$cert_root/acme-logs:/var/log/letsencrypt" \
-    "$certbot_image" renew --non-interactive --cert-name "$cert_name" "${dry_run[@]}"
+    "$certbot_image" renew --non-interactive --no-random-sleep-on-renew --cert-name "$cert_name" "${dry_run[@]}"
 done
 
 # Dry-run never installs a staging certificate or reloads a live TLS service.

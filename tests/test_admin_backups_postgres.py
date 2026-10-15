@@ -8,10 +8,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import asyncpg
 from botocore.exceptions import ClientError
 
 from app.services import admin_backups, cloud_backup
-from app.web import api_backups
+from app.web import api_backups, main as web
 from tests.test_admin_api_postgres import H, make
 from tests.test_postgres_integration import db as db
 
@@ -73,6 +74,7 @@ async def test_backup_catalog_and_download_require_header_key(db, monkeypatch, t
     identifier, _, s3, _ = await fixture(db[0], tmp_path, monkeypatch)
     async with make(monkeypatch, db[0]) as api:
         assert (await api.get('/api/admin/backups')).status_code == 401
+        assert (await api.get(f'/api/admin/backups/{identifier}/availability')).status_code == 401
         assert (await api.post(f'/api/admin/backups/{identifier}/download')).status_code == 401
         assert (await api.post(f'/api/admin/backups/{identifier}/download', headers={'X-Admin-Key':'wrong'})).status_code == 401
         assert s3.downloads == 0
@@ -136,6 +138,7 @@ async def test_unconfigured_cloud_and_invalid_keys_do_not_start_downloads(db, mo
     async with make(monkeypatch, db[0]) as api:
         assert (await api.get('/api/admin/backups', headers=H)).json()['download_enabled'] is False
         assert (await api.post(f'/api/admin/backups/{identifier}/download', headers=H)).status_code == 503
+        assert (await api.get(f'/api/admin/backups/{identifier}/availability', headers=H)).status_code == 503
         assert (await api.post('/api/admin/backups/99999999999999999999999/download', headers=H)).status_code == 422
         assert s3.downloads == 0
 
@@ -169,6 +172,71 @@ async def test_non_database_receipts_and_traversal_never_reach_s3(db, monkeypatc
     async with make(monkeypatch, db[0]) as api:
         await db[0].execute("UPDATE cloud_backup_receipts SET object_key='bible-messenger/v1/database/../../secret.aesgcm' WHERE id=$1", identifier)
         assert (await api.post(f'/api/admin/backups/{identifier}/download', headers=H)).status_code == 502
+        assert (await api.get(f'/api/admin/backups/{identifier}/availability', headers=H)).json()['status'] == 'invalid'
         await db[0].execute("UPDATE cloud_backup_receipts SET kind='image' WHERE id=$1", identifier)
         assert (await api.post(f'/api/admin/backups/{identifier}/download', headers=H)).status_code == 404
+        assert (await api.get(f'/api/admin/backups/{identifier}/availability', headers=H)).status_code == 404
         assert s3.downloads == 0 and all(not d.exists() for d in directories)
+
+
+@pytest.mark.parametrize('state', ['available', 'missing', 'invalid', 'unavailable'])
+async def test_availability_checks_metadata_without_download_and_does_not_invent_deletion(db, monkeypatch, tmp_path, state):
+    identifier, _, s3, directories = await fixture(db[0], tmp_path, monkeypatch)
+    if state == 'missing':
+        s3.missing = True
+    elif state == 'invalid':
+        await db[0].execute("UPDATE cloud_backup_receipts SET sha256=$2 WHERE id=$1", identifier, '0' * 64)
+    elif state == 'unavailable':
+        def disconnected(**kwargs):
+            raise OSError('fixture-secret https://signed.fixture.invalid/?secret')
+        monkeypatch.setattr(s3, 'head_object', disconnected)
+    async with make(monkeypatch, db[0]) as api:
+        response = await api.get(f'/api/admin/backups/{identifier}/availability', headers=H)
+        assert response.status_code == 200 and response.json() == {'id': identifier, 'status': state}
+        assert 'fixture-secret' not in response.text and 'signed.fixture' not in response.text
+        assert s3.closed and s3.downloads == 0 and not directories
+        assert (await api.get('/api/admin/backups', headers=H)).json()['total'] == 1
+
+
+async def test_availability_is_limited_to_three_and_does_not_block_list_or_download(db, monkeypatch, tmp_path):
+    identifier, payload, _, _ = await fixture(db[0], tmp_path, monkeypatch)
+    started, release = threading.Event(), threading.Event()
+    counter_lock = threading.Lock()
+    counts = {'active': 0, 'peak': 0, 'calls': 0}
+    original = admin_backups.probe
+
+    def blocked(*args):
+        with counter_lock:
+            counts['active'] += 1
+            counts['calls'] += 1
+            counts['peak'] = max(counts['peak'], counts['active'])
+            if counts['active'] == 3:
+                started.set()
+        try:
+            assert release.wait(30)
+            return original(*args)
+        finally:
+            with counter_lock:
+                counts['active'] -= 1
+
+    monkeypatch.setattr(admin_backups, 'probe', blocked)
+    pool = await asyncpg.create_pool(db[1].database_url, min_size=1, max_size=6)
+    async def factory(_settings=None):
+        return pool
+    try:
+        async with make(monkeypatch, db[0]) as api:
+            monkeypatch.setattr(web, 'create_pool', factory)
+            tasks = [asyncio.create_task(api.get(f'/api/admin/backups/{identifier}/availability', headers=H)) for _ in range(4)]
+            try:
+                assert await asyncio.to_thread(started.wait, 10)
+                assert counts['active'] == 3 and counts['calls'] == 3
+                assert (await api.get('/api/admin/backups', headers=H)).status_code == 200
+                response = await api.post(f'/api/admin/backups/{identifier}/download', headers=H)
+                assert response.status_code == 200 and response.content == payload
+            finally:
+                release.set()
+                responses = await asyncio.gather(*tasks)
+            assert all(response.json()['status'] == 'available' for response in responses)
+            assert counts == {'active': 0, 'peak': 3, 'calls': 4}
+    finally:
+        await pool.close()

@@ -35,8 +35,8 @@ def public(record: Any) -> dict[str, Any]:
             'verified_at': record['verified_at'].isoformat(), 'size_bytes': record['byte_count']}
 
 
-def prepare(record: Any, directory: Path, settings: cloud_backup.CloudSettings) -> Path:
-    """Скачать только квитанцию БД, проверить размер/SHA-256 и AES-GCM, вернуть готовый PGDMP. Работать блоками на диске, не загружая dump в RAM."""
+def details(record: Any, settings: cloud_backup.CloudSettings) -> tuple[str, int]:
+    """Проверить область ключа, допустимый размер и ключ шифрования до обращений к S3."""
     key = str(record['object_key'])
     prefix = cloud_backup.PREFIX + 'database/'
     if (record['kind'] != 'database' or not key.startswith(prefix)
@@ -47,13 +47,34 @@ def prepare(record: Any, directory: Path, settings: cloud_backup.CloudSettings) 
     if size < 34 or size > 16 * 1024**3:
         raise ValueError('invalid_backup_size')
     cloud_backup.encryption_bytes(settings.encryption_key)
+    return key, size
+
+
+def metadata(client: Any, settings: cloud_backup.CloudSettings, record: Any, key: str, size: int) -> None:
+    """Проверить наличие и метаданные архива; HEAD не заменяет полную проверку содержимого перед скачиванием."""
+    head = client.head_object(Bucket=settings.bucket, Key=key)
+    if head['ContentLength'] != size or head.get('Metadata', {}).get('sha256') != record['sha256']:
+        raise ValueError('backup_metadata_mismatch')
+
+
+def probe(record: Any, settings: cloud_backup.CloudSettings) -> None:
+    """Проверить наличие без скачивания большого архива и без изменения исторической квитанции."""
+    key, size = details(record, settings)
+    client = settings.client()
+    try:
+        metadata(client, settings, record, key, size)
+    finally:
+        client.close()
+
+
+def prepare(record: Any, directory: Path, settings: cloud_backup.CloudSettings) -> Path:
+    """Скачать только квитанцию БД, проверить размер/SHA-256 и AES-GCM, вернуть готовый PGDMP. Работать блоками на диске, не загружая dump в RAM."""
+    key, size = details(record, settings)
     if shutil.disk_usage(directory).free < 2 * size + 64 * 1024**2:
         raise OSError('backup_disk_full')
     client = settings.client()
     try:
-        head = client.head_object(Bucket=settings.bucket, Key=key)
-        if head['ContentLength'] != size or head.get('Metadata', {}).get('sha256') != record['sha256']:
-            raise ValueError('backup_metadata_mismatch')
+        metadata(client, settings, record, key, size)
         encrypted = directory / 'snapshot.aesgcm'
         client.download_file(settings.bucket, key, str(encrypted), Config=TransferConfig(
             max_concurrency=1, use_threads=False, multipart_chunksize=8 * 1024**2))

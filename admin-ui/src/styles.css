@@ -39,3 +39,4 @@ code { background: var(--line); padding: 1px 5px; border-radius: 4px; }
 .backup-table { overflow-x: auto; }
 .backup-table th { white-space: nowrap; }
 .backup-table td:nth-child(3) { overflow-wrap: anywhere; min-width: 180px; }
+.backup-table td:last-child button { white-space: nowrap; }
