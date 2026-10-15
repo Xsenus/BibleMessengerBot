@@ -70,7 +70,7 @@ async def test_paid_adapter_chunks_exact_input_and_checks_audio(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not shutil.which('espeak-ng') or not shutil.which('ffmpeg'),reason='Local speech tools required')
-@pytest.mark.parametrize('language,text',[('rus','В начале сотворил Бог небо и землю.'),('grc','Ἐν ἀρχῇ ἦν ὁ λόγος.'),('lat','In principio erat Verbum.')])
+@pytest.mark.parametrize('language,text',[('rus','В начале сотворил Бог небо и землю.'),('grc','Ἐν ἀρχῇ ἦν ὁ λόγος.'),('lat','In principio erat Verbum.'),('ell','Στην αρχή ήταν ο Λόγος.')])
 async def test_real_free_local_audio_decodes(language,text):
  data,duration,provider,voice=await speech.synthesize(text,language,speech.SpeechSettings(provider='espeak'))
  assert len(data)>512 and duration>0 and provider=='espeak'
@@ -103,4 +103,23 @@ async def test_free_neural_failure_falls_back_without_calling_paid_api(monkeypat
  result=await speech.synthesize('English text.','eng',speech.SpeechSettings())
  assert result[2:]==('espeak','en')
  assert any(call.args[0]=='espeak-ng' and '--stdin' in call.args for call in run.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_modern_greek_fallback_does_not_require_a_greek_ui_catalog(monkeypatch):
+ import edge_tts
+ class Unavailable:
+  def __init__(self,*args,**kwargs):
+   pass
+  async def stream(self):
+   raise TimeoutError()
+   yield None
+ monkeypatch.setattr(edge_tts,'Communicate',Unavailable)
+ monkeypatch.setattr(speech,'ui_for_language',lambda _:None)
+ run=AsyncMock(return_value=b'Pty Language Name\n5 el Greek\n')
+ monkeypatch.setattr(speech,'run_process',run)
+ monkeypatch.setattr(speech,'validate_audio',AsyncMock(return_value=(b'ID3'+b'a'*600,7)))
+ result=await speech.synthesize('Στην αρχή ήταν ο Λόγος.','ell',speech.SpeechSettings())
+ assert result[2:]==('espeak','el')
+ assert any(call.args[:3]==('espeak-ng','-v','el') and '--stdin' in call.args for call in run.await_args_list)
  assert speech.SpeechSettings().paid_enabled is False
