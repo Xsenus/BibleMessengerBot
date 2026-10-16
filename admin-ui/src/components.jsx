@@ -125,3 +125,13 @@ export function FilePicker({ accept, onChange, disabled, children, icon: Icon = 
     </label>
   );
 }
+
+/** Переключатель «включено / выключено». label — что переключается (для чтения с экрана). */
+export function Switch({ checked, onChange, label, on = 'вкл', off = 'выкл', disabled }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} className="switch" disabled={disabled} onClick={() => onChange(!checked)}>
+      <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+      <span className="switch-text">{checked ? on : off}</span>
+    </button>
+  );
+}

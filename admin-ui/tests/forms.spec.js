@@ -67,7 +67,8 @@ test('источник: смена режима и включение', async ({
   const row = page.getByRole('row').filter({ hasText: 'Община' });
   await row.getByRole('combobox').selectOption('auto');
   await expect.poll(() => api.writes().length).toBe(1);
-  await row.getByRole('button', { name: 'выкл' }).click();
+  await expect(row.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+  await row.getByRole('switch').click();
   await expect.poll(() => api.writes().length).toBe(2);
   expect(api.writes()).toMatchObject([
     { method: 'PATCH', path: '/sources/2', body: { mode: 'auto' } },
@@ -253,4 +254,40 @@ test('объявление: картинка загружается и уход�
   expect(writes.map((w) => `${w.method} ${w.path}`)).toEqual(['POST /media', 'POST /announcements', 'POST /announcements/import']);
   expect(writes[1].body).toMatchObject({ body: 'С картинкой', asset_id: 42 });
   expect(writes[2].body).toEqual(items);
+});
+
+test('видео: переключатели проверки и рассылки, интервал, удаление после подтверждения', async ({ page, api }) => {
+  await openSection(page, 'Видео');
+  const row = page.getByRole('row').filter({ hasText: 'Библейские уроки' });
+  await row.getByRole('switch', { name: /Присылать ссылки/ }).click();
+  await expect.poll(() => api.writes().length).toBe(1);
+  await row.getByRole('switch', { name: /Проверять канал/ }).click();
+  await expect.poll(() => api.writes().length).toBe(2);
+  await row.getByRole('combobox').selectOption('180');
+  await expect.poll(() => api.writes().length).toBe(3);
+  answerDialog(page, { accept: false });
+  await row.getByRole('button', { name: 'Удалить' }).click();
+  answerDialog(page);
+  await row.getByRole('button', { name: 'Удалить' }).click();
+  await expect.poll(() => api.writes().length).toBe(4);
+  expect(api.writes()).toMatchObject([
+    { method: 'PATCH', path: '/videos/1', body: { notify: false } },
+    { method: 'PATCH', path: '/videos/1', body: { is_enabled: false } },
+    { method: 'PATCH', path: '/videos/1', body: { interval_minutes: 180 } },
+    { method: 'DELETE', path: '/videos/1' },
+  ]);
+});
+
+test('генератор: выключение переключателем и правка настроек', async ({ page, api }) => {
+  await openSection(page, 'Генераторы картинок');
+  await page.getByRole('switch', { name: /Cloudflare Flux/ }).click();
+  await expect.poll(() => api.writes().length).toBe(1);
+  await page.getByRole('button', { name: 'Настроить' }).click();
+  await page.getByLabel('В сутки').fill('50');
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await expect.poll(() => api.writes().length).toBe(2);
+  expect(api.writes()).toMatchObject([
+    { method: 'PATCH', path: '/image-providers/1', body: { is_enabled: false } },
+    { method: 'PATCH', path: '/image-providers/1', body: { daily_limit: 50 } },
+  ]);
 });

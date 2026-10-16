@@ -328,3 +328,64 @@ tbody tr.row-editor:hover td { background: var(--surface-2); }
   .table-stack .cell-main { min-width: 0; max-width: none; }
 }
 .field > .button-like, .field > .file-chosen { align-self: flex-start; }
+
+/* ---------- Переключатель ---------- */
+button.switch { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0; background: none; border: 0; box-shadow: none;
+  color: var(--text-2); font: 500 var(--text-sm)/1 var(--font-sans); }
+button.switch:hover:not(:disabled) { background: none; color: var(--text); }
+.switch-track { position: relative; width: 34px; height: 20px; border-radius: var(--radius-full); background: var(--border-strong); transition: background .15s; flex: none; }
+.switch-thumb { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: transform .15s; }
+.switch[aria-checked='true'] .switch-track { background: var(--accent); }
+.switch[aria-checked='true'] .switch-thumb { transform: translateX(14px); }
+.switch[aria-checked='true'] .switch-text { color: var(--text); }
+.switch:focus-visible { box-shadow: none; }
+.switch:focus-visible .switch-track { box-shadow: var(--focus); }
+
+/* ---------- Карточки списков ---------- */
+.item-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.item-card { padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.panel .item-card { background: var(--surface-2); }
+.item-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.item-title { display: flex; flex-direction: column; min-width: 0; }
+.item-title b { font-size: var(--text-md); }
+.item-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: var(--space-2); font-size: var(--text-sm); color: var(--text-2); }
+.item-body { margin: var(--space-3) 0; white-space: pre-wrap; }
+.item-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-top: var(--space-3); }
+.warn-line { display: flex; align-items: flex-start; gap: 6px; color: var(--warning); font-size: var(--text-sm); }
+.warn-line svg { flex: none; margin-top: 2px; }
+.add-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0 var(--space-3); }
+.add-row > .field { min-width: 160px; }
+.add-row > .grow { flex: 1 1 240px; }
+.add-row > button, .add-row > .checkbox-line { margin-bottom: var(--space-4); }
+.checkbox-line { display: inline-flex; align-items: center; gap: 8px; min-height: var(--control-h); font-size: var(--text-sm); color: var(--text-2); cursor: pointer; }
+
+/* ---------- Картинки ---------- */
+.input-row { display: flex; gap: var(--space-2); align-items: center; }
+.input-row > input { flex: 1; margin: 0 !important; }
+.search-box > input:not([type=checkbox]) { min-height: var(--control-h-sm); width: 240px; max-width: 100%; font-size: var(--text-sm); }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-4); }
+.gallery-item { margin: 0; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.gallery-item.is-quarantined .thumb { opacity: .4; filter: grayscale(1); }
+.thumb { aspect-ratio: 16 / 11; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-3); overflow: hidden; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gallery-item figcaption { display: flex; flex-direction: column; gap: 2px; padding: 0 4px; }
+.gallery-ref { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.gallery-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 4px 4px; }
+@media (max-width: 720px) { .gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); } .search-box > input:not([type=checkbox]) { width: 100%; } }
+
+/* ---------- Генераторы картинок ---------- */
+.check-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.check-item { display: flex; align-items: flex-start; gap: 10px; }
+.check-item > svg { flex: none; margin-top: 2px; }
+.check-ok > svg { color: var(--success); }
+.check-danger > svg { color: var(--danger); }
+.check-warning > svg { color: var(--warning); }
+.check-muted > svg { color: var(--text-3); }
+.stat-stack { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: var(--space-4); align-content: start; }
+.stat-stack > .stat:last-child { grid-column: 1 / -1; align-items: flex-start; gap: 6px; }
+.job-list { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--text-sm); color: var(--text-2); }
+.job-list b { color: var(--text); font-variant-numeric: tabular-nums; }
+.item-meta svg { vertical-align: -2px; }
+.test-preview { display: block; max-width: 260px; margin-top: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--border); }
+.form-grid-wide { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
+.stat-hint { overflow-wrap: anywhere; }
