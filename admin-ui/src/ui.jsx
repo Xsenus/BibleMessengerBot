@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ChevronRight, Info } from 'lucide-react';
 import { api } from './api.js';
 
 const MESSAGES = {
@@ -73,7 +74,7 @@ export const describeAudience = (a) => {
 export function Help({ title = 'Как это настроить', children, open = false }) {
   return (
     <details className="help" open={open}>
-      <summary>ℹ️ {title}</summary>
+      <summary><Info size={16} aria-hidden="true" /><span>{title}</span><ChevronRight className="help-chevron" size={16} aria-hidden="true" /></summary>
       <div className="helpbody">{children}</div>
     </details>
   );

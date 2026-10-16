@@ -1,63 +1,55 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { BookOpen, CircleAlert, KeyRound } from 'lucide-react';
 import { api, getKey, setKey } from './api.js';
 import { explain } from './ui.jsx';
-import Overview from './pages/Overview.jsx';
-import Announcements from './pages/Announcements.jsx';
-import Sources from './pages/Sources.jsx';
-import Videos from './pages/Videos.jsx';
-import Admins from './pages/Admins.jsx';
-import ImageProviders from './pages/ImageProviders.jsx';
-import Chats from './pages/Chats.jsx';
-import Deliveries from './pages/Deliveries.jsx';
-import Settings from './pages/Settings.jsx';
-import Gallery from './pages/Gallery.jsx';
-import Audit from './pages/Audit.jsx';
-import Reports from './pages/Reports.jsx';
-import Network from './pages/Network.jsx';
-import Backups from './pages/Backups.jsx';
-
-const PAGES = [
-  ['overview', 'Состояние', Overview], ['announcements', 'Объявления', Announcements],
-  ['sources', 'Источники', Sources], ['videos', 'Видео', Videos], ['images', 'Генераторы картинок', ImageProviders], ['gallery', 'Картинки', Gallery],
-  ['chats', 'Чаты и пользователи', Chats], ['deliveries', 'Доставки', Deliveries], ['reports', 'Отчёты', Reports], ['audit', 'Журнал', Audit], ['admins', 'Администраторы', Admins],
-  ['network', 'Сеть и прокси', Network], ['backups', 'Резервные копии', Backups], ['settings', 'Настройки', Settings],
-];
+import { findSection } from './sections.js';
+import { useHashRoute } from './hooks.js';
+import Shell from './Shell.jsx';
 
 function Login({ onDone }) {
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   const submit = async (event) => {
     event.preventDefault();
     setKey(value.trim());
+    setBusy(true);
     try { await api('/overview'); onDone(); }
     catch (e) { setKey(''); setError(explain(e)); }
+    finally { setBusy(false); }
   };
   return (
-    <form className="card login" onSubmit={submit}>
-      <h1>Панель администратора</h1>
-      <p className="muted">Введите ключ администратора (ADMIN_API_KEY). Он хранится только в этой вкладке.</p>
-      <input type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} placeholder="Ключ" />
-      <button disabled={!value.trim()}>Войти</button>
-      {error && <p className="error">{error}</p>}
-    </form>
+    <div className="login-screen">
+      <form className="login-card" onSubmit={submit}>
+        <span className="brand-mark brand-mark-lg" aria-hidden="true"><BookOpen size={22} /></span>
+        <h1>Панель администратора</h1>
+        <p className="muted">Введите ключ администратора (<code>ADMIN_API_KEY</code>). Он хранится только в этой вкладке.</p>
+        <label className="field">
+          <span className="field-label">Ключ</span>
+          <span className="input-with-icon">
+            <KeyRound size={16} aria-hidden="true" />
+            <input type="password" autoComplete="off" autoFocus value={value} onChange={(e) => setValue(e.target.value)} placeholder="Ключ" />
+          </span>
+        </label>
+        {error && <p className="callout callout-danger" role="alert"><CircleAlert size={16} aria-hidden="true" />{error}</p>}
+        <button className="button-block" disabled={!value.trim() || busy}>Войти</button>
+      </form>
+    </div>
   );
 }
 
 export default function App() {
   const [authed, setAuthed] = useState(Boolean(getKey()));
-  const [page, setPage] = useState('overview');
+  const route = useHashRoute();
+  const current = findSection(route);
+  useEffect(() => {
+    document.title = authed ? `${current.label} — Библия · панель` : 'Библия — панель администратора';
+  }, [authed, current]);
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
-  const Current = PAGES.find(([id]) => id === page)[2];
+  const Page = current.page;
   return (
-    <div className="layout">
-      <nav>
-        <strong>📖 Библия</strong>
-        {PAGES.map(([id, label]) => (
-          <button key={id} className={id === page ? 'active' : ''} onClick={() => setPage(id)}>{label}</button>
-        ))}
-        <button className="link" onClick={() => { setKey(''); setAuthed(false); }}>Выйти</button>
-      </nav>
-      <main><Current /></main>
-    </div>
+    <Shell current={current} onLogout={() => { setKey(''); setAuthed(false); }}>
+      <Page key={current.id} />
+    </Shell>
   );
 }

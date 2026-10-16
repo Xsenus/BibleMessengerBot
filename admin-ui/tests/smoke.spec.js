@@ -51,3 +51,63 @@ test('на телефоне все разделы доступны', async ({ pa
   }
   void api;
 });
+
+test.describe('адреса разделов', () => {
+  test('раздел открывается по адресу и переживает обновление страницы', async ({ page, api }) => {
+    await login(page);
+    await openSection(page, 'Сеть и прокси');
+    await expect(page).toHaveURL(/#\/network$/);
+    await expect(page).toHaveTitle('Сеть и прокси — Библия · панель');
+    await page.reload();
+    await expect(heading(page, 'Сеть и прокси')).toBeVisible();
+    await page.goto('./#/backups');
+    await expect(heading(page, 'Резервные копии')).toBeVisible();
+    void api;
+  });
+
+  test('кнопка «Назад» возвращает к предыдущему разделу', async ({ page, api }) => {
+    await login(page);
+    await openSection(page, 'Объявления');
+    await openSection(page, 'Журнал');
+    await page.goBack();
+    await expect(heading(page, 'Объявления')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Объявления', exact: true })).toHaveAttribute('aria-current', 'page');
+    void api;
+  });
+
+  test('неизвестный адрес открывает «Состояние»', async ({ page, api }) => {
+    await page.goto('./#/no-such-section');
+    await page.locator('input[type=password]').fill('test-admin-key');
+    await page.getByRole('button', { name: 'Войти' }).click();
+    await expect(heading(page, 'Состояние')).toBeVisible();
+    void api;
+  });
+});
+
+test('меню на телефоне открывается, закрывается по Esc и после выбора раздела', async ({ page, api }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const nav = page.getByRole('navigation', { name: 'Разделы' });
+  await expect(nav).toBeHidden();
+  await page.getByRole('button', { name: 'Открыть меню' }).click();
+  await expect(nav).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(nav).toBeHidden();
+  await openSection(page, 'Видео');
+  await expect(nav).toBeHidden();
+  await expect(page.locator('.topbar-title')).toHaveText('Видео');
+  void api;
+});
+
+test('тема переключается и запоминается', async ({ page, api }) => {
+  await login(page);
+  const button = page.getByRole('button', { name: /^Тема:/ });
+  await expect(button).toHaveText('Тема: как в системе');
+  await button.click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await button.click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  void api;
+});
