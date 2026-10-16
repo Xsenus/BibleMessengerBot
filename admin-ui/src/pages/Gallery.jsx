@@ -54,7 +54,7 @@ function Tuning() {
             { key: 'avg', header: 'Время, с', align: 'end', render: (s) => (s.avg_seconds ?? '—') },
             { key: 'score', header: 'Оценка', align: 'end', render: (s) => (s.score ?? '—') },
           ]} />
-        {message && <p className="form-message" role="status">{message}</p>}
+        {message && <p className="form-message" role="alert">{message}</p>}
       </>)}
     </Panel>
   );
@@ -94,7 +94,7 @@ export default function Gallery() {
             </figure>
           ))}
         </div>
-        {message && <p className="form-message" role="status">{message}</p>}
+        {message && <p className="form-message" role="alert">{message}</p>}
       </Panel>
     </section>
   );

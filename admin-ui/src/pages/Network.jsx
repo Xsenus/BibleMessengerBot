@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ArrowDown, ArrowUp, CircleCheck, CircleX, Network as NetworkIcon, X } from 'lucide-react';
+import { ask } from '../feedback.jsx';
 import { api } from '../api.js';
 import { Help, Status, useAction, useData } from '../ui.jsx';
 import { EmptyState, Field, PageHeader, Panel, Switch, TimeAgo } from '../components.jsx';
@@ -40,7 +41,7 @@ function ProxyForm({ onCreated, secretsReady }) {
           <Field label="Пароль"><input type="password" value={f.password} onChange={(e) => set({ password: e.target.value })} placeholder="Пароль" autoComplete="new-password" /></Field>
         </div>
       )}
-      <div className="form-actions"><button disabled={busy || !f.name}>Добавить</button>{message && <span className="form-message" role="status">{message}</span>}</div>
+      <div className="form-actions"><button disabled={busy || !f.name}>Добавить</button>{message && <span className="form-message" role="alert">{message}</span>}</div>
     </form>
   );
 }
@@ -62,11 +63,11 @@ function ProxyRow({ proxy, services, reload }) {
       <td className="cell-actions"><div className="actions">
         <select className="select-sm" value={service} aria-label={`Проверить «${proxy.name}» на сервисе`} onChange={(e) => setService(e.target.value)}>{services.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
         <button className="small" disabled={busy} onClick={test}>Проверить</button>
-        <button className="small danger" disabled={busy} onClick={() => confirm(`Удалить прокси «${proxy.name}»? Он пропадёт из всех маршрутов.`) && run(() => api(`/net/proxies/${proxy.id}`, { method: 'DELETE' }))}>Удалить</button>
+        <button className="small danger" disabled={busy} onClick={async () => (await ask({ title: `Удалить прокси «${proxy.name}»?`, body: 'Он пропадёт из всех маршрутов сервисов.', confirmText: 'Удалить', danger: true })) && run(() => api(`/net/proxies/${proxy.id}`, { method: 'DELETE' }))}>Удалить</button>
       </div>
         {result && <div className={`probe ${result.ok ? 'probe-ok' : 'probe-fail'}`}>{result.ok ? <CircleCheck size={14} aria-hidden="true" /> : <CircleX size={14} aria-hidden="true" />}
           {result.ok ? `работает (${result.ms} мс, HTTP ${result.status})` : result.error}</div>}
-        {!result && message && <small className="muted">{message}</small>}
+        {!result && message && <small className="form-message" role="alert">{message}</small>}
       </td>
     </tr>
   );
@@ -119,7 +120,7 @@ function Service({ service, proxies, reload }) {
         <button disabled={busy || !draft} onClick={save}>Сохранить</button>
         {draft && <button className="small" onClick={() => setDraft(null)}>Отмена</button>}
         <button className="small" disabled={busy} onClick={check}>Проверить маршруты</button>
-        {message && <small className="muted">{message}</small>}
+        {message && <small className="form-message" role="alert">{message}</small>}
       </div>
       {probe && <ul className="probe-list">{probe.map((p) => <li key={p.route} className={`probe ${p.ok ? 'probe-ok' : 'probe-fail'}`}>
         {p.ok ? <CircleCheck size={14} aria-hidden="true" /> : <CircleX size={14} aria-hidden="true" />}{p.label}: {p.ok ? `${p.ms} мс (HTTP ${p.status})` : p.error}</li>)}</ul>}

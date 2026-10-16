@@ -5,8 +5,9 @@ import { explain } from './ui.jsx';
 import { findSection } from './sections.js';
 import { useHashRoute } from './hooks.js';
 import Shell from './Shell.jsx';
+import { DialogHost, Toaster } from './feedback.jsx';
 
-function Login({ onDone }) {
+function Login({ onDone, notice }) {
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,6 +32,7 @@ function Login({ onDone }) {
             <input type="password" autoComplete="off" autoFocus value={value} onChange={(e) => setValue(e.target.value)} placeholder="Ключ" />
           </span>
         </label>
+        {!error && notice && <p className="callout callout-info" role="alert"><CircleAlert size={16} aria-hidden="true" />{notice}</p>}
         {error && <p className="callout callout-danger" role="alert"><CircleAlert size={16} aria-hidden="true" />{error}</p>}
         <button className="button-block" disabled={!value.trim() || busy}>Войти</button>
       </form>
@@ -38,18 +40,29 @@ function Login({ onDone }) {
   );
 }
 
-export default function App() {
+function Panel() {
   const [authed, setAuthed] = useState(Boolean(getKey()));
+  const [notice, setNotice] = useState('');
   const route = useHashRoute();
   const current = findSection(route);
   useEffect(() => {
     document.title = authed ? `${current.label} — Библия · панель` : 'Библия — панель администратора';
   }, [authed, current]);
-  if (!authed) return <Login onDone={() => setAuthed(true)} />;
+  useEffect(() => {
+    if (!authed) return undefined;
+    const expired = () => { setKey(''); setAuthed(false); setNotice('Ключ больше не подходит: возможно, его сменили на сервере. Войдите снова.'); };
+    window.addEventListener('admin:unauthorized', expired);
+    return () => window.removeEventListener('admin:unauthorized', expired);
+  }, [authed]);
+  if (!authed) return <Login notice={notice} onDone={() => { setNotice(''); setAuthed(true); }} />;
   const Page = current.page;
   return (
-    <Shell current={current} onLogout={() => { setKey(''); setAuthed(false); }}>
+    <Shell current={current} onLogout={() => { setKey(''); setNotice(''); setAuthed(false); }}>
       <Page key={current.id} />
     </Shell>
   );
+}
+
+export default function App() {
+  return <><Panel /><Toaster /><DialogHost /></>;
 }

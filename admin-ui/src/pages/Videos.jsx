@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Clapperboard, TriangleAlert } from 'lucide-react';
+import { ask } from '../feedback.jsx';
 import { api } from '../api.js';
 import { Help, AudienceEditor, Status, describeAudience, useAction, useData } from '../ui.jsx';
 import { EmptyState, Field, PageHeader, Panel, Switch, TimeAgo } from '../components.jsx';
@@ -83,7 +84,7 @@ export default function Videos() {
                       </select></td>
                       <td className="cell-actions"><div className="actions">
                         <button className="small" aria-expanded={open === f.id} onClick={() => setOpen(open === f.id ? null : f.id)}>Настроить</button>
-                        <button className="small danger" disabled={busy} onClick={() => confirm(`Удалить канал «${name}»? Проверка и рассылка прекратятся.`) && run(() => api(`/videos/${f.id}`, { method: 'DELETE' }))}>Удалить</button>
+                        <button className="small danger" disabled={busy} onClick={async () => (await ask({ title: `Удалить канал «${name}»?`, body: 'Проверка новых видео и рассылка ссылок прекратятся.', confirmText: 'Удалить', danger: true })) && run(() => api(`/videos/${f.id}`, { method: 'DELETE' }))}>Удалить</button>
                       </div></td>
                     </tr>,
                     open === f.id && <tr key={`e${f.id}`} className="row-editor"><td colSpan="5">
@@ -95,7 +96,7 @@ export default function Videos() {
             </table>
           </div>
         )}
-        {message && <p className="form-message" role="status">{message}</p>}
+        {message && <p className="form-message" role="alert">{message}</p>}
       </Panel>
     </section>
   );

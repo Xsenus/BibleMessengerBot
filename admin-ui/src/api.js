@@ -21,6 +21,8 @@ export async function api(path, { method = 'GET', body, raw, signal } = {}) {
   try { response = await fetch(`/api/admin${path}`, { method, headers, body: payload, signal }); }
   catch { throw new ApiError(0, 'Нет связи с сервером'); }
   if (!response.ok) {
+    // Ключ перестал подходить (сменили на сервере, истёк сеанс) — панель вернётся на экран входа.
+    if (response.status === 401) window.dispatchEvent(new CustomEvent('admin:unauthorized'));
     let detail = '';
     try { const data = await response.json(); detail = typeof data.detail === 'string' ? data.detail : 'Некорректные данные'; } catch { /* пустой ответ */ }
     throw new ApiError(response.status, detail);

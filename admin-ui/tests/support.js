@@ -31,6 +31,7 @@ class MockApi {
     await this.page.clock.setFixedTime(BASE);
     this.page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('status of 401')) this.problems.push(`console: ${m.text()}`); });
     this.page.on('pageerror', (e) => this.problems.push(`pageerror: ${e.message}`));
+    this.page.on('dialog', (d) => { this.problems.push(`окно браузера вместо окна панели: ${d.message()}`); d.dismiss(); });
     await this.page.route('**/api/admin/**', (route) => this.handle(route));
   }
 
@@ -89,10 +90,14 @@ export async function openSection(page, label) {
   await page.locator('#sidebar').waitFor({ state: 'attached' });
   const toggle = page.getByRole('button', { name: 'Открыть меню' });
   if (await toggle.isVisible() && (await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
-  await page.getByRole('navigation', { name: 'Разделы' }).getByRole('link', { name: label, exact: true }).click();
+  await page.getByRole('navigation', { name: 'Разделы' }).getByRole('link', { name: new RegExp(`^${label}( \\d+ требуют решения)?$`) }).click();
 }
 
-/** Принять (или отклонить) следующее окно confirm/prompt; для prompt можно передать ответ. */
-export function answerDialog(page, { accept = true, text } = {}) {
-  page.once('dialog', (dialog) => (accept ? dialog.accept(text) : dialog.dismiss()));
+/** Ответить в открытом окне подтверждения или ввода панели (вызывать после нажатия, открывшего окно). */
+export async function answerDialog(page, { accept = true, text } = {}) {
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  if (text !== undefined) await dialog.getByRole('textbox').fill(text);
+  await dialog.locator(`[data-dialog="${accept ? 'confirm' : 'cancel'}"]`).click();
+  await expect(dialog).toBeHidden();
 }

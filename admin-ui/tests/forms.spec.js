@@ -45,15 +45,17 @@ test('объявление: пауза, правка и отправка сей�
   await row.getByRole('button', { name: 'Пауза' }).click();
   await expect.poll(() => api.writes().length).toBe(1);
 
-  answerDialog(page, { accept: false });
   await row.getByRole('button', { name: 'Сейчас' }).click();
+
+  await answerDialog(page, { accept: false });
   await row.getByRole('button', { name: 'Править' }).click();
   await page.locator('textarea').nth(1).fill('Новый текст');
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
   await expect.poll(() => api.writes().length).toBe(2);
 
-  answerDialog(page);
   await row.getByRole('button', { name: 'Сейчас' }).click();
+
+  await answerDialog(page);
   await expect(page.getByText('Отправлено')).toBeVisible();
   expect(api.writes()).toMatchObject([
     { method: 'POST', path: '/announcements/1/status', body: { status: 'paused' } },
@@ -78,8 +80,8 @@ test('источник: смена режима и включение', async ({
 
 test('источник: публикация поста после подтверждения', async ({ page, api }) => {
   await openSection(page, 'Источники');
-  answerDialog(page);
   await page.getByRole('button', { name: 'Отправить всем' }).click();
+  await answerDialog(page);
   await expect(page.getByText('Поставлено в очередь')).toBeVisible();
   expect(api.writes()).toMatchObject([{ method: 'POST', path: '/posts/7/publish' }]);
 });
@@ -148,10 +150,10 @@ test('чаты: поиск и фильтр уходят в запрос', async 
 
 test('доставки: решение только после подтверждения', async ({ page, api }) => {
   await openSection(page, 'Доставки');
-  answerDialog(page, { accept: false });
   await page.getByRole('button', { name: 'Повторить' }).click();
-  answerDialog(page);
+  await answerDialog(page, { accept: false });
   await page.getByRole('button', { name: 'Дошло' }).click();
+  await answerDialog(page);
   await expect.poll(() => api.writes().length).toBe(1);
   expect(api.writes()).toMatchObject([{ method: 'POST', path: '/deliveries/501/resolve', body: { action: 'sent' } }]);
 });
@@ -169,8 +171,8 @@ test('администраторы: приглашение, смена роли 
   await expect(page.getByText('/claim ABCD-1234')).toBeVisible();
   await page.getByLabel('Роль: Мария').selectOption('viewer');
   await expect.poll(() => api.writes().length).toBe(2);
-  answerDialog(page);
   await page.getByRole('button', { name: 'Снять' }).click();
+  await answerDialog(page);
   await expect.poll(() => api.writes().length).toBe(3);
   expect(api.writes()).toMatchObject([
     { method: 'POST', path: '/admins/invite?role=editor' },
@@ -265,10 +267,10 @@ test('видео: переключатели проверки и рассылк�
   await expect.poll(() => api.writes().length).toBe(2);
   await row.getByRole('combobox').selectOption('180');
   await expect.poll(() => api.writes().length).toBe(3);
-  answerDialog(page, { accept: false });
   await row.getByRole('button', { name: 'Удалить' }).click();
-  answerDialog(page);
+  await answerDialog(page, { accept: false });
   await row.getByRole('button', { name: 'Удалить' }).click();
+  await answerDialog(page);
   await expect.poll(() => api.writes().length).toBe(4);
   expect(api.writes()).toMatchObject([
     { method: 'PATCH', path: '/videos/1', body: { notify: false } },
@@ -290,4 +292,39 @@ test('генератор: выключение переключателем и �
     { method: 'PATCH', path: '/image-providers/1', body: { is_enabled: false } },
     { method: 'PATCH', path: '/image-providers/1', body: { daily_limit: 50 } },
   ]);
+});
+
+test('окна панели: шаблон сохраняется через окно ввода, Esc отменяет подтверждение', async ({ page, api }) => {
+  await openSection(page, 'Объявления');
+  await page.getByPlaceholder('Заголовок (необязательно)').fill('Суббота');
+  await page.getByPlaceholder('Текст').fill('Мир вам');
+  await page.getByRole('button', { name: 'Сохранить как шаблон' }).click();
+  await expect(page.getByRole('dialog').getByRole('textbox')).toHaveValue('Суббота');
+  await answerDialog(page, { text: 'Субботнее приветствие 2' });
+  await expect(page.getByText('Шаблон сохранён')).toBeVisible();
+
+  await page.getByRole('row').filter({ hasText: 'Субботнее чтение' }).getByRole('button', { name: 'Сейчас' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Отправить «Субботнее чтение» сейчас?');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toBeHidden();
+  expect(api.writes()).toMatchObject([{ method: 'POST', path: '/announcement-templates', body: { name: 'Субботнее приветствие 2', title: 'Суббота', body: 'Мир вам' } }]);
+});
+
+test('ошибка действия показывается рядом с формой, успех — уведомлением', async ({ page, api }) => {
+  api.on('POST', '/videos', { status: 422, json: { detail: 'invalid' } });
+  await openSection(page, 'Видео');
+  await page.getByPlaceholder('ID канала или ссылка').fill('плохой');
+  await page.getByRole('button', { name: 'Добавить' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Проверьте введённые данные' })).toBeVisible();
+  api.problems = api.problems.filter((p) => !p.includes('status of 422'));
+  await page.getByRole('switch', { name: /Присылать ссылки/ }).first().click();
+  await expect(page.locator('.toast')).toContainText('Сохранено');
+});
+
+test('ключ перестал подходить посреди работы — возврат на экран входа с пояснением', async ({ page, api }) => {
+  await openSection(page, 'Журнал');
+  api.on('GET', '/audit?limit=200', { status: 401, json: { detail: 'unauthorized' } });
+  await page.getByRole('button', { name: 'Обновить' }).click();
+  await expect(page.getByText('Ключ больше не подходит')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Войти' })).toBeVisible();
 });

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Newspaper, Rss } from 'lucide-react';
+import { ask } from '../feedback.jsx';
 import { api } from '../api.js';
 import { Help, AudienceEditor, Status, describeAudience, useAction, useData } from '../ui.jsx';
 import { EmptyState, Field, PageHeader, Panel, Switch, TimeAgo } from '../components.jsx';
@@ -20,13 +21,13 @@ function Posts() {
             <div className="item-meta"><b>{p.source_title}</b><span>{label(PLATFORMS, p.platform)}</span><TimeAgo value={p.posted_at} /></div>
             <p className="item-body">{p.body}</p>
             <div className="item-actions">
-              <button disabled={busy} onClick={() => confirm('Отправить копию поста всем получателям источника?') && run(() => api(`/posts/${p.id}/publish`, { method: 'POST' }), 'Поставлено в очередь')}>Отправить всем</button>
+              <button disabled={busy} onClick={async () => (await ask({ title: 'Отправить пост всем?', body: `Копия поста из «${p.source_title}» уйдёт всем получателям этого источника.`, confirmText: 'Отправить' })) && run(() => api(`/posts/${p.id}/publish`, { method: 'POST' }), 'Поставлено в очередь')}>Отправить всем</button>
               <button className="small" disabled={busy} onClick={() => run(() => api(`/posts/${p.id}/ignore`, { method: 'POST' }))}>Пропустить</button>
             </div>
           </article>
         ))}
       </div>
-      {message && <p className="form-message" role="status">{message}</p>}
+      {message && <p className="form-message" role="alert">{message}</p>}
     </Panel>
   );
 }
@@ -94,7 +95,7 @@ export default function Sources() {
             </table>
           </div>
         )}
-        {message && <p className="form-message" role="status">{message}</p>}
+        {message && <p className="form-message" role="alert">{message}</p>}
       </Panel>
       <Posts />
     </section>
