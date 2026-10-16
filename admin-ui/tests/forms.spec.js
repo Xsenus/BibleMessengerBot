@@ -21,7 +21,7 @@ test('объявление: создание по дням недели', async 
 test('объявление: разовая отправка с ограничением по платформам', async ({ page, api }) => {
   await openSection(page, 'Объявления');
   await page.getByPlaceholder('Текст').fill('Обновление бота');
-  await page.locator('select').first().selectOption('once');
+  await page.getByLabel('Как часто').selectOption('once');
   await page.getByRole('checkbox', { name: 'MAX' }).check();
   await page.getByRole('button', { name: 'Создать' }).click();
   await expect(page.getByText('Объявление создано')).toBeVisible();
@@ -34,7 +34,7 @@ test('объявление: предпросмотр показывает пол
   await openSection(page, 'Объявления');
   await page.getByPlaceholder('Текст').fill('Мир вам');
   await page.getByRole('button', { name: 'Предпросмотр' }).click();
-  await expect(page.getByText('Получателей: 2249')).toBeVisible();
+  await expect(page.getByText('Получателей: 2 249')).toBeVisible();
   expect(api.writes()).toMatchObject([{ method: 'POST', path: '/announcements/preview',
     body: { title: '', body: 'Мир вам', audience: { platforms: [] }, asset_id: null } }]);
 });
@@ -235,4 +235,22 @@ test('доставки: пустой список показывает «Всё 
   await openSection(page, 'Доставки');
   await expect(page.getByText('Всё в порядке')).toBeVisible();
   await expect(page.getByRole('table')).toHaveCount(0);
+});
+
+test('объявление: картинка загружается и уходит в asset_id, импорт JSON отправляет список', async ({ page, api }) => {
+  await openSection(page, 'Объявления');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  await page.getByLabel('Выбрать картинку').setInputFiles({ name: 'cover.png', mimeType: 'image/png', buffer: png });
+  await expect(page.getByText('Загружена #42')).toBeVisible();
+  await page.getByPlaceholder('Текст').fill('С картинкой');
+  await page.getByRole('button', { name: 'Создать' }).click();
+  await expect(page.getByText('Объявление создано')).toBeVisible();
+
+  const items = [{ body: 'Из файла', kind: 'once' }];
+  await page.getByLabel('Импорт JSON').setInputFiles({ name: 'plan.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(items)) });
+  await expect(page.getByText('Импортировано')).toBeVisible();
+  const writes = api.writes();
+  expect(writes.map((w) => `${w.method} ${w.path}`)).toEqual(['POST /media', 'POST /announcements', 'POST /announcements/import']);
+  expect(writes[1].body).toMatchObject({ body: 'С картинкой', asset_id: 42 });
+  expect(writes[2].body).toEqual(items);
 });

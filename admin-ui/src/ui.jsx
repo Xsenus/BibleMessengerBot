@@ -45,28 +45,33 @@ export const CHAT_TYPES = [['private', 'личные'], ['group', 'группы'
 
 const toggleIn = (list, value) => (list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
 
+const PLATFORM_NAMES = Object.fromEntries(PLATFORMS);
+const CHAT_TYPE_NAMES = Object.fromEntries(CHAT_TYPES);
+
 /** Выбор аудитории: пусто = все. */
 export function AudienceEditor({ value, onChange }) {
   const audience = { platforms: [], chat_types: [], ...(value || {}) };
   return (
-    <div className="row">
-      <span className="muted">Кому (пусто — всем):</span>
-      {PLATFORMS.map(([id, label]) => (
-        <label key={id}><input type="checkbox" checked={audience.platforms.includes(id)}
-          onChange={() => onChange({ ...audience, platforms: toggleIn(audience.platforms, id) })} /> {label}</label>
-      ))}
-      <span className="muted">·</span>
-      {CHAT_TYPES.map(([id, label]) => (
-        <label key={id}><input type="checkbox" checked={audience.chat_types.includes(id)}
-          onChange={() => onChange({ ...audience, chat_types: toggleIn(audience.chat_types, id) })} /> {label}</label>
-      ))}
-    </div>
+    <fieldset className="field audience">
+      <legend className="field-label">Кому <span className="muted">(ничего не отмечено — всем)</span></legend>
+      <div className="chip-group">
+        {PLATFORMS.map(([id, label]) => (
+          <label key={id} className={`chip${audience.platforms.includes(id) ? ' chip-on' : ''}`}><input type="checkbox" checked={audience.platforms.includes(id)}
+            onChange={() => onChange({ ...audience, platforms: toggleIn(audience.platforms, id) })} /> <span>{label}</span></label>
+        ))}
+        <span className="chip-sep" aria-hidden="true" />
+        {CHAT_TYPES.map(([id, label]) => (
+          <label key={id} className={`chip${audience.chat_types.includes(id) ? ' chip-on' : ''}`}><input type="checkbox" checked={audience.chat_types.includes(id)}
+            onChange={() => onChange({ ...audience, chat_types: toggleIn(audience.chat_types, id) })} /> <span>{label}</span></label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
 export const describeAudience = (a) => {
-  const platforms = (a?.platforms || []).join(', ') || 'все платформы';
-  const types = (a?.chat_types || []).join(', ') || 'все чаты';
+  const platforms = (a?.platforms || []).map((p) => PLATFORM_NAMES[p] || p).join(', ') || 'все платформы';
+  const types = (a?.chat_types || []).map((t) => CHAT_TYPE_NAMES[t] || t).join(', ') || 'все чаты';
   return `${platforms} · ${types}`;
 };
 

@@ -41,7 +41,7 @@ export default function Deliveries() {
         </ul>
       </Help>
       <Status error={error} loading={loading} />
-      <DataTable columns={columns} rows={data} caption="Доставки, требующие решения"
+      <DataTable columns={columns} rows={data} caption="Доставки, требующие решения" stack
         empty={<EmptyState icon={CircleCheck} title="Всё в порядке">Решений не требуется.</EmptyState>} />
       {message && <p className="muted" role="status">{message}</p>}
     </section>
