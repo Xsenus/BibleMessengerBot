@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from './api.js';
 import { explain, when } from './ui.jsx';
+import { ScrollArea } from './components.jsx';
 
 const SERVER_STATES = {
   running: ['Выполняется', 'pending'], succeeded: ['Успешно', 'ok'],
@@ -69,11 +70,11 @@ function DeployHistory({ server, github, stale }) {
   const records = server.history || [];
   const runs = github.history || [];
   return <section className="deploy-history" aria-label="История автодеплоев">
-    <h3>История автодеплоев</h3>
+    <h2>История автодеплоев</h2>
     {stale && <p className="error">История могла устареть: не удалось обновить данные.</p>}
-    <h4>Установки на VPS</h4>
+    <h3>Установки на VPS</h3>
     {!records.length ? <p className="muted">Сохранённых установок пока нет.</p> : <>
-      <div className="deploy-history-table"><table><thead><tr><th>Начало / завершение</th><th>Коммит</th><th>Результат</th><th>Причина / этап</th><th>Изменения</th></tr></thead><tbody>
+      <ScrollArea className="deploy-history-table" label="Установки на VPS"><table><thead><tr><th>Начало / завершение</th><th>Коммит</th><th>Результат</th><th>Причина / этап</th><th>Изменения</th></tr></thead><tbody>
         {records.slice(0, limit).map((item) => <tr key={item.id}>
           <td>{when(item.started_at)}<br /><small className="muted">{when(item.finished_at)}</small></td>
           <td><Commit value={item.commit} url={item.commit_url} /></td>
@@ -81,7 +82,7 @@ function DeployHistory({ server, github, stale }) {
           <td><Failure item={item} /></td>
           <td><Changes item={item} /></td>
         </tr>)}
-      </tbody></table></div>
+      </tbody></table></ScrollArea>
       {records.length > limit && <button className="small" onClick={() => setLimit((value) => value + 10)}>Показать ещё</button>}
     </>}
     <p className="muted release-footnote">Сохраняются последние 50 попыток установки, включая ошибки и откаты.</p>
@@ -89,14 +90,14 @@ function DeployHistory({ server, github, stale }) {
       <p className="muted">Здесь видны и ошибки до подключения к VPS. Результат GitHub Actions и подтверждение установки на сервере показаны отдельно.</p>
       {!github.available && <p className="error">GitHub временно недоступен.{runs.length > 0 && ' Показаны ранее полученные данные.'}</p>}
       {github.available && github.history_complete === false && <p className="muted">Часть предыдущих повторных попыток пока недоступна. Их можно открыть в GitHub.</p>}
-      {!runs.length ? <p className="muted">Нет данных о запусках.</p> : <div className="deploy-history-table"><table><thead><tr><th>Начало / обновлён</th><th>Коммит</th><th>Результат</th><th>Причина / журнал</th></tr></thead><tbody>
+      {!runs.length ? <p className="muted">Нет данных о запусках.</p> : <ScrollArea className="deploy-history-table" label="Запуски GitHub Actions"><table><thead><tr><th>Начало / обновлён</th><th>Коммит</th><th>Результат</th><th>Причина / журнал</th></tr></thead><tbody>
         {runs.map((run) => <tr key={`${run.id}-${run.attempt}`}>
           <td>{when(run.started_at)}<br /><small className="muted">{when(run.updated_at)}</small></td>
           <td><Commit value={run.commit} url={`https://github.com/Xsenus/BibleMessengerBot/commit/${run.commit}`} /></td>
           <td><Label value={workflowState(run)} /></td>
           <td><WorkflowReason run={run} /><p><a href={run.attempt_url || run.url} target="_blank" rel="noreferrer">Журнал{run.attempt ? ` · попытка ${run.attempt}` : ''} ↗</a></p></td>
         </tr>)}
-      </tbody></table></div>}
+      </tbody></table></ScrollArea>}
     </details>
   </section>;
 }
@@ -126,21 +127,21 @@ export default function ReleaseStatus({ refreshKey = 0 }) {
   const run = data?.github.run;
   return (
     <div className="card release-status" aria-label="Версия и автодеплой">
-      <div className="row release-heading"><h3>Версия и автодеплой</h3></div>
+      <div className="row release-heading"><h2>Версия и автодеплой</h2></div>
       {error && <p className="error">Не удалось обновить статус: {error}. Показанные ниже данные могут устареть.</p>}
       {!data && !error && <p className="muted">Загрузка версии и статуса…</p>}
       {data && <>
         <div className="release-grid">
-          <div><h4>Запущенная сборка</h4><p><strong>BibleMessengerBot {data.build.version || '—'}</strong></p>
+          <div><h3>Запущенная сборка</h3><p><strong>BibleMessengerBot {data.build.version || '—'}</strong></p>
             <p><Commit value={data.build.commit} url={data.build.commit_url} /></p>
             <p className="muted">Собрана: {when(data.build.built_at)}</p></div>
-          <div><h4>Последняя установка на VPS</h4><p><Label value={data.server.stale ? ['Нет подтверждения завершения', 'error'] : latest && SERVER_STATES[latest.status]} /></p>
+          <div><h3>Последняя установка на VPS</h3><p><Label value={data.server.stale ? ['Нет подтверждения завершения', 'error'] : latest && SERVER_STATES[latest.status]} /></p>
             {latest ? <><p><Commit value={latest.commit} url={latest.commit_url} /></p>
               <p>Начало: {when(latest.started_at)}<br />Завершение: {when(latest.finished_at)}</p>
               {latest.status === 'running' && <p className="muted">{data.server.stale ? 'Квитанция не обновлялась более 90 минут. Проверьте запуск и сервер.' : STAGES[latest.stage] || 'Выполняется'}</p>}
               {latest.failure && <p className="error">{latest.failure.message}</p>}
             </> : <p className="muted">Квитанция установки ещё не получена.</p>}</div>
-          <div><h4>Последний запуск GitHub Actions</h4><p><Label value={data.github.available ? workflowState(run) : run ? ['Данные устарели', 'off'] : null} /></p>
+          <div><h3>Последний запуск GitHub Actions</h3><p><Label value={data.github.available ? workflowState(run) : run ? ['Данные устарели', 'off'] : null} /></p>
             {run && <><p><a href={run.url} target="_blank" rel="noreferrer">Открыть запуск ↗</a>{run.attempt && ` · попытка ${run.attempt}`}</p>
               <p>Коммит: <code title={run.commit}>{run.commit.slice(0, 8)}</code></p>
               <p className="muted">Обновлён: {when(run.updated_at)}</p></>}
@@ -148,11 +149,11 @@ export default function ReleaseStatus({ refreshKey = 0 }) {
             {data.github.available && !run && <p className="muted">Запусков пока нет.</p>}</div>
         </div>
         {current && current.commit !== data.build.commit && <p className="release-notice">Последняя подтверждённая установка относится к другому коммиту. Проверка этой сборки ещё не подтверждена.</p>}
-        <div className="release-bots"><table><thead><tr><th>Бот</th><th>Проверка после установки</th><th>Текущий сигнал</th></tr></thead><tbody>
+        <ScrollArea className="release-bots" label="Боты после установки"><table><thead><tr><th>Бот</th><th>Проверка после установки</th><th>Текущий сигнал</th></tr></thead><tbody>
           {data.bots.map((bot) => <tr key={bot.service}><td>{bot.label}</td>
             <td><Label value={bot.expected === false ? ['Не запускался', 'off'] : bot.verified ? ['Проверен', 'ok'] : ['Не подтверждена', 'off']} /></td>
             <td>{bot.expected === false ? <span className="muted">—</span> : <><Label value={error || bot.live === null ? ['Нет данных', 'off'] : bot.live ? ['Свежий сигнал', 'ok'] : ['Нет свежего сигнала', 'error']} /><br /><small>{when(bot.last_seen)}</small></>}</td></tr>)}
-        </tbody></table></div>
+        </tbody></table></ScrollArea>
         <p className="muted release-footnote">Состояние обновляется каждые 30 секунд, данные GitHub — не чаще раза в 2 минуты. Время: {Intl.DateTimeFormat().resolvedOptions().timeZone}. Сигнал подтверждает работу процесса, но не проверяет доставку сообщений.</p>
         <DeployHistory server={data.server} github={data.github} stale={Boolean(error)} />
       </>}

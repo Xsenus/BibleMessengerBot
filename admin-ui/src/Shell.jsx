@@ -38,7 +38,15 @@ export default function Shell({ current, onLogout, children }) {
   const attention = useAttention();
   const badges = { deliveries: attention };
 
-  useEffect(() => { setOpen(false); window.scrollTo(0, 0); }, [current.id]);
+  const firstRoute = useRef(true);
+  useEffect(() => {
+    setOpen(false);
+    window.scrollTo(0, 0);
+    // При переходе в другой раздел фокус — на его заголовок: так чтение с экрана начинается с нового раздела,
+    // а клавиатура не остаётся в закрытом меню. При первом открытии панели фокус не трогаем.
+    if (firstRoute.current) { firstRoute.current = false; return; }
+    requestAnimationFrame(() => document.querySelector('#content h1')?.focus({ preventScroll: true }));
+  }, [current.id]);
   useEffect(() => {
     if (!open) return undefined;
     sidebar.current?.querySelector('[aria-current="page"]')?.focus();
@@ -49,6 +57,8 @@ export default function Shell({ current, onLogout, children }) {
 
   return (
     <div className="app" data-menu-open={open || undefined}>
+      <a className="skip-link" href="#content"
+        onClick={(event) => { event.preventDefault(); document.querySelector('#content h1')?.focus(); }}>Перейти к содержимому</a>
       <header className="topbar">
         <button ref={menuButton} type="button" className="icon-button" aria-label="Открыть меню" aria-expanded={open}
           aria-controls="sidebar" onClick={() => setOpen(true)}><Menu size={20} /></button>

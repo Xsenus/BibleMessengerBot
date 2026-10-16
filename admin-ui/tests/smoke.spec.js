@@ -15,7 +15,7 @@ test.describe('вход', () => {
 
   test('верный ключ открывает «Состояние», «Выйти» возвращает к входу', async ({ page, api }) => {
     await login(page);
-    await expect(page.getByRole('heading', { name: 'Состояние', level: 2 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Состояние', level: 1 })).toBeVisible();
     expect(api.requests.every((r) => r.key === 'test-admin-key')).toBe(true);
     await page.getByRole('button', { name: 'Выйти' }).click();
     await expect(page.getByRole('button', { name: 'Войти' })).toBeVisible();
@@ -27,6 +27,8 @@ for (const section of SECTIONS) {
     await login(page);
     await openSection(page, section.nav);
     await expect(heading(page, section.heading)).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1 }), 'один заголовок первого уровня — название раздела').toHaveCount(1);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(new RegExp(`^${section.heading}`));
     for (const text of section.texts) await expect(page.getByText(text).filter({ visible: true }).first()).toBeVisible();
     void api;
   });
@@ -146,4 +148,39 @@ test('в меню у «Доставок» видно, сколько требу�
   await login(page);
   await expect(page.getByRole('link', { name: 'Доставки 3 требуют решения' })).toBeVisible();
   void api;
+});
+
+test.describe('клавиатура и чтение с экрана', () => {
+  test('первый Tab — «Перейти к содержимому», ссылка ведёт к заголовку раздела', async ({ page, api }) => {
+    await login(page);
+    await api.settle();
+    await page.keyboard.press('Tab');
+    const skip = page.getByRole('link', { name: 'Перейти к содержимому' });
+    await expect(skip).toBeFocused();
+    await expect(skip).toBeInViewport();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
+    await expect(page).toHaveURL(/#\/overview$|\/panel\/$/);
+  });
+
+  test('после выбора раздела фокус на его заголовке, а не в закрытом меню', async ({ page, api }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await login(page);
+    await openSection(page, 'Журнал');
+    await expect(page.getByRole('heading', { name: 'Журнал действий', level: 1 })).toBeFocused();
+    void api;
+  });
+
+  test('широкая таблица на телефоне прокручивается с клавиатуры', async ({ page, api }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await login(page);
+    await openSection(page, 'Отчёты');
+    const region = page.getByRole('region', { name: /./ }).filter({ has: page.locator('table') }).first();
+    await expect(region).toHaveAttribute('tabindex', '0');
+    await region.focus();
+    const before = await region.evaluate((el) => el.scrollLeft);
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(() => region.evaluate((el) => el.scrollLeft)).toBeGreaterThan(before);
+    void api;
+  });
 });

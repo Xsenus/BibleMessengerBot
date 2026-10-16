@@ -20,7 +20,7 @@ function Login({ onDone, notice }) {
     finally { setBusy(false); }
   };
   return (
-    <div className="login-screen">
+    <main className="login-screen">
       <form className="login-card" onSubmit={submit}>
         <span className="brand-mark brand-mark-lg" aria-hidden="true"><BookOpen size={22} /></span>
         <h1>Панель администратора</h1>
@@ -36,7 +36,7 @@ function Login({ onDone, notice }) {
         {error && <p className="callout callout-danger" role="alert"><CircleAlert size={16} aria-hidden="true" />{error}</p>}
         <button className="button-block" disabled={!value.trim() || busy}>Войти</button>
       </form>
-    </div>
+    </main>
   );
 }
 

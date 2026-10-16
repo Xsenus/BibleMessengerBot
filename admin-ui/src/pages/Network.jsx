@@ -25,7 +25,7 @@ function ProxyForm({ onCreated, secretsReady }) {
   };
   return (
     <form className="panel" onSubmit={submit}>
-      <div className="panel-head"><h3>Добавить прокси</h3></div>
+      <div className="panel-head"><h2>Добавить прокси</h2></div>
       {!secretsReady && <p className="callout callout-danger"><CircleX size={16} aria-hidden="true" /><span>Для хранения адресов задайте <code>SECRETS_KEY</code> или <code>ADMIN_API_KEY</code> (24+ символа) и пересоздайте службу admin.</span></p>}
       <div className="form-grid form-grid-wide">
         <Field label="Название"><input value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder="Название (например, NL-1)" required /></Field>

@@ -68,7 +68,7 @@ function Form({ onCreated }) {
   return (
     <div className="compose">
       <form className="panel compose-form" onSubmit={submit}>
-        <div className="panel-head"><h3>Новое объявление</h3>
+        <div className="panel-head"><h2>Новое объявление</h2>
           <select className="select-sm" aria-label="Шаблон" value="" onChange={(e) => { const t = (templates.data || []).find((x) => String(x.id) === e.target.value); if (t) set({ title: t.title, body: t.body }); }}>
             <option value="">Из шаблона…</option>{(templates.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
@@ -84,7 +84,7 @@ function Form({ onCreated }) {
         </div>
 
         <div className="form-section">
-          <h4 className="form-section-title"><CalendarClock size={16} aria-hidden="true" />Когда отправлять</h4>
+          <h3 className="form-section-title"><CalendarClock size={16} aria-hidden="true" />Когда отправлять</h3>
           <div className="form-grid">
             <Field label="Как часто">
               <select value={f.kind} onChange={(e) => set({ kind: e.target.value })}>{Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
@@ -126,7 +126,7 @@ function Form({ onCreated }) {
       </form>
 
       <aside className="panel compose-preview" aria-label="Предпросмотр">
-        <div className="panel-head"><h3>Предпросмотр</h3></div>
+        <div className="panel-head"><h2>Предпросмотр</h2></div>
         {!preview ? <p className="muted">Нажмите «Предпросмотр»: здесь появится число получателей и то, как текст разобьётся на сообщения в каждой платформе.</p> : (<>
           <p className="preview-total">Получателей: <strong>{formatNumber(preview.total)}</strong></p>
           {Object.entries(preview.platforms).map(([name, p]) => (

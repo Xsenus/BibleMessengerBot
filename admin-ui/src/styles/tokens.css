@@ -18,7 +18,7 @@
   --border-strong: #d4d4d8;
   --text: #18181b;
   --text-2: #52525b;
-  --text-3: #71717a;
+  --text-3: #696971;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --accent-fg: #ffffff;
@@ -26,7 +26,7 @@
   --accent-text: #1d4ed8;
   --success: #15803d; --success-soft: #ecfdf3;
   --warning: #b45309; --warning-soft: #fffbeb;
-  --danger: #dc2626; --danger-soft: #fef2f2;
+  --danger: #c81e1e; --danger-soft: #fef2f2;
   --focus: 0 0 0 3px rgb(37 99 235 / 0.28);
   --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.05);
   --shadow-md: 0 4px 12px rgb(16 24 40 / 0.08), 0 1px 3px rgb(16 24 40 / 0.06);
