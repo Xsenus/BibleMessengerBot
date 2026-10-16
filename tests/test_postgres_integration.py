@@ -4,6 +4,7 @@ They are SKIPPED, not counted as passed, when asyncpg or RUN_DB_TESTS=1 is absen
 No Telegram request and no real Bible download is made in these tests.
 """
 from __future__ import annotations
+import asyncio
 from dataclasses import replace
 from datetime import time
 import hashlib
@@ -31,6 +32,22 @@ from app.services.errors import SendError,UserError
 from tests.test_hardening import metadata,OT,NT
 
 
+async def drop_database(admin,name,attempts=20):
+    """DROP ... WITH (FORCE), retried only on InsufficientPrivilegeError.
+
+    A role that may create databases but is not a superuser cannot terminate a backend of another
+    role or of no role. An autovacuum worker in the disposable database is such a backend; it ends
+    by itself within moments, so a short retry is enough. Any other error is raised at once.
+    """
+    for attempt in range(attempts):
+        try:
+            await admin.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
+            return
+        except asyncpg.InsufficientPrivilegeError:
+            if attempt==attempts-1:raise
+            await asyncio.sleep(0.25)
+
+
 @pytest_asyncio.fixture
 async def db(tmp_path):
     """Create and drop a uniquely named database; never DROP/TRUNCATE the configured app database."""
@@ -51,7 +68,7 @@ async def db(tmp_path):
         yield connection,settings,tmp_path
     finally:
         if connection is not None:await connection.close()
-        await admin.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
+        await drop_database(admin,name)
         await admin.close()
 
 
