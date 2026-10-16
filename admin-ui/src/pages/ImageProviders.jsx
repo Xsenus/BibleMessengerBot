@@ -84,7 +84,7 @@ function AddForm({ templates, onCreated, secretsReady }) {
           </div>
           <div className="form-section">
             <h4 className="form-section-title">Оплата</h4>
-            <div className="form-grid">
+            <div className="form-grid form-grid-wide">
               <Field label="Режим оплаты"><select value={f.billing_mode} onChange={(e) => set({ billing_mode: e.target.value })}>
                 {Object.entries(BILLING).map(([id, text]) => <option key={id} value={id}>{text}</option>)}
               </select></Field>

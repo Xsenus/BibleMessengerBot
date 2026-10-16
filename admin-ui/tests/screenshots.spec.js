@@ -27,3 +27,33 @@ for (const mode of MODES) {
     }
   });
 }
+
+// Скриншоты для пользовательской документации (docs/assets/screenshots/panel-*.png):
+// `npm run screenshots:docs`. Светлая тема, окно 1180×820, тестовые данные из моков.
+const DOCS = path.resolve('../docs/assets/screenshots');
+const DOC_SHOTS = [
+  ['panel-overview', 'Состояние'], ['panel-announcements', 'Объявления'], ['panel-sources', 'Источники'],
+  ['panel-videos', 'Видео'], ['panel-images', 'Генераторы картинок'], ['panel-chats', 'Чаты и пользователи'],
+  ['panel-deliveries', 'Доставки'], ['panel-admins', 'Администраторы'], ['panel-settings', 'Настройки'],
+  ['panel-network', 'Сеть и прокси'],
+];
+
+test('скриншоты для документации', async ({ page, api }) => {
+  test.skip(!process.env.DOCS_SCREENSHOTS, 'только по npm run screenshots:docs');
+  test.setTimeout(120000);
+  await page.setViewportSize({ width: 1180, height: 820 });
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto('./');
+  await page.screenshot({ path: `${DOCS}/panel-login.png` });
+  await login(page);
+  for (const [name, label] of DOC_SHOTS) {
+    await openSection(page, label);
+    await api.settle();
+    await page.screenshot({ path: `${DOCS}/${name}.png`, animations: 'disabled' });
+  }
+  await openSection(page, 'Генераторы картинок');
+  await page.getByRole('combobox').filter({ hasText: 'выберите шаблон' }).selectOption('cloudflare-flux');
+  await api.settle();
+  await page.getByRole('heading', { name: 'Добавить генератор' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${DOCS}/panel-images-template.png`, fullPage: true, animations: 'disabled' });
+});

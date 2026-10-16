@@ -54,7 +54,6 @@ export function useAction(after) {
 
 export const Status = ({ error, loading }) => (error ? <p className="callout callout-danger" role="alert">{error}</p>
   : loading ? <p className="loading" aria-live="polite"><span className="spinner" aria-hidden="true" />Загрузка…</p> : null);
-export const Badge = ({ on, yes = 'вкл', no = 'выкл' }) => <span className={`badge ${on ? 'ok' : 'off'}`}>{on ? yes : no}</span>;
 export const when = (value) => (value ? new Date(value).toLocaleString('ru-RU') : '—');
 
 export const PLATFORMS = [['telegram', 'Telegram'], ['max', 'MAX'], ['vk', 'ВКонтакте']];
