@@ -5,6 +5,7 @@
 | Тема | Документ |
 |---|---|
 | Ежедневное обслуживание, резервные копии, восстановление, обновление | [operations.md](operations.md) |
+| Автодеплой проверенной main на VPS, SSH-доступ и откат | [automatic-deploy.md](automatic-deploy.md) |
 | Метрики, оповещения, хранение данных | [monitoring.md](monitoring.md) |
 | Зашифрованные копии в S3 | [s3-backup.md](s3-backup.md) |
 | Безопасность и модель угроз | [security.md](security.md) |
