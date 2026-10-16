@@ -31,7 +31,7 @@ def publish(public_dir, state, target, previous, status, stage):
     if (not re.fullmatch('[0-9a-f]{40}', target) or not re.fullmatch('[0-9a-f]{40}', previous)
             or status not in STATUSES or stage not in STAGES):
         raise ValueError('invalid_status_arguments')
-    now = datetime.datetime.now(datetime.UTC).isoformat()
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     attempt_file = state / 'public-attempt.json'
     old_attempt = read(attempt_file)
     services = []
