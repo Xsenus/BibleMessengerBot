@@ -5,6 +5,7 @@
 | [systems.md](systems.md) | Подробное описание каждой системы: как устроена и как работает |
 | [new-platform.md](new-platform.md) | Как добавить новый мессенджер (шаг за шагом) |
 | [extending.md](extending.md) | Как добавить генератор картинок, источник видео, способ доставки |
+| [admin-redesign.md](admin-redesign.md) | Редизайн веб-панели: аудит, правила и план по этапам |
 | [../../CONTRIBUTING.md](../../CONTRIBUTING.md) | Правила работы с кодом, проверки перед коммитом |
 
 Быстрые проверки перед коммитом: `ruff check .`, `mypy`, `pytest` (для тестов с БД: `RUN_DB_TESTS=1 DATABASE_URL=postgresql://…`).
