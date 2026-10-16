@@ -1,6 +1,9 @@
-import { api } from '../api.js';
 import { useState } from 'react';
-import { Help, AudienceEditor, Badge, Status, describeAudience, useAction, useData, when } from '../ui.jsx';
+import { Newspaper, Rss } from 'lucide-react';
+import { api } from '../api.js';
+import { Help, AudienceEditor, Status, describeAudience, useAction, useData } from '../ui.jsx';
+import { EmptyState, Field, PageHeader, Panel, Switch, TimeAgo } from '../components.jsx';
+import { PLATFORMS, label } from '../labels.js';
 
 const MODES = { capture: 'только сохранять', approve: 'с подтверждением', auto: 'отправлять сразу' };
 
@@ -8,31 +11,43 @@ function Posts() {
   const { data, error, loading, reload } = useData('/posts?status=new');
   const { run, message, busy } = useAction(reload);
   return (
-    <>
-      <h3>Новые посты</h3>
+    <Panel title={`Новые посты${data ? ` (${data.length})` : ''}`}>
       <Status error={error} loading={loading} />
-      {(data || []).map((p) => (
-        <div className="card" key={p.id}>
-          <small className="muted">{p.platform} · {p.source_title} · {when(p.posted_at)}</small>
-          <p className="pre">{p.body}</p>
-          <button disabled={busy} onClick={() => confirm('Отправить копию всем?') && run(() => api(`/posts/${p.id}/publish`, { method: 'POST' }), 'Поставлено в очередь')}>Отправить всем</button>{' '}
-          <button className="small" disabled={busy} onClick={() => run(() => api(`/posts/${p.id}/ignore`, { method: 'POST' }))}>Пропустить</button>
-        </div>
-      ))}
-      {data?.length === 0 && <p className="muted">Новых постов нет.</p>}
-      {message && <p className="muted">{message}</p>}
-    </>
+      {data?.length === 0 && <EmptyState icon={Newspaper} title="Новых постов нет">Посты появятся здесь, когда выйдут в подключённых источниках.</EmptyState>}
+      <div className="item-list">
+        {(data || []).map((p) => (
+          <article className="item-card" key={p.id}>
+            <div className="item-meta"><b>{p.source_title}</b><span>{label(PLATFORMS, p.platform)}</span><TimeAgo value={p.posted_at} /></div>
+            <p className="item-body">{p.body}</p>
+            <div className="item-actions">
+              <button disabled={busy} onClick={() => confirm('Отправить копию поста всем получателям источника?') && run(() => api(`/posts/${p.id}/publish`, { method: 'POST' }), 'Поставлено в очередь')}>Отправить всем</button>
+              <button className="small" disabled={busy} onClick={() => run(() => api(`/posts/${p.id}/ignore`, { method: 'POST' }))}>Пропустить</button>
+            </div>
+          </article>
+        ))}
+      </div>
+      {message && <p className="form-message" role="status">{message}</p>}
+    </Panel>
   );
 }
 
-function Editor({ source, onSave, busy }) {
+function Editor({ source, onSave, onCancel, busy }) {
   const [draft, setDraft] = useState({ prefix: source.prefix || '', min_length: source.min_length, audience: source.audience || {} });
   return (
-    <div className="row">
-      <input value={draft.prefix} maxLength={200} onChange={(e) => setDraft({ ...draft, prefix: e.target.value })} placeholder="Приставка перед текстом копии" />
-      <label>Мин. длина <input type="number" min="1" value={draft.min_length} onChange={(e) => setDraft({ ...draft, min_length: Number(e.target.value) })} /></label>
+    <div className="inline-editor">
+      <div className="form-grid">
+        <Field label="Приставка перед текстом" hint="Например, «Из канала …». Пусто — без приставки.">
+          <input value={draft.prefix} maxLength={200} onChange={(e) => setDraft({ ...draft, prefix: e.target.value })} placeholder="Приставка перед текстом копии" />
+        </Field>
+        <Field label="Минимальная длина поста" hint="Более короткие посты не копируются.">
+          <input type="number" min="1" value={draft.min_length} onChange={(e) => setDraft({ ...draft, min_length: Number(e.target.value) })} />
+        </Field>
+      </div>
       <AudienceEditor value={draft.audience} onChange={(audience) => setDraft({ ...draft, audience })} />
-      <button disabled={busy} onClick={() => onSave(draft)}>Сохранить</button>
+      <div className="form-actions">
+        <button disabled={busy} onClick={() => onSave(draft)}>Сохранить</button>
+        <button className="small" onClick={onCancel}>Отмена</button>
+      </div>
     </div>
   );
 }
@@ -44,34 +59,43 @@ export default function Sources() {
   const patch = (id, body) => run(() => api(`/sources/${id}`, { method: 'PATCH', body }));
   return (
     <section>
-      <h2>Источники контента</h2>
+      <PageHeader title="Источники контента" description="Каналы, группы и сообщества, где состоит бот. Новые посты из них можно пересылать подписчикам." />
       <Help title="Как это работает">
         <ol>
           <li>Добавьте бота в канал (администратором) или группу — источник появится в списке <b>выключенным</b>.</li>
-          <li>Нажмите «выкл», чтобы включить, и выберите режим: «только сохранять» (посты копятся, отправляете вручную), «с подтверждением» (администраторам приходит уведомление) или «отправлять сразу».</li>
+          <li>Включите его и выберите режим: «только сохранять» (посты копятся, отправляете вручную), «с подтверждением» (администраторам приходит уведомление) или «отправлять сразу».</li>
           <li>«Настроить» задаёт приставку перед копией, минимальную длину поста и аудиторию (кому отправлять копии). Копия не возвращается в чат-источник.</li>
-          <li>Новые посты внизу страницы: «Отправить всем» или «Пропустить». Telegram не показывает боту старые посты канала — собираются только вышедшие после добавления бота.</li>
+          <li>Новые посты — в блоке ниже: «Отправить всем» или «Пропустить». Telegram не показывает боту старые посты канала: собираются только вышедшие после того, как бот стал администратором.</li>
         </ol>
       </Help>
-      <p className="muted">Каналы, группы и сообщества, где состоит бот. Новые источники появляются выключенными. Telegram не отдаёт историю канала: посты собираются с момента, когда бот стал администратором.</p>
-      <Status error={error} loading={loading} />
-      <table>
-        <thead><tr><th>Источник</th><th>Платформа</th><th>Режим</th><th>Состояние</th></tr></thead>
-        <tbody>
-          {(data || []).flatMap((s) => [
-            <tr key={s.id}>
-              <td>{s.title || s.external_id}</td><td>{s.platform}</td>
-              <td><select value={s.mode} disabled={busy} onChange={(e) => patch(s.id, { mode: e.target.value })}>
-                {Object.entries(MODES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select></td>
-              <td><button className="small" disabled={busy} onClick={() => patch(s.id, { is_enabled: !s.is_enabled })}><Badge on={s.is_enabled} /></button>{' '}
-                <button className="small" onClick={() => setOpen(open === s.id ? null : s.id)}>Настроить</button><br /><small className="muted">{describeAudience(s.audience)}</small></td>
-            </tr>,
-            open === s.id && <tr key={`e${s.id}`}><td colSpan="4"><Editor source={s} busy={busy} onSave={async (draft) => { if (await patch(s.id, draft)) setOpen(null); }} /></td></tr>,
-          ])}
-        </tbody>
-      </table>
-      {message && <p className="muted">{message}</p>}
+      <Panel title={`Источники${data ? ` (${data.length})` : ''}`}>
+        <Status error={error} loading={loading} />
+        {data?.length === 0 && <EmptyState icon={Rss} title="Источников пока нет">Добавьте бота в канал или группу — источник появится здесь.</EmptyState>}
+        {data?.length > 0 && (
+          <div className="table-wrap">
+            <table className="data-table table-stack">
+              <thead><tr><th scope="col">Источник</th><th scope="col">Режим</th><th scope="col">Работает</th><th scope="col">Кому</th><th scope="col"><span className="sr-only">Действия</span></th></tr></thead>
+              <tbody>
+                {data.flatMap((s) => [
+                  <tr key={s.id}>
+                    <td data-label="Источник"><b>{s.title || s.external_id}</b><div><small>{label(PLATFORMS, s.platform)}</small></div></td>
+                    <td data-label="Режим"><select value={s.mode} disabled={busy} aria-label={`Режим: ${s.title || s.external_id}`} onChange={(e) => patch(s.id, { mode: e.target.value })}>
+                      {Object.entries(MODES).map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+                    </select></td>
+                    <td data-label="Работает"><Switch checked={s.is_enabled} disabled={busy} label={`Источник «${s.title || s.external_id}» включён`} onChange={(value) => patch(s.id, { is_enabled: value })} /></td>
+                    <td data-label="Кому"><small>{describeAudience(s.audience)}</small></td>
+                    <td className="cell-actions"><button className="small" aria-expanded={open === s.id} onClick={() => setOpen(open === s.id ? null : s.id)}>Настроить</button></td>
+                  </tr>,
+                  open === s.id && <tr key={`e${s.id}`} className="row-editor"><td colSpan="5">
+                    <Editor source={s} busy={busy} onCancel={() => setOpen(null)} onSave={async (draft) => { if (await patch(s.id, draft)) setOpen(null); }} />
+                  </td></tr>,
+                ])}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {message && <p className="form-message" role="status">{message}</p>}
+      </Panel>
       <Posts />
     </section>
   );
