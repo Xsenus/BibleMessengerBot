@@ -1,5 +1,5 @@
 // Базовые компоненты разделов. Стили — в styles.css (блок «Компоненты»).
-import { Inbox } from 'lucide-react';
+import { Inbox, Upload } from 'lucide-react';
 
 const number = new Intl.NumberFormat('ru-RU');
 export const formatNumber = (value) => (typeof value === 'number' ? number.format(value) : value ?? '—');
@@ -67,21 +67,22 @@ export function EmptyState({ icon: Icon = Inbox, title, children }) {
 
 /**
  * Таблица: columns — [{ key, header, render?, align?, className? }].
- * Пустой список показывает empty; пока данных нет — ничего.
+ * Пустой список показывает empty; пока данных нет — ничего. stack — на телефоне строки становятся карточками.
  */
-export function DataTable({ columns, rows, rowKey = (row) => row.id, empty, caption }) {
+export function DataTable({ columns, rows, rowKey = (row) => row.id, empty, caption, stack = false }) {
   if (!rows) return null;
   if (!rows.length) return empty || null;
   return (
     <div className="table-wrap">
-      <table className="data-table">
+      <table className={`data-table${stack ? ' table-stack' : ''}`}>
         {caption && <caption className="sr-only">{caption}</caption>}
         <thead><tr>{columns.map((c) => <th key={c.key} className={c.align === 'end' ? 'align-end' : undefined} scope="col">{c.header}</th>)}</tr></thead>
         <tbody>
           {rows.map((row) => (
             <tr key={rowKey(row)}>
               {columns.map((c) => (
-                <td key={c.key} className={[c.align === 'end' && 'align-end', c.className].filter(Boolean).join(' ') || undefined}>
+                <td key={c.key} data-label={stack && c.header && !c.className?.includes('cell-actions') ? c.header : undefined}
+                  className={[c.align === 'end' && 'align-end', c.className].filter(Boolean).join(' ') || undefined}>
                   {c.render ? c.render(row) : row[c.key]}
                 </td>
               ))}
@@ -90,5 +91,37 @@ export function DataTable({ columns, rows, rowKey = (row) => row.id, empty, capt
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Поле формы с подписью и подсказкой. Для группы флажков — as="fieldset". */
+export function Field({ label, hint, children, as: Tag = 'label', className = '' }) {
+  const Caption = Tag === 'fieldset' ? 'legend' : 'span';
+  return (
+    <Tag className={`field ${className}`}>
+      <Caption className="field-label">{label}</Caption>
+      {children}
+      {hint && <span className="field-hint">{hint}</span>}
+    </Tag>
+  );
+}
+
+/** Флажок-«чип» для выбора нескольких вариантов. */
+export function Chip({ checked, onChange, children, disabled }) {
+  return (
+    <label className={`chip${checked ? ' chip-on' : ''}`}>
+      <input type="checkbox" checked={checked} onChange={onChange} disabled={disabled} />
+      <span>{children}</span>
+    </label>
+  );
+}
+
+/** Кнопка выбора файла с русской подписью вместо стандартной «Choose File». */
+export function FilePicker({ accept, onChange, disabled, children, icon: Icon = Upload, title }) {
+  return (
+    <label className={`button-like small${disabled ? ' is-disabled' : ''}`} title={title}>
+      <Icon size={15} aria-hidden="true" />{children}
+      <input type="file" accept={accept} className="sr-only" disabled={disabled} onChange={onChange} />
+    </label>
   );
 }
