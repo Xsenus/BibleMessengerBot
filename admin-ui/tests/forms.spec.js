@@ -323,6 +323,9 @@ test('ошибка действия показывается рядом с фо�
 
 test('ключ перестал подходить посреди работы — возврат на экран входа с пояснением', async ({ page, api }) => {
   await openSection(page, 'Журнал');
+  // Сначала дождаться обычной загрузки журнала, иначе 401 получит она, а не нажатие «Обновить».
+  await expect(page.getByText('announcement.create')).toBeVisible();
+  await api.settle();
   api.on('GET', '/audit?limit=200', { status: 401, json: { detail: 'unauthorized' } });
   await page.getByRole('button', { name: 'Обновить' }).click();
   await expect(page.getByText('Ключ больше не подходит')).toBeVisible();
