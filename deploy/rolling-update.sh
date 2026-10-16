@@ -24,6 +24,12 @@ finish() {
 trap finish EXIT
 
 echo '1/4 Сборка образа…'
+PROJECT_REVISION=unknown
+if revision="$(git rev-parse HEAD 2>/dev/null)" && git diff --quiet && git diff --cached --quiet \
+    && [[ -z "$(git ls-files --others --exclude-standard)" ]]; then
+  PROJECT_REVISION="$revision"
+fi
+export PROJECT_REVISION
 # Every app service shares bootstrap's image; parallel exports to the same tag can stall.
 "${compose[@]}" build bootstrap
 "${compose[@]}" run --rm --no-deps bootstrap python -m app.neural_audio_admin prepare

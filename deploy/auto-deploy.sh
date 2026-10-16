@@ -29,23 +29,66 @@ compose=(docker compose --profile '*')
 "${compose[@]}" config --quiet
 free_kib="$(df -Pk . | awk 'NR==2 {print $4}')"
 [[ "$free_kib" =~ ^[0-9]+$ && "$free_kib" -ge 4194304 ]] || { echo 'At least 4 GiB free disk space is required.' >&2; exit 1; }
-state="$PWD/runtime-evidence/auto-deploy/$(date -u +%Y%m%dT%H%M%SZ)-${target:0:12}-$$"
+state="$project/runtime-evidence/auto-deploy/$(date -u +%Y%m%dT%H%M%SZ)-${target:0:12}-$$"
 mkdir -p "$state"
 exec > >(tee -a "$state/deploy.log") 2>&1
 echo "Deploy $previous -> $target"
+running=()
+declare -A old_images old_tags
+changed=false
+stage=checking
+publish_status() {
+  # В админку передаётся отдельная квитанция, а не приватные файлы runtime-evidence.
+  python3 "${BIBLE_DEPLOY_STATUS_WRITER:-/usr/local/libexec/bible-deploy-status}" \
+    "$project/runtime-evidence/deploy-status" "$state" "$target" "$previous" "$1" "$2"
+}
+schema_fingerprint() {
+  # Только хеш применённых миграций; нет пользовательских данных и SQL восстановления.
+  "${compose[@]}" exec -T postgres sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT name,sha256 FROM schema_migrations ORDER BY name"' | sha256sum
+}
+rollback() {
+  code=$?
+  trap - EXIT
+  outcome=failed
+  if (( code != 0 )) && [[ "$changed" == true ]]; then
+    if current_schema="$(schema_fingerprint)" && [[ "$current_schema" == "$schema_before" ]]; then
+      echo 'Deployment failed; restoring previous code and images (schema unchanged).'
+      publish_status running rollback || true
+      restored=true
+      git switch --detach "$previous" || restored=false
+      for service in "${running[@]}"; do docker tag "${old_images[$service]}" "${old_tags[$service]}" || restored=false; done
+      rollback_compose=(docker compose --project-directory "$project" -f "$state/previous-compose.yml" -f "$state/rollback-images.yml" --profile '*')
+      for service in "${running[@]}"; do
+        "${rollback_compose[@]}" up -d --no-deps --wait --wait-timeout 180 "$service" || restored=false
+      done
+      stage=rollback
+      [[ "$restored" == false ]] || outcome=rolled_back
+    else
+      echo 'Schema changed or cannot be checked: stop application services; operator intervention required. Database is NOT restored automatically.' >&2
+      "${compose[@]}" stop "${running[@]}" || code=1
+      outcome=manual_intervention
+      stage=stopped
+    fi
+  fi
+  if (( code == 0 )); then outcome=succeeded; stage=completed; fi
+  publish_status "$outcome" "$stage" || code=1
+  if (( code == 0 )); then
+    printf '%s\n' "$target" > "$state/deployed-commit"
+    printf '%s\n' "$target" > runtime-evidence/auto-deploy/deployed-commit
+    echo "DEPLOYED: $target; application services healthy; PostgreSQL and configuration preserved."
+  fi
+  printf '%s\n' "$code" > "$state/exit-code"
+  exit "$code"
+}
+trap rollback EXIT
+publish_status running checking
 sha256sum .env > "$state/environment.sha256"
 cp docker-compose.yml "$state/previous-compose.yml"
 "${compose[@]}" ps --format json > "$state/services-before.jsonl"
 postgres_id="$("${compose[@]}" ps -q postgres)"
 [[ -n "$postgres_id" ]]
-schema_fingerprint() {
-  # Только хеш применённых миграций; нет пользовательских данных и SQL восстановления.
-  "${compose[@]}" exec -T postgres sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT name,sha256 FROM schema_migrations ORDER BY name"' | sha256sum
-}
 schema_before="$(schema_fingerprint)"
 printf '%s\n' "$schema_before" > "$state/schema-before.sha256"
-running=()
-declare -A old_images old_tags
 printf 'services:\n' > "$state/rollback-images.yml"
 while IFS= read -r service; do
   case "$service" in worker|composer|bot|admin|max-web|maxbot|vkbot|illustrator|speaker) ;;
@@ -60,39 +103,26 @@ while IFS= read -r service; do
   running+=("$service")
 done < <("${compose[@]}" ps --services --filter status=running)
 (( ${#running[@]} > 0 ))
-changed=false
-rollback() {
-  code=$?
-  trap - EXIT
-  if (( code != 0 )) && [[ "$changed" == true ]]; then
-    if current_schema="$(schema_fingerprint)" && [[ "$current_schema" == "$schema_before" ]]; then
-      echo 'Deployment failed; restoring previous code and images (schema unchanged).'
-      git switch --detach "$previous" || code=1
-      for service in "${running[@]}"; do docker tag "${old_images[$service]}" "${old_tags[$service]}" || code=1; done
-      rollback_compose=(docker compose --project-directory "$project" -f "$state/previous-compose.yml" -f "$state/rollback-images.yml" --profile '*')
-      for service in "${running[@]}"; do
-        "${rollback_compose[@]}" up -d --no-deps --wait --wait-timeout 180 "$service" || code=1
-      done
-    else
-      echo 'Schema changed or cannot be checked: stop application services; operator intervention required. Database is NOT restored automatically.' >&2
-      "${compose[@]}" stop "${running[@]}" || code=1
-    fi
-  fi
-  printf '%s\n' "$code" > "$state/exit-code"
-  exit "$code"
-}
-trap rollback EXIT
 echo 'Creating and verifying the cloud database backup before deployment.'
+stage=backup
+publish_status running "$stage"
 BACKUP_LOCAL_ONLY=0 bash backup.sh
 changed=true
+stage=updating
+publish_status running "$stage"
 git switch main
 git merge --ff-only "$target"
 bash deploy/rolling-update.sh --yes
+stage=verifying
+publish_status running "$stage"
 sha256sum --check "$state/environment.sha256"
 [[ "$("${compose[@]}" ps -q postgres)" == "$postgres_id" ]]
 for service in "${running[@]}"; do
   container="$("${compose[@]}" ps -q "$service")"
   [[ "$(docker inspect --format '{{.State.Health.Status}}' "$container")" == healthy ]]
+  revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$container")"
+  [[ "$revision" == "$target" ]]
+  printf '{"name":"%s","health":"healthy","commit":"%s"}\n' "$service" "$revision" >> "$state/checked-services.jsonl"
 done
 "${compose[@]}" exec -T "${running[0]}" python -m app.cli migrate --check
 if [[ " ${running[*]} " == *' admin '* ]]; then
@@ -100,6 +130,3 @@ if [[ " ${running[*]} " == *' admin '* ]]; then
   curl --fail --silent --show-error "http://$address/ready"
 fi
 "${compose[@]}" ps --format json > "$state/services-after.jsonl"
-printf '%s\n' "$target" > "$state/deployed-commit"
-printf '%s\n' "$target" > runtime-evidence/auto-deploy/deployed-commit
-echo "DEPLOYED: $target; application services healthy; PostgreSQL and configuration preserved."

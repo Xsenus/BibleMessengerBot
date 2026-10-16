@@ -4,6 +4,8 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
+import json
 
 import pytest
 
@@ -55,6 +57,8 @@ exit "${ACTIVATION_EXIT:-0}"
 record() { printf '%q ' "$@" >> "$DEPLOY_TRACE"; printf '\\n' >> "$DEPLOY_TRACE"; }
 id() { echo 0; }
 flock() { record flock "$@"; }
+python3() { "$DEPLOY_TEST_PYTHON" "$@"; }
+df() { printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nsynthetic 99999999 0 %s 1%% /\\n' "${FREE_KIB:-8388608}"; }
 git() { record git "$@"; if [[ "$1" != fetch ]]; then command git "$@"; fi; }
 curl() { record curl "$@"; echo '{"status":"ready"}'; }
 docker() {
@@ -63,6 +67,7 @@ docker() {
     case "$3" in
       *Health.Status*) if [[ "${UNHEALTHY:-0}" == 1 && -f "$DEPLOY_ACTIVATED" ]]; then echo unhealthy; else echo healthy; fi;;
       *Config.Image*) echo bible-messenger-bot:synthetic-previous;;
+      *org.opencontainers.image.revision*) if [[ "${WRONG_REVISION:-0}" == 1 ]]; then printf '%040d\\n' 0; else echo "$DEPLOY_TARGET_SHA"; fi;;
       *) echo sha256:synthetic-previous;;
     esac
     return
@@ -81,6 +86,8 @@ docker() {
     env = {**os.environ, 'BIBLE_DEPLOY_PROJECT_DIR':project.as_posix(),
            'BIBLE_DEPLOY_LOCK':(tmp_path / 'lock').as_posix(), 'BASH_ENV':commands.as_posix(),
            'DEPLOY_TRACE':trace.as_posix(), 'DEPLOY_ACTIVATED':activated.as_posix(),
+           'DEPLOY_TEST_PYTHON':sys.executable, 'DEPLOY_TARGET_SHA':target,
+           'BIBLE_DEPLOY_STATUS_WRITER':(ROOT / 'deploy/write-deployment-status.py').as_posix(),
            'GIT_CONFIG_NOSYSTEM':'1'}
 
     def run(**changes):
@@ -98,12 +105,15 @@ def test_success_deploys_exact_commit_and_preserves_configuration(deployment):
     assert git('rev-parse', 'HEAD') == target
     assert (project / '.env').read_text() == 'SYNTHETIC_ONLY=yes\n'
     assert (project / 'runtime-evidence/auto-deploy/deployed-commit').read_text().strip() == target
+    status = json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())
+    assert status['current']['commit'] == target and status['last_attempt']['status'] == 'succeeded'
+    assert {row['name'] for row in status['current']['services']} == {'bot', 'worker', 'admin'}
     calls = trace.read_text().splitlines()
     assert calls.index('backup') < calls.index('activation')
     assert not any('down' in shlex.split(call) or 'restore' in shlex.split(call) for call in calls)
 
 
-@pytest.mark.parametrize('failure', [{'ACTIVATION_EXIT':'17'}, {'UNHEALTHY':'1'}])
+@pytest.mark.parametrize('failure', [{'ACTIVATION_EXIT':'17'}, {'UNHEALTHY':'1'}, {'WRONG_REVISION':'1'}])
 def test_failed_update_restores_previous_images_and_checkout(deployment, failure):
     project, git, previous, target, trace, run = deployment
     result = run(**failure)
@@ -113,6 +123,8 @@ def test_failed_update_restores_previous_images_and_checkout(deployment, failure
     calls = trace.read_text()
     assert 'rollback-images.yml' in calls and '--no-deps' in calls
     assert not (project / 'runtime-evidence/auto-deploy/deployed-commit').exists()
+    status = json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())
+    assert status['last_attempt']['status'] == 'rolled_back' and status['current'] is None
 
 
 def test_changed_schema_stops_workers_without_automatic_restore(deployment):
@@ -132,6 +144,14 @@ def test_backup_failure_never_changes_running_release(deployment):
     assert result.returncode == 23
     assert git('rev-parse', 'HEAD') == previous
     assert 'activation' not in trace.read_text()
+    assert json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())['last_attempt']['status'] == 'failed'
+
+
+def test_insufficient_disk_never_starts_backup_or_activation(deployment):
+    project, git, previous, target, trace, run = deployment
+    result = run(FREE_KIB='1024')
+    assert result.returncode != 0 and git('rev-parse', 'HEAD') == previous
+    assert 'backup' not in trace.read_text() and 'activation' not in trace.read_text()
 
 
 def test_outdated_ci_commit_is_skipped(deployment):

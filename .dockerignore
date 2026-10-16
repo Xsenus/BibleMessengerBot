@@ -1,4 +1,5 @@
 .git
+BUILD-METADATA.json
 .env
 .env.*
 !.env.example

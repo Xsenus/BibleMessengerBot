@@ -136,10 +136,12 @@ jobs:
           context: .
           load: true
           tags: bible-messenger-bot:ci
+          build-args: PROJECT_REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Container database and admin smoke test
         run: |
+          docker run --rm -e EXPECTED_REVISION="$GITHUB_SHA" bible-messenger-bot:ci python -c 'import os; from app.services.release_info import build_info; assert build_info()["commit"] == os.environ["EXPECTED_REVISION"]'
           docker run --rm --network host -e DATABASE_URL -e BIBLE_PROFILE bible-messenger-bot:ci python -m app.cli seed --profile none
           docker run --rm --network host --user 0:0 --cap-drop ALL --security-opt no-new-privileges -e DATABASE_URL -e BIBLE_PROFILE bible-messenger-bot:ci python -m app.backup_admin status
           docker run -d --name biblebot-ci-admin --network host -e DATABASE_URL -e BIBLE_PROFILE -e ADMIN_API_KEY bible-messenger-bot:ci uvicorn app.web.main:app --host 127.0.0.1 --port 18080
