@@ -48,7 +48,7 @@ function AddForm({ templates, onCreated, secretsReady }) {
   const keyless = ['pollinations', 'horde'].includes(f.adapter);
   return (
     <form className="panel" onSubmit={submit}>
-      <div className="panel-head"><h3>Добавить генератор</h3></div>
+      <div className="panel-head"><h2>Добавить генератор</h2></div>
       <Field label="Шаблон сервиса" hint="Шаблон заполнит адрес, модель и размеры; их можно поправить.">
         <select value={templateId} onChange={(e) => pick(e.target.value)}>
           <option value="">— выберите шаблон —</option>
@@ -83,7 +83,7 @@ function AddForm({ templates, onCreated, secretsReady }) {
             {!secretsReady && f.api_key && <p className="callout callout-danger"><CircleX size={16} aria-hidden="true" />Для хранения ключей задайте SECRETS_KEY или ADMIN_API_KEY (24+ символа) и перезапустите панель.</p>}
           </div>
           <div className="form-section">
-            <h4 className="form-section-title">Оплата</h4>
+            <h3 className="form-section-title">Оплата</h3>
             <div className="form-grid form-grid-wide">
               <Field label="Режим оплаты"><select value={f.billing_mode} onChange={(e) => set({ billing_mode: e.target.value })}>
                 {Object.entries(BILLING).map(([id, text]) => <option key={id} value={id}>{text}</option>)}
@@ -93,7 +93,7 @@ function AddForm({ templates, onCreated, secretsReady }) {
             <p className="field-hint">Укажите верхнюю границу цены для выбранной модели и размеров. Каждый запрос, включая проверку и таймаут, резервируется в общем месячном бюджете. Бесплатный кредит платного аккаунта не гарантирует нулевую стоимость.</p>
           </div>
           <div className="form-section">
-            <h4 className="form-section-title">Размер и лимиты</h4>
+            <h3 className="form-section-title">Размер и лимиты</h3>
             <div className="form-grid">
               <Field label="Ширина"><input type="number" value={f.width} min="256" max="2048" onChange={(e) => set({ width: e.target.value })} /></Field>
               <Field label="Высота"><input type="number" value={f.height} min="256" max="2048" onChange={(e) => set({ height: e.target.value })} /></Field>

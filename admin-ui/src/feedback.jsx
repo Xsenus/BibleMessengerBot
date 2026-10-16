@@ -82,7 +82,7 @@ export function DialogHost() {
       <form method="dialog" onSubmit={submit}>
         <div className="dialog-head">
           {current.danger && <TriangleAlert size={20} className="dialog-icon" aria-hidden="true" />}
-          <h3 id="dialog-title">{current.title}</h3>
+          <h2 id="dialog-title">{current.title}</h2>
         </div>
         {current.body && <p className="dialog-body">{current.body}</p>}
         {current.kind === 'prompt' && (

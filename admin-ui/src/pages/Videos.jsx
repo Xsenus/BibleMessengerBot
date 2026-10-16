@@ -50,7 +50,7 @@ export default function Videos() {
         <p>Первая проверка только запоминает уже вышедшие видео. Чтобы бот присылал ссылки, включите «Рассылку». «Настроить» задаёт название, шаблон (<code>{'{title}'}</code>, <code>{'{url}'}</code>, <code>{'{channel}'}</code>) и аудиторию. При ошибках интервал проверки растёт; причина видна под названием канала.</p>
       </Help>
       <form className="panel" onSubmit={add}>
-        <div className="panel-head"><h3>Добавить канал</h3></div>
+        <div className="panel-head"><h2>Добавить канал</h2></div>
         <div className="add-row">
           <Field label="Платформа">
             <select value={form.platform} onChange={(e) => setForm({ ...form, platform: e.target.value })}>

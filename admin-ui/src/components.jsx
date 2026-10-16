@@ -1,4 +1,5 @@
 // Базовые компоненты разделов. Стили — в styles.css (блок «Компоненты»).
+import { useEffect, useRef, useState } from 'react';
 import { Inbox, Upload } from 'lucide-react';
 
 const number = new Intl.NumberFormat('ru-RU');
@@ -22,7 +23,7 @@ export function PageHeader({ title, description, actions }) {
   return (
     <header className="page-header">
       <div className="page-header-text">
-        <h2>{title}</h2>
+        <h1 tabIndex={-1}>{title}</h1>
         {description && <p className="page-description">{description}</p>}
       </div>
       {actions && <div className="page-actions">{actions}</div>}
@@ -34,7 +35,7 @@ export function PageHeader({ title, description, actions }) {
 export function Panel({ title, actions, children, className = '' }) {
   return (
     <section className={`panel ${className}`}>
-      {(title || actions) && <div className="panel-head">{title && <h3>{title}</h3>}{actions}</div>}
+      {(title || actions) && <div className="panel-head">{title && <h2>{title}</h2>}{actions}</div>}
       {children}
     </section>
   );
@@ -69,11 +70,33 @@ export function EmptyState({ icon: Icon = Inbox, title, children }) {
  * Таблица: columns — [{ key, header, render?, align?, className? }].
  * Пустой список показывает empty; пока данных нет — ничего. stack — на телефоне строки становятся карточками.
  */
+/**
+ * Область с горизонтальной прокруткой. Когда содержимое шире экрана, область получает фокус,
+ * чтобы её можно было прокрутить стрелками, и подпись label для чтения с экрана.
+ */
+export function ScrollArea({ label, className, children }) {
+  const ref = useRef(null);
+  const [scrolls, setScrolls] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    const check = () => setScrolls(element.scrollWidth > element.clientWidth + 1);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(element);
+    if (element.firstElementChild) observer.observe(element.firstElementChild);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className={className} tabIndex={scrolls ? 0 : undefined}
+      role={scrolls ? 'region' : undefined} aria-label={scrolls ? label : undefined}>{children}</div>
+  );
+}
+
 export function DataTable({ columns, rows, rowKey = (row) => row.id, empty, caption, stack = false }) {
   if (!rows) return null;
   if (!rows.length) return empty || null;
   return (
-    <div className="table-wrap">
+    <ScrollArea className="table-wrap" label={caption || 'Таблица'}>
       <table className={`data-table${stack ? ' table-stack' : ''}`}>
         {caption && <caption className="sr-only">{caption}</caption>}
         <thead><tr>{columns.map((c) => <th key={c.key} className={c.align === 'end' ? 'align-end' : undefined} scope="col">{c.header}</th>)}</tr></thead>
@@ -90,7 +113,7 @@ export function DataTable({ columns, rows, rowKey = (row) => row.id, empty, capt
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollArea>
   );
 }
 
