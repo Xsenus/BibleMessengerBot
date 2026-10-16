@@ -84,8 +84,11 @@ export async function login(page, key = KEY) {
 
 /** Открыть раздел через меню; на узком экране меню сначала выдвигается кнопкой. */
 export async function openSection(page, label) {
+  // Дождаться каркаса: сразу после входа меню может быть ещё не отрисовано. Открыто ли меню, смотрим по
+  // aria-expanded, а не по видимости: во время анимации закрытия меню ещё видно, хотя уже закрывается.
+  await page.locator('#sidebar').waitFor({ state: 'attached' });
   const toggle = page.getByRole('button', { name: 'Открыть меню' });
-  if (await toggle.isVisible()) await toggle.click();
+  if (await toggle.isVisible() && (await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   await page.getByRole('navigation', { name: 'Разделы' }).getByRole('link', { name: label, exact: true }).click();
 }
 
