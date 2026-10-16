@@ -324,9 +324,9 @@ test('ошибка действия показывается рядом с фо�
 test('ключ перестал подходить посреди работы — возврат на экран входа с пояснением', async ({ page, api }) => {
   await openSection(page, 'Журнал');
   // Сначала дождаться обычной загрузки журнала, иначе 401 получит она, а не нажатие «Обновить».
-  await expect(page.getByText('announcement.create')).toBeVisible();
+  await expect(page.getByRole('table').getByText('announcement.create')).toBeVisible();
   await api.settle();
-  api.on('GET', '/audit?limit=200', { status: 401, json: { detail: 'unauthorized' } });
+  api.on('GET', /^\/audit\?/, { status: 401, json: { detail: 'unauthorized' } });
   await page.getByRole('button', { name: 'Обновить' }).click();
   await expect(page.getByText('Ключ больше не подходит')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Войти' })).toBeVisible();
@@ -347,4 +347,29 @@ test('коды ошибок API показываются понятным тек
   await page.getByLabel('Импорт JSON').setInputFiles({ name: 'plan.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(items)) });
   await expect(page.getByText('Объявление № 2: Неверные дни недели')).toBeVisible();
   api.problems = api.problems.filter((p) => !/status of (409|422)/.test(p));
+});
+
+test('журнал: фильтры и страницы уходят в запрос', async ({ page, api }) => {
+  const row = (n) => ({ id: n, created_at: '2026-10-16T09:00:00+00:00', actor: 'panel', source: 'panel', action: 'source.enable', target: `Источник ${n}`, details: {} });
+  api.on('GET', /^\/audit\?.*offset=0&/, { has_more: true, items: Array.from({ length: 50 }, (_, i) => row(100 - i)) });
+  api.on('GET', /^\/audit\?.*offset=50&/, { has_more: false, items: [row(50), row(49)] });
+  await openSection(page, 'Журнал');
+  await expect(page.getByText('Записи 1–50')).toBeVisible();
+  await page.getByRole('button', { name: 'Старее' }).click();
+  await expect(page.getByText('Записи 51–52')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Старее' })).toBeDisabled();
+
+  // Любой фильтр возвращает на первую страницу.
+  await page.getByLabel('Откуда').selectOption('bot');
+  await expect(page.getByText('Записи 1–50')).toBeVisible();
+  await page.getByLabel('Действие').selectOption('source.enable');
+  await page.getByLabel('Период').selectOption('7');
+  await page.getByLabel('Поиск в журнале').fill('Община');
+  await api.settle();
+  const audit = api.requests.filter((r) => r.path.startsWith('/audit?')).map((r) => Object.fromEntries(new URLSearchParams(r.path.split('?')[1])));
+  expect(audit[0]).toEqual({ limit: '50', offset: '0', q: '', source: '', action: '', days: '0' });
+  expect(audit[1]).toMatchObject({ offset: '50' });
+  expect(audit.at(-1)).toEqual({ limit: '50', offset: '0', q: 'Община', source: 'bot', action: 'source.enable', days: '7' });
+  // Поиск с задержкой: промежуточные буквы не порождают запросов.
+  expect(audit.filter((r) => r.q && r.q !== 'Община')).toEqual([]);
 });

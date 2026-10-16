@@ -92,10 +92,11 @@ export const readResponses = {
     errors: [{ error_code: 'chat_not_found', mode: 'verse_of_day', n: 4 }],
     runs: [{ id: 9, announcement_id: 1, title: 'Субботнее чтение', created_at: ago(5000), status: 'done', recipients: 1840, queued: 0, skipped: 0, sent: 1838, failed: 2 }],
   },
-  '/audit': { items: [
+  '/audit': { has_more: false, items: [
     { id: 2, created_at: ago(5), actor: 'panel', source: 'panel', action: 'announcement.create', target: '#1', details: {} },
     { id: 1, created_at: ago(60), actor: '2', source: 'bot', action: 'source.enable', target: 'Община', details: {} },
   ] },
+  '/audit/actions': ['announcement.create', 'source.enable'],
   '/admins': [
     { telegram_user_id: 1, platform: 'telegram', username: 'anna', first_name: 'Анна', is_owner: true, admin_role: 'admin' },
     { telegram_user_id: 2, platform: 'max', username: null, first_name: 'Мария', is_owner: false, admin_role: 'editor' },

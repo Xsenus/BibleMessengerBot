@@ -389,6 +389,7 @@ button.tab[aria-selected='true'] { background: var(--surface); color: var(--text
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
 .toolbar .search-box { flex: 1 1 220px; max-width: 320px; }
 .toolbar .search-box > input:not([type=checkbox]) { width: 100%; }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; font-size: var(--text-sm); }
 
 /* ---------- Администраторы ---------- */
 .invite-code { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--accent-soft); }

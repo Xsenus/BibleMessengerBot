@@ -6,6 +6,10 @@ import { SECTIONS } from './sections.js';
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'];
 
+// Без анимаций (панель отключает их по prefers-reduced-motion): иначе axe может проверить кадр появления окна
+// или раздела, когда цвета ещё полупрозрачные, и найти «нарушение» контраста, которого в покое нет.
+test.use({ reducedMotion: 'reduce' });
+
 async function scan(page, where) {
   const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
   return violations.flatMap((v) => v.nodes.map((n) => `${where} · ${v.id} · ${n.target.join(' ')} · ${n.failureSummary?.split('\n')[1]?.trim() ?? v.help}`));
@@ -21,7 +25,7 @@ for (const mode of MODES) {
   test(`доступность: вход и все разделы, ${mode.name}`, async ({ page, api }) => {
     test.setTimeout(120000);
     await page.setViewportSize(mode.viewport);
-    await page.emulateMedia({ colorScheme: mode.colorScheme });
+    await page.emulateMedia({ colorScheme: mode.colorScheme, reducedMotion: 'reduce' });
     await page.goto('./');
     const found = await scan(page, 'вход');
     await login(page);

@@ -35,7 +35,7 @@ for (const section of SECTIONS) {
 }
 
 test('ошибка API показывается в разделе, а не ломает панель', async ({ page, api }) => {
-  api.on('GET', '/audit?limit=200', { status: 500, json: { detail: 'Сервис временно недоступен' } });
+  api.on('GET', /^\/audit\?/, { status: 500, json: { detail: 'Сервис временно недоступен' } });
   await login(page);
   await openSection(page, 'Журнал');
   await expect(page.getByText('Сервис временно недоступен')).toBeVisible();
@@ -175,12 +175,16 @@ test.describe('клавиатура и чтение с экрана', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await login(page);
     await openSection(page, 'Отчёты');
+    // После перехода панель сама ставит фокус на заголовок (в следующем кадре) — дождаться этого и загрузки данных,
+    // иначе заголовок заберёт фокус у таблицы и стрелка прокрутит страницу.
+    await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
+    await api.settle();
     const region = page.getByRole('region', { name: /./ }).filter({ has: page.locator('table') }).first();
     await expect(region).toHaveAttribute('tabindex', '0');
     await region.focus();
+    await expect(region).toBeFocused();
     const before = await region.evaluate((el) => el.scrollLeft);
     await page.keyboard.press('ArrowRight');
     await expect.poll(() => region.evaluate((el) => el.scrollLeft)).toBeGreaterThan(before);
-    void api;
   });
 });
