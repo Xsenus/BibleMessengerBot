@@ -71,11 +71,14 @@ sed 's/+cpu$//' constraints-neural-linux.txt > /tmp/neural-audit.txt
 pip-audit --no-deps --disable-pip --strict -r constraints-linux.txt -r /tmp/neural-audit.txt
 ```
 
-Веб-панель (`admin-ui`, React + Vite). Линтера и тестов у панели нет — проверяется установка, аудит и сборка:
+Веб-панель (`admin-ui`, React + Vite). Линтера у панели нет — проверяются установка, аудит, сборка и smoke-тесты Playwright на моках API (сервер и БД не нужны):
 ```bash
 npm ci --prefix admin-ui
 npm audit --prefix admin-ui --audit-level=moderate
 npm run build --prefix admin-ui
+(cd admin-ui && npx playwright install --with-deps chromium)   # один раз; или PW_CHROMIUM_PATH=<путь к Chromium>
+npm test --prefix admin-ui
 ```
+Меняешь API панели — обнови моки в `admin-ui/tests/fixtures.js`.
 
 Docker (джоб `image` в CI; локально — если есть Docker): `cp .env.example .env && docker compose --profile '*' config --quiet`, затем сборка образа `docker build .`.
