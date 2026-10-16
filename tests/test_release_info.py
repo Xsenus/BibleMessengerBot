@@ -1,8 +1,10 @@
 """Изолированная проверка безопасных метаданных и отказов GitHub; настоящая сеть и production не используются."""
 import asyncio
+import importlib.util
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -135,7 +137,8 @@ async def test_github_timeout_is_unknown_and_empty_list_is_valid():
 @pytest.mark.asyncio
 @pytest.mark.parametrize('fail_db', [False, True])
 async def test_release_endpoint_auth_and_independent_bot_checks(monkeypatch, tmp_path, fail_db):
-    files(monkeypatch, tmp_path, snapshot())
+    saved = {**snapshot(), 'changes': {'state': 'ready', 'source': 'changelog', 'items': ['Исправлен поиск.'], 'more': False}}
+    files(monkeypatch, tmp_path, saved)
     calls = []
     class Github:
         async def get(self):
@@ -167,7 +170,49 @@ async def test_release_endpoint_auth_and_independent_bot_checks(monkeypatch, tmp
     assert data['bots'][1]['verified'] and data['bots'][1]['live'] is (None if fail_db else False)
     assert data['bots'][2]['expected'] is False
     assert not data['github']['available'] and data['build']['commit']==SHA
+    assert data['server']['current']['changes']['items'] == ['Исправлен поиск.']
     assert 'private connection' not in response.text
+
+
+def test_saved_changes_are_allowlisted_and_comparison_link_is_rebuilt():
+    changes = {'state': 'ready', 'source': 'commits', 'items': ['Исправлен поиск.'], 'more': True,
+               'url': 'javascript:private', 'log': 'private', 'token': 'private'}
+    data = info.attempt({**snapshot(), 'changes': changes})
+    assert data['changes']['items'] == ['Исправлен поиск.'] and data['changes']['more'] is True
+    assert data['changes']['compare_url'] == f'{info.REPOSITORY}/compare/{OLD}...{SHA}'
+    assert 'private' not in json.dumps(data)
+    assert info.change_info({'state': 'unchanged'}, SHA, SHA)['state'] == 'unchanged'
+    assert info.change_info({'state': 'unchanged'}, OLD, SHA) is None
+
+
+@pytest.mark.parametrize('changes', [
+    {'state': []}, {'state': 'ready', 'source': 'private', 'items': ['safe']},
+    {'state': 'ready', 'source': 'commits', 'items': ['x'] * 6},
+    {'state': 'ready', 'source': 'commits', 'items': ['x' * 181]},
+    {'state': 'ready', 'source': 'commits', 'items': ['line\nprivate']},
+    {'state': 'unavailable', 'reason': 'private traceback'},
+])
+def test_invalid_change_payloads_are_not_exposed(changes):
+    assert info.attempt({**snapshot(), 'changes': changes})['changes'] is None
+
+
+def test_fifty_unicode_summaries_fit_bounded_status_and_survive_duplicate_candidates(monkeypatch, tmp_path):
+    spec = importlib.util.spec_from_file_location('unicode_history_writer', Path(__file__).resolve().parents[1] / 'deploy/write-deployment-status.py')
+    writer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(writer)
+    rows = [{**snapshot(), 'started_at': f'2026-10-16T02:00:{number:02d}+00:00',
+             'changes': {'state': 'ready', 'source': 'changelog', 'items': ['🌿' * 180] * 5, 'more': True}}
+            for number in range(50)]
+    public = tmp_path / 'public'
+    writer.atomic_write(public, {'schema': 1, 'history': rows, 'current': snapshot(), 'last_attempt': rows[-1]})
+    path = public / 'status.json'
+    assert 131072 < path.stat().st_size < 262144
+    monkeypatch.setattr(info, 'STATUS_FILE', path)
+    result = info.server_info()
+    assert result['available'] and len(result['history']) == 50
+    assert all(row['changes']['items'] == ['🌿' * 180] * 5 for row in result['history'])
+    path.write_bytes(b' ' * 262145)
+    assert not info.server_info()['available']
 
 
 def test_history_sanitizes_errors_and_keeps_multiple_attempts_for_same_commit(monkeypatch, tmp_path):

@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import socket
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 
@@ -45,15 +46,16 @@ def version(project, sha):
     return value if re.fullmatch(r'[0-9][A-Za-z0-9.+_-]{0,39}', value) else None
 
 
-def changes(project, previous, target):
-    """Кратко перечислить новые пункты CHANGELOG между точными SHA; иначе взять заголовки коммитов, без сети и shell."""
+def change_summary(project, previous, target):
+    """Получить ограниченные структурированные изменения для Telegram и квитанции, без сети и shell."""
+    result = {'state': 'unavailable', 'reason': 'previous_unknown', 'source': None, 'items': [], 'more': False}
     if not all(isinstance(sha, str) and re.fullmatch('[0-9a-f]{40}', sha) for sha in (previous, target)):
-        return ['Список изменений недоступен: предыдущая версия не подтверждена.']
+        return result
     if previous == target:
-        return ['Новых изменений кода нет: повторная установка той же версии.']
+        return {**result, 'state': 'unchanged', 'reason': None}
     git = ['git', '-C', str(project)]
     if command([*git, 'merge-base', '--is-ancestor', previous, target]) is None:
-        return ['Список изменений недоступен: не удалось подтвердить диапазон версий.']
+        return {**result, 'reason': 'range_unavailable'}
     patch = command([*git, 'diff', '--no-ext-diff', '--no-textconv', '--unified=0', previous, target, '--', 'CHANGELOG.md'])
     entries = []
     continuing = False
@@ -66,7 +68,9 @@ def changes(project, previous, target):
                 entries[-1] += ' ' + line[1:].strip()
             else:
                 continuing = False
+    source = 'changelog'
     if not entries:
+        source = 'commits'
         subjects = command([*git, '-c', 'i18n.logOutputEncoding=UTF-8', 'log', '--no-color', '--first-parent', '--format=%s', '-n', '6', previous + '..' + target])
         entries = subjects.splitlines() if subjects else []
     notes = []
@@ -75,10 +79,22 @@ def changes(project, previous, target):
         plain = ' '.join(''.join(char for char in plain if char.isprintable() or char.isspace()).split())
         if plain and plain not in notes:
             notes.append(plain)
-    lines = ['• ' + (note if len(note) <= 180 else note[:177].rsplit(' ', 1)[0] + '…') for note in notes[:5]]
-    if not lines:
-        lines = ['Краткое описание изменений недоступно.']
-    if len(notes) > 5:
+    items = [note if len(note) <= 180 else note[:177].rsplit(' ', 1)[0] + '…' for note in notes[:5]]
+    return {**result, 'state': 'ready' if items else 'unavailable', 'reason': None if items else 'description_unavailable',
+            'source': source if items else None, 'items': items, 'more': len(notes) > 5}
+
+
+def changes(project, previous, target):
+    """Оформить тот же структурированный список для личного уведомления, не меняя подтверждение доставки."""
+    details = change_summary(project, previous, target)
+    if details['state'] == 'unchanged':
+        return ['Новых изменений кода нет: повторная установка той же версии.']
+    if details['reason'] == 'previous_unknown':
+        return ['Список изменений недоступен: предыдущая версия не подтверждена.']
+    if details['reason'] == 'range_unavailable':
+        return ['Список изменений недоступен: не удалось подтвердить диапазон версий.']
+    lines = ['• ' + item for item in details['items']] or ['Краткое описание изменений недоступно.']
+    if details['more']:
         lines.append('… Остальные изменения доступны по ссылке ниже.')
     return [*lines, 'Сравнение версий: https://github.com/Xsenus/BibleMessengerBot/compare/' + previous + '...' + target]
 
@@ -201,6 +217,12 @@ def notify(project, state, config, reasons):
 
 
 if __name__ == '__main__':
+    if sys.argv[1:2] == ['--changes-json']:
+        if len(sys.argv) != 5:
+            raise SystemExit('Expected project directory, previous SHA and target SHA')
+        # Режим квитанции не читает конфигурацию Telegram и никогда не отправляет сообщения.
+        print(json.dumps(change_summary(Path(sys.argv[2]), sys.argv[3], sys.argv[4])))
+        raise SystemExit(0)
     parser = argparse.ArgumentParser()
     parser.add_argument('project', type=Path)
     parser.add_argument('state', type=Path)

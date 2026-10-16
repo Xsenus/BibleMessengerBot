@@ -120,6 +120,56 @@ def test_uninstalled_changes_are_not_presented_as_deployed(notifier, monkeypatch
     assert '• Добавлен поиск.' in text and '1.20.0 · bbbbbbbb' in text
 
 
+@pytest.fixture
+def status_writer():
+    spec = importlib.util.spec_from_file_location('changes_status_writer', ROOT / 'deploy/write-deployment-status.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_final_history_freezes_same_changes_as_telegram(notifier, status_writer, history, monkeypatch):
+    project, previous, git, release = history
+    target = release('# История\n\n- Исправлен поиск.\n\n- Старое изменение.\n')
+    public = project / 'runtime-evidence/deploy-status'
+    state = project / 'runtime-evidence/auto-deploy/current'
+    state.mkdir(parents=True)
+    (state / 'checked-services.jsonl').write_text(json.dumps({'name': 'bot', 'commit': target, 'health': 'healthy'}) + '\n')
+    status_writer.publish(public, state, target, previous, 'succeeded', 'completed')
+    data = json.loads((public / 'status.json').read_text(encoding='utf-8'))
+    expected = notifier.change_summary(project, previous, target)
+    assert data['history'][0]['changes'] == expected and expected['items'] == ['Исправлен поиск.']
+    assert data['history'][0]['previous_commit'] == previous
+    monkeypatch.setattr(status_writer, 'collect_changes', lambda *args: pytest.fail('Saved changes must not be recomputed'))
+    status_writer.publish(public, state, target, previous, 'succeeded', 'completed')
+    assert json.loads((public / 'status.json').read_text(encoding='utf-8'))['current']['changes'] == expected
+
+
+def test_import_backfills_old_receipts_without_reading_logs_or_sending_messages(notifier, status_writer, history, monkeypatch):
+    project, previous, git, release = history
+    target = release()
+    public, archive = project / 'runtime-evidence/deploy-status', project / 'runtime-evidence/auto-deploy'
+    state = archive / ('20261015T020000Z-' + target[:12] + '-123')
+    state.mkdir(parents=True)
+    record = {'commit': target, 'previous_commit': previous, 'status': 'succeeded', 'stage': 'completed',
+              'started_at': '2026-10-15T02:00:00+00:00', 'finished_at': '2026-10-15T03:00:00+00:00', 'services': []}
+    raw = json.dumps(record).encode()
+    (state / 'public-attempt.json').write_bytes(raw)
+    (state / 'deploy.log').mkdir()
+    (state / '.env').mkdir()
+    status_writer.atomic_write(public, {'schema': 1, 'current': record, 'last_attempt': record,
+                                      'history': [{key: value for key, value in record.items() if key != 'previous_commit'}]})
+    assert status_writer.import_history(public, archive) == 1
+    data = json.loads((public / 'status.json').read_text(encoding='utf-8'))
+    expected = notifier.change_summary(project, previous, target)
+    assert data['history'][0]['changes'] == data['current']['changes'] == data['last_attempt']['changes'] == expected
+    assert data['history'][0]['previous_commit'] == previous
+    assert (state / 'public-attempt.json').read_bytes() == raw and not (state / 'telegram-notification.json').exists()
+    monkeypatch.setattr(status_writer, 'collect_changes', lambda *args: pytest.fail('Ready archive must remain frozen'))
+    assert status_writer.import_history(public, archive) == 1
+    assert json.loads((public / 'status.json').read_text(encoding='utf-8')) == data
+
+
 def test_actual_version_and_health_are_independent_of_requested_commit(notifier, monkeypatch):
     monkeypatch.setattr(notifier, 'version', lambda project, sha: '1.20.0' if sha == OLD else '1.21.0')
     runtime = [dict(item, commit=OLD) for item in RUNTIME]

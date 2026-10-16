@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -27,8 +28,8 @@ def read(path):
         if path.is_symlink():
             return {}
         with path.open('rb') as stream:
-            payload = stream.read(131073)
-        result = json.loads(payload) if len(payload) <= 131072 else None
+            payload = stream.read(262145)
+        result = json.loads(payload) if len(payload) <= 262144 else None
         return result if isinstance(result, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -41,6 +42,39 @@ def moment(value):
         return date.astimezone(UTC).isoformat() if date and date.tzinfo else None
     except ValueError:
         return None
+
+
+def change_details(value):
+    """Сохранить только пять коротких пунктов и разрешённые признаки, без URL, путей и сырых ошибок."""
+    if not isinstance(value, dict) or value.get('state') not in ('ready', 'unchanged', 'unavailable'):
+        return None
+    state = value['state']
+    if state == 'ready':
+        items = value.get('items')
+        if (value.get('source') not in ('changelog', 'commits') or not isinstance(items, list) or not 1 <= len(items) <= 5
+                or any(not isinstance(item, str) or not 0 < len(item) <= 180 or not item.isprintable() for item in items)):
+            return None
+        return {'state': state, 'source': value['source'], 'items': items, 'more': value.get('more') is True, 'reason': None}
+    reason = value.get('reason')
+    if state == 'unavailable' and reason not in ('previous_unknown', 'range_unavailable', 'description_unavailable'):
+        return None
+    return {'state': state, 'source': None, 'items': [], 'more': False, 'reason': reason if state == 'unavailable' else None}
+
+
+def collect_changes(public_dir, previous, target):
+    """Вызвать только режим списка у доверенного уведомителя; отказ Git не влияет на результат установки."""
+    notifier = Path(__file__).with_name('notify-deployment.py')
+    if not notifier.is_file():
+        notifier = Path(__file__).with_name('bible-deploy-notify')
+    try:
+        result = subprocess.run([sys.executable, str(notifier), '--changes-json', str(public_dir.parent.parent), previous or '', target],
+                                capture_output=True, text=True, encoding='utf-8', check=True, timeout=20)
+        details = change_details(json.loads(result.stdout)) if len(result.stdout) <= 16384 else None
+        if details:
+            return details
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return {'state': 'unavailable', 'source': None, 'items': [], 'more': False, 'reason': 'range_unavailable'}
 
 
 def compact(data):
@@ -63,7 +97,10 @@ def compact(data):
                    'stage': failure.get('stage') if isinstance(failure.get('stage'), str) and failure['stage'] in STAGES else None,
                    'exit_code': failure.get('exit_code') if type(failure.get('exit_code')) is int and 0 <= failure['exit_code'] <= 255 else None,
                    'service': failure.get('service') if isinstance(failure.get('service'), str) and failure['service'] in SERVICES else None}
-    return {'id': identity, 'commit': data['commit'], 'status': data['status'],
+    previous = data.get('previous_commit')
+    return {'id': identity, 'commit': data['commit'],
+            'previous_commit': previous if isinstance(previous, str) and re.fullmatch('[0-9a-f]{40}', previous) else None,
+            'changes': change_details(data.get('changes')), 'status': data['status'],
             'stage': data.get('stage') if isinstance(data.get('stage'), str) and data['stage'] in STAGES else None,
             'started_at': started, 'finished_at': finished,
             'updated_at': moment(data.get('updated_at')), 'failure': failure,
@@ -78,6 +115,12 @@ def history(existing, *records):
     for row in candidates:
         item = compact(row)
         if item:
+            prior = unique.get(item['id'])
+            if prior:
+                if not item['previous_commit']:
+                    item['previous_commit'] = prior['previous_commit']
+                if not item['changes'] and item['previous_commit'] == prior['previous_commit']:
+                    item['changes'] = prior['changes']
             unique[item['id']] = item
     return sorted(unique.values(), key=lambda row: row['started_at'], reverse=True)[:HISTORY_LIMIT]
 
@@ -119,6 +162,9 @@ def publish(public_dir, state, target, previous, status, stage, reason='', faile
     latest = {'commit': target, 'previous_commit': previous, 'status': status, 'stage': stage,
               'started_at': old_attempt.get('started_at') or now, 'updated_at': now,
               'finished_at': None if status == 'running' else now, 'services': services}
+    latest['changes'] = change_details(old_attempt.get('changes'))
+    if status != 'running' and latest['changes'] is None:
+        latest['changes'] = collect_changes(public_dir, previous, target)
     if reason:
         if reason not in REASONS or failed_stage not in STAGES or not exit_code.isdigit() or not 0 <= int(exit_code) <= 255 or (service and service not in SERVICES):
             raise ValueError('invalid_failure_arguments')
@@ -160,8 +206,16 @@ def import_history(public_dir, archive):
         finished = datetime.datetime.fromtimestamp(result.stat().st_mtime, UTC).isoformat()
         records.append({'commit': sha, 'status': 'succeeded', 'stage': 'completed', 'started_at': started,
                         'finished_at': finished, 'updated_at': finished, 'legacy': True})
-    document = {'schema': 1, 'current': existing.get('current'), 'last_attempt': existing.get('last_attempt'),
-                'history': history(existing, *records)}
+    rows = history(existing, *records)
+    for row in rows:
+        if row['status'] != 'running' and (not row['changes'] or row['changes']['state'] == 'unavailable'):
+            row['changes'] = collect_changes(public_dir, row['previous_commit'], row['commit'])
+    document = {'schema': 1, 'current': existing.get('current'), 'last_attempt': existing.get('last_attempt'), 'history': rows}
+    for key in ('current', 'last_attempt'):
+        item = compact(document[key])
+        enriched = next((row for row in rows if item and row['id'] == item['id']), None)
+        if enriched and enriched['status'] != 'running':
+            document[key] = {**document[key], 'previous_commit': enriched['previous_commit'], 'changes': enriched['changes']}
     atomic_write(public_dir, document)
     return len(document['history'])
 

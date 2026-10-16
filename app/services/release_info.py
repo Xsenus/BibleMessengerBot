@@ -74,8 +74,8 @@ def read_json(path: Path) -> dict | None:
         if path.is_symlink():
             return None
         with path.open('rb') as stream:
-            payload = stream.read(131073)
-        if len(payload) > 131072:
+            payload = stream.read(262145)
+        if len(payload) > 262144:
             return None
         data = json.loads(payload)
         return data if isinstance(data, dict) else None
@@ -96,6 +96,33 @@ def build_info() -> dict:
             'commit_url': f'{REPOSITORY}/commit/{sha}' if sha else None}
 
 
+def change_info(value: Any, previous: str | None, target: str) -> dict | None:
+    """Проверить сохранённый список; ссылку строить только из SHA, произвольные поля и URL не публиковать."""
+    if not isinstance(value, dict) or value.get('state') not in ('ready', 'unchanged', 'unavailable'):
+        return None
+    state = value['state']
+    items: list[str] = []
+    source = None
+    reason = None
+    more = False
+    if state == 'ready':
+        raw = value.get('items')
+        if (not previous or previous == target or value.get('source') not in ('changelog', 'commits')
+                or not isinstance(raw, list) or not 1 <= len(raw) <= 5
+                or any(not isinstance(item, str) or not 0 < len(item) <= 180 or not item.isprintable() for item in raw)):
+            return None
+        items, source, more = raw, value['source'], value.get('more') is True
+    elif state == 'unchanged':
+        if previous != target:
+            return None
+    else:
+        reason = value.get('reason')
+        if reason not in ('previous_unknown', 'range_unavailable', 'description_unavailable'):
+            return None
+    compare = f'{REPOSITORY}/compare/{previous}...{target}' if previous and previous != target and reason not in ('previous_unknown', 'range_unavailable') else None
+    return {'state': state, 'source': source, 'items': items, 'more': more, 'reason': reason, 'compare_url': compare}
+
+
 def attempt(data: Any) -> dict | None:
     """Отдать только разрешённые поля квитанции, без журналов, путей, окружения и секретов."""
     if (not isinstance(data, dict) or not commit(data.get('commit'))
@@ -111,6 +138,7 @@ def attempt(data: Any) -> dict | None:
                 and item.get('health') == 'healthy' and commit(item.get('commit'))):
             services.append({'name': item['name'], 'health': 'healthy', 'commit': item['commit']})
     return {'commit': data['commit'], 'previous_commit': commit(data.get('previous_commit')),
+            'changes': change_info(data.get('changes'), commit(data.get('previous_commit')), data['commit']),
             'status': data['status'], 'stage': data.get('stage') if isinstance(data.get('stage'), str) and data['stage'] in STAGES else None,
             'started_at': started, 'finished_at': finished, 'updated_at': moment(data.get('updated_at')),
             'services': services, 'failure': failure_info(data.get('failure')) if data['status'] not in {'running', 'succeeded'} else None,
@@ -121,7 +149,7 @@ def history_records(data: dict) -> list[dict]:
     """Проверить и упорядочить максимум 50 попыток; обновления этапа не создают дубликатов."""
     rows = data.get('history', [])
     candidates = (rows[:50] if isinstance(rows, list) else []) + [data.get('current'), data.get('last_attempt')]
-    unique = {}
+    unique: dict[str, dict] = {}
     for raw in candidates:
         item = attempt(raw)
         if item:
@@ -129,6 +157,11 @@ def history_records(data: dict) -> list[dict]:
             item['id'] = hashlib.sha256((item['commit'] + ' ' + item['started_at']).encode()).hexdigest()[:24]
             item['stale'] = bool(item['status'] == 'running' and (datetime.now(UTC) - datetime.fromisoformat(
                 item['updated_at'] or item['started_at'])).total_seconds() > 5400)
+            prior = unique.get(item['id'])
+            if prior and not item['previous_commit']:
+                item['previous_commit'] = prior['previous_commit']
+            if prior and not item['changes'] and prior['previous_commit'] == item['previous_commit']:
+                item['changes'] = prior['changes']
             unique[item['id']] = item
     return sorted(unique.values(), key=lambda row: row['started_at'], reverse=True)[:50]
 
