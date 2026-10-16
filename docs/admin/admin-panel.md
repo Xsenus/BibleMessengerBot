@@ -103,8 +103,8 @@ GitHub: Docker socket, `.env`, журналы и приватные артефа
 | Видео | `GET/POST /videos`, `PATCH/DELETE /videos/{id}` |
 | Генераторы | `GET/POST /image-providers`, `PATCH/DELETE /image-providers/{id}`, `POST /image-providers/{id}/test`, `GET /image-queue`, `POST /image-queue/retry` |
 | Настройки | `GET/PUT /settings` |
-| Чаты и пользователи | `GET /chats`, `PUT /chats/{id}/active`, `GET /users`, `PUT /users/{id}/blocked` |
-| Доставки | `GET /deliveries/attention`, `POST /deliveries/{id}/resolve` |
+| Чаты и пользователи | `GET /chats?platform=&q=&limit=&offset=`, `PUT /chats/{id}/active`, `GET /users?q=&limit=&offset=`, `PUT /users/{id}/blocked` (`limit` до 200, по умолчанию 200) |
+| Доставки | `GET /deliveries/attention?limit=&offset=` (`limit` до 100, по умолчанию 100), `POST /deliveries/{id}/resolve` |
 | Администраторы | `GET /admins`, `POST /admins/invite`, `DELETE /admins/{id}` |
 | Сеть | `GET /net`, `POST/PATCH/DELETE /net/proxies`, `POST /net/proxies/{id}/test`, `PUT /net/services/{service}`, `POST /net/services/{service}/probe` |
 | Аудитория | `GET /audience?platform=&chat_type=` — сколько получателей |

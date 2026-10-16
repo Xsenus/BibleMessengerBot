@@ -112,6 +112,35 @@ async def test_chats_users_and_deliveries(db, monkeypatch):
         assert (await client.post('/api/admin/deliveries/1/resolve', headers=H, json={'action': 'bad'})).status_code == 422
 
 
+async def test_chats_users_and_deliveries_page_without_gaps(db, monkeypatch):
+    c = db[0]
+    await prepare(c)
+    # Одинаковое время обновления: порядок страниц должен держаться на id, без повторов и пропусков.
+    for n in range(7):
+        await c.execute("INSERT INTO telegram_users(telegram_user_id,platform,timezone) VALUES($1,'telegram','UTC')", 500 + n)
+        await c.execute("INSERT INTO telegram_chats(telegram_chat_id,chat_type,registered_by) VALUES($1,'private',$1)", 500 + n)
+        await c.execute("""INSERT INTO delivery_log(telegram_chat_id,mode,scheduled_for,payload_key,status,chunks,progress)
+            VALUES($1,'manual',now(),$2,'failed','[]'::jsonb,'{}'::jsonb)""", 500 + n, f'k{n}')
+    await c.execute("UPDATE telegram_chats SET updated_at='2026-01-01'; UPDATE telegram_users SET updated_at='2026-01-01'")
+    await c.execute("UPDATE delivery_log SET updated_at='2026-01-01'")
+    async with make(monkeypatch, c) as client:
+        async def all_pages(path: str, total: int) -> list:
+            seen = []
+            for offset in range(0, total + 3, 3):
+                page = (await client.get(f'{path}{"&" if "?" in path else "?"}limit=3&offset={offset}', headers=H)).json()
+                assert len(page) <= 3
+                seen += [x['id'] for x in page]
+            return seen
+
+        everything = [x['id'] for x in (await client.get('/api/admin/chats', headers=H)).json()]
+        assert await all_pages('/api/admin/chats?platform=', len(everything)) == everything and len(set(everything)) == len(everything) >= 9
+        users = [x['id'] for x in (await client.get('/api/admin/users', headers=H)).json()]
+        assert await all_pages('/api/admin/users', len(users)) == users and len(set(users)) == len(users) >= 9
+        attention = [x['id'] for x in (await client.get('/api/admin/deliveries/attention', headers=H)).json()]
+        assert await all_pages('/api/admin/deliveries/attention', len(attention)) == attention and len(attention) == 7
+        assert (await client.get('/api/admin/chats?limit=0&offset=-5', headers=H)).status_code == 200      # границы зажимаются
+
+
 async def test_announcement_edit_and_image_queue_retry(db, monkeypatch):
     c = db[0]
     await prepare(c)

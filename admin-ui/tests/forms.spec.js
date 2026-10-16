@@ -145,7 +145,7 @@ test('чаты: поиск и фильтр уходят в запрос', async 
   await openSection(page, 'Чаты и пользователи');
   await page.getByLabel('Платформа').selectOption('max');
   await page.getByPlaceholder('Поиск по названию').fill('дом');
-  await expect.poll(() => api.requests.some((r) => r.path === '/chats?platform=max&q=%D0%B4%D0%BE%D0%BC')).toBe(true);
+  await expect.poll(() => api.requests.some((r) => r.path === '/chats?platform=max&q=%D0%B4%D0%BE%D0%BC&limit=51&offset=0')).toBe(true);
 });
 
 test('доставки: решение только после подтверждения', async ({ page, api }) => {
@@ -234,7 +234,7 @@ test('состояние: «Обновить» перечитывает свод
 });
 
 test('доставки: пустой список показывает «Всё в порядке»', async ({ page, api }) => {
-  api.on('GET', '/deliveries/attention', []);
+  api.on('GET', /^\/deliveries\/attention\?/, []);
   await openSection(page, 'Доставки');
   await expect(page.getByText('Всё в порядке')).toBeVisible();
   await expect(page.getByRole('table')).toHaveCount(0);
@@ -372,4 +372,46 @@ test('журнал: фильтры и страницы уходят в запр�
   expect(audit.at(-1)).toEqual({ limit: '50', offset: '0', q: 'Община', source: 'bot', action: 'source.enable', days: '7' });
   // Поиск с задержкой: промежуточные буквы не порождают запросов.
   expect(audit.filter((r) => r.q && r.q !== 'Община')).toEqual([]);
+});
+
+test('длинные списки листаются страницами; поиск возвращает на первую', async ({ page, api }) => {
+  const params = (path) => Object.fromEntries(new URLSearchParams(path.split('?')[1]));
+  const page1 = (make) => Array.from({ length: 51 }, (_, i) => make(i + 1));
+  const chat = (n) => ({ id: n, platform: 'telegram', chat_type: 'group', title: `Группа ${n}`, username: '', ui_language: 'ru', timezone: 'UTC', is_active: true, updated_at: null });
+  const user = (n) => ({ id: n, platform: 'telegram', username: '', first_name: `Имя ${n}`, is_owner: false, is_admin: false, is_blocked: false });
+  api.on('GET', /^\/chats\?/, ({ path }) => (params(path).offset === '0' ? page1(chat) : [chat(51), chat(52)]));
+  api.on('GET', /^\/users\?/, ({ path }) => (params(path).offset === '0' ? page1(user) : [user(51)]));
+
+  await openSection(page, 'Чаты и пользователи');
+  const pager = page.getByRole('navigation', { name: 'Страницы чатов' });
+  await expect(pager.getByText('Чаты 1–50')).toBeVisible();
+  await expect(page.getByText('Группа 51', { exact: true })).toHaveCount(0);
+  await pager.getByRole('button', { name: 'Дальше' }).click();
+  await expect(pager.getByText('Чаты 51–52')).toBeVisible();
+  await expect(page.getByText('Группа 52', { exact: true })).toBeVisible();
+  await page.getByPlaceholder('Поиск по названию').fill('Группа');
+  await expect(pager.getByText('Чаты 1–50')).toBeVisible();
+
+  await page.getByRole('tab', { name: /Пользователи/ }).click();
+  const users = page.getByRole('navigation', { name: 'Страницы пользователей' });
+  await users.getByRole('button', { name: 'Дальше' }).click();
+  await expect(users.getByText('Пользователи 51–51')).toBeVisible();
+  await expect(users.getByRole('button', { name: 'Дальше' })).toBeDisabled();
+  await api.settle();
+
+  const asked = (prefix) => api.requests.filter((r) => r.path.startsWith(prefix)).map((r) => params(r.path));
+  expect(asked('/chats?')[0]).toEqual({ platform: '', q: '', limit: '51', offset: '0' });
+  expect(asked('/chats?').map((p) => p.offset)).toContain('50');
+  expect(asked('/chats?').at(-1)).toEqual({ platform: '', q: 'Группа', limit: '51', offset: '0' });
+  expect(asked('/users?').map((p) => p.offset)).toEqual(['0', '50']);
+});
+
+test('доставки и картинки: кнопки страниц появляются, только когда есть следующая', async ({ page, api }) => {
+  await openSection(page, 'Доставки');
+  await expect(page.getByRole('navigation', { name: 'Страницы доставок' })).toHaveCount(0);
+  await openSection(page, 'Картинки');
+  await expect(page.getByRole('navigation', { name: 'Страницы картинок' })).toHaveCount(0);
+  await api.settle();
+  expect(api.requests.some((r) => r.path === '/deliveries/attention?limit=51&offset=0')).toBe(true);
+  expect(api.requests.some((r) => r.path === '/illustrations?q=&limit=25&offset=0')).toBe(true);
 });
