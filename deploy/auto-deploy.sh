@@ -79,6 +79,9 @@ rollback() {
     echo "DEPLOYED: $target; application services healthy; PostgreSQL and configuration preserved."
   fi
   printf '%s\n' "$code" > "$state/exit-code"
+  # Уведомление не зависит от БД/бота и не меняет результат установки при отказе Telegram.
+  python3 "${BIBLE_DEPLOY_NOTIFIER:-/usr/local/libexec/bible-deploy-notify}" "$project" "$state" \
+    || echo 'BIBLE_DEPLOY_NOTICE=unavailable'
   exit "$code"
 }
 trap rollback EXIT
