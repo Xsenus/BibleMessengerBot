@@ -112,8 +112,9 @@ test('тема переключается и запоминается', async ({
   void api;
 });
 
-// Разделы, уже переведённые на новые компоненты, не должны быть шире экрана телефона.
-const RESPONSIVE = ['Состояние', 'Доставки', 'Отчёты', 'Объявления', 'Источники', 'Видео', 'Картинки', 'Генераторы картинок'];
+// Разделы не должны быть шире экрана телефона.
+// Все разделы переведены на новые компоненты — проверяются все.
+const RESPONSIVE = SECTIONS.map((section) => section.nav);
 test('переделанные разделы помещаются в ширину телефона', async ({ page, api }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
@@ -123,4 +124,20 @@ test('переделанные разделы помещаются в ширин
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(width, label).toBeLessThanOrEqual(390);
   }
+});
+
+test('поиск: на экране результат последнего запроса, даже если старый ответ пришёл позже', async ({ page, api }) => {
+  api.on('GET', /^\/chats\?platform=&q=%D0%B4$/, async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    return [{ id: 1, platform: 'telegram', chat_type: 'group', title: 'Устаревший ответ', username: '', ui_language: 'ru', timezone: 'UTC', is_active: true, updated_at: null }];
+  });
+  await login(page);
+  await openSection(page, 'Чаты и пользователи');
+  const search = page.getByPlaceholder('Поиск по названию');
+  await search.pressSequentially('д');
+  await page.waitForTimeout(450);
+  await search.pressSequentially('ом');
+  await expect(page.getByText('Домашняя группа')).toBeVisible();
+  await page.waitForTimeout(1300);
+  await expect(page.getByText('Устаревший ответ')).toHaveCount(0);
 });

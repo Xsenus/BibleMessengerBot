@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronRight, Info } from 'lucide-react';
 import { api } from './api.js';
 
@@ -12,15 +12,29 @@ const MESSAGES = {
 };
 export const explain = (error) => MESSAGES[error.message] || (error.status === 401 ? 'Неверный ключ' : error.message || 'Ошибка');
 
-/** Загрузка списка с обновлением и показом ошибки. */
+/** Загрузка списка с обновлением и показом ошибки. Ответ на устаревший запрос (например, при быстром вводе
+ * в поиске) отбрасывается: на экране всегда результат последнего запроса. */
 export function useData(path) {
   const [state, setState] = useState({ data: null, error: '', loading: true });
+  const latest = useRef(0);
   const load = useCallback(async () => {
-    try { setState({ data: await api(path), error: '', loading: false }); }
-    catch (e) { setState((s) => ({ ...s, error: explain(e), loading: false })); }
+    const id = ++latest.current;
+    try { const data = await api(path); if (id === latest.current) setState({ data, error: '', loading: false }); }
+    catch (e) { if (id === latest.current) setState((s) => ({ ...s, error: explain(e), loading: false })); }
   }, [path]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => () => { latest.current += 1; }, []);
   return { ...state, reload: load };
+}
+
+/** Значение, которое обновляется только после паузы в вводе (для поиска). */
+export function useDebounced(value, delay = 300) {
+  const [current, setCurrent] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setCurrent(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return current;
 }
 
 /** Выполнить действие, показать результат и обновить данные. */

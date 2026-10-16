@@ -128,10 +128,10 @@ test('картинки: закрепление и карантин', async ({ pa
 
 test('чаты и пользователи: отключение чата и блокировка пользователя', async ({ page, api }) => {
   await openSection(page, 'Чаты и пользователи');
-  await page.getByRole('button', { name: 'получает' }).click();
+  await page.getByRole('switch', { name: 'Рассылки в чат «Домашняя группа»' }).click();
   await expect.poll(() => api.writes().length).toBe(1);
-  await page.getByRole('button', { name: 'Пользователи', exact: true }).click();
-  await page.getByRole('button', { name: 'заблокирован' }).click();
+  await page.getByRole('tab', { name: 'Пользователи' }).click();
+  await page.getByRole('switch', { name: 'Доступ к боту: Пётр' }).click();
   await expect.poll(() => api.writes().length).toBe(2);
   expect(api.writes()).toMatchObject([
     { method: 'PUT', path: '/chats/-100500/active', body: { value: false } },
@@ -141,7 +141,7 @@ test('чаты и пользователи: отключение чата и б�
 
 test('чаты: поиск и фильтр уходят в запрос', async ({ page, api }) => {
   await openSection(page, 'Чаты и пользователи');
-  await page.getByRole('combobox').selectOption('max');
+  await page.getByLabel('Платформа').selectOption('max');
   await page.getByPlaceholder('Поиск по названию').fill('дом');
   await expect.poll(() => api.requests.some((r) => r.path === '/chats?platform=max&q=%D0%B4%D0%BE%D0%BC')).toBe(true);
 });
@@ -164,10 +164,10 @@ test('отчёты: смена периода', async ({ page, api }) => {
 
 test('администраторы: приглашение, смена роли и снятие прав', async ({ page, api }) => {
   await openSection(page, 'Администраторы');
-  await page.getByRole('combobox').last().selectOption('editor');
+  await page.getByLabel('Роль нового администратора').selectOption('editor');
   await page.getByRole('button', { name: 'Создать приглашение' }).click();
   await expect(page.getByText('/claim ABCD-1234')).toBeVisible();
-  await page.getByRole('row').filter({ hasText: 'Мария' }).getByRole('combobox').selectOption('viewer');
+  await page.getByLabel('Роль: Мария').selectOption('viewer');
   await expect.poll(() => api.writes().length).toBe(2);
   answerDialog(page);
   await page.getByRole('button', { name: 'Снять' }).click();
@@ -198,8 +198,8 @@ test('сеть: добавление прокси по полям и прове�
 
 test('сеть: порядок маршрутов сохраняется', async ({ page, api }) => {
   await openSection(page, 'Сеть и прокси');
-  const card = page.locator('.card').filter({ hasText: 'api.telegram.org' });
-  await card.getByRole('button', { name: '↓' }).first().click();
+  const card = page.getByRole('region', { name: 'Telegram' });
+  await card.getByRole('button', { name: 'Переместить «NL-1» ниже' }).click();
   await card.getByRole('button', { name: 'Сохранить' }).click();
   await expect.poll(() => api.writes().length).toBe(1);
   expect(api.writes()).toMatchObject([{ method: 'PUT', path: '/net/services/telegram',
@@ -216,7 +216,7 @@ test('резервные копии: скачивание файла', async ({ 
 
 test('настройки: скрытие раздела поддержки', async ({ page, api }) => {
   await openSection(page, 'Настройки');
-  await page.getByRole('button', { name: 'Скрыть раздел' }).click();
+  await page.getByRole('switch', { name: 'Раздел «Поддержка проекта» показан' }).click();
   await expect.poll(() => api.writes().length).toBe(1);
   expect(api.writes()).toMatchObject([{ method: 'PUT', path: '/settings', body: { support_section: false } }]);
 });

@@ -389,3 +389,48 @@ button.switch:hover:not(:disabled) { background: none; color: var(--text); }
 .test-preview { display: block; max-width: 260px; margin-top: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--border); }
 .form-grid-wide { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
 .stat-hint { overflow-wrap: anywhere; }
+
+/* ---------- Вкладки ---------- */
+.tabs { display: inline-flex; gap: 2px; padding: 3px; margin-bottom: var(--space-4); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); }
+button.tab { min-height: 30px; padding: 0 14px; background: none; border: 0; box-shadow: none; color: var(--text-2); font-size: var(--text-sm); border-radius: 6px; }
+button.tab:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+button.tab[aria-selected='true'] { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+.toolbar .search-box { flex: 1 1 220px; max-width: 320px; }
+.toolbar .search-box > input:not([type=checkbox]) { width: 100%; }
+
+/* ---------- Администраторы ---------- */
+.invite-code { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--accent-soft); }
+.invite-command { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.invite-command code { font-size: var(--text-md); padding: 4px 8px; background: var(--surface); }
+.role-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: var(--space-2) var(--space-4); margin: var(--space-4) 0 0; padding-top: var(--space-4); border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.role-list dt { font-weight: 600; }
+.role-list dd { margin: 0; color: var(--text-3); }
+.badge svg { flex: none; }
+
+/* ---------- Сеть, копии, настройки ---------- */
+.route-list { list-style: none; margin: var(--space-2) 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.route-list li { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.route-list li:last-child { border-bottom: 0; }
+.route-index { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-2); font-size: var(--text-xs); color: var(--text-2); flex: none; }
+.route-health { flex: 1 1 160px; }
+.route-buttons { display: inline-flex; gap: 2px; margin-left: auto; }
+.route-buttons .icon-button { width: 30px; height: 30px; }
+.route-buttons .icon-button:disabled { opacity: .3; }
+.icon-button.danger { color: var(--danger); }
+.probe { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); margin-top: 6px; }
+.probe-ok { color: var(--success); }
+.probe-fail { color: var(--danger); }
+.probe-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; }
+.callout-info { background: var(--accent-soft); color: var(--text-2); margin-bottom: var(--space-4); }
+.callout-info > svg { color: var(--accent-text); }
+.cell-file code { overflow-wrap: anywhere; }
+.pager { display: flex; align-items: center; justify-content: center; gap: var(--space-3); margin-top: var(--space-4); }
+.setting-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-5); }
+.setting-row p { margin: 0 0 6px; }
+.setting-row .switch { flex: none; }
+.plain-list { margin: 0; padding-left: 18px; color: var(--text-2); }
+.plain-list li { margin: 6px 0; }
+@media (max-width: 720px) { .setting-row { flex-direction: column; gap: var(--space-2); } }
+.panel .table-wrap:not(:last-child) { margin-bottom: var(--space-3); border-bottom: 1px solid var(--border); }
+.item-card > .item-head { margin-bottom: var(--space-3); }
