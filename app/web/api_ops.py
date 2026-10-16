@@ -40,9 +40,17 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
     Conn = Depends(connection)
 
     @router.get('/audit')
-    async def audit_log(limit: int = 100, offset: int = 0, actor: str = '', action: str = '', conn: Any = Conn) -> dict:
-        """Журнал действий администраторов (новые сверху)."""
-        return dict(items=await audit.recent(conn, limit, offset, actor, action))
+    async def audit_log(limit: int = 100, offset: int = 0, actor: str = '', action: str = '', source: str = '',
+                        q: str = '', days: int = 0, conn: Any = Conn) -> dict:
+        """Журнал действий администраторов (новые сверху), по страницам; has_more — есть записи старее."""
+        limit = max(1, min(limit, 499))
+        items = await audit.recent(conn, limit + 1, offset, actor, action, source, q, days)
+        return dict(items=items[:limit], has_more=len(items) > limit)
+
+    @router.get('/audit/actions')
+    async def audit_actions(conn: Any = Conn) -> list[str]:
+        """Какие действия встречаются в журнале — для фильтра."""
+        return await audit.actions(conn)
 
     @router.post('/announcements/preview')
     async def preview(payload: PreviewIn, conn: Any = Conn) -> dict:

@@ -46,6 +46,34 @@ async def test_audit_records_panel_and_hides_secrets(db, monkeypatch):
     assert 'POST /announcements' in actions and not any('preview' in a for a in actions)
 
 
+async def test_audit_filters_and_pages(db, monkeypatch):
+    c = db[0]
+    await prepare(c)
+    for n in range(5):
+        await audit.record(c, 'panel', 'panel', 'source.enable', f'Источник {n}')
+    await audit.record(c, 101, 'bot', 'admin.role', '50%_off')
+    await c.execute("UPDATE admin_audit SET created_at=now() - interval '40 days' WHERE target='Источник 0'")
+    async with make(monkeypatch, c) as client:
+        async def get(query: str) -> dict:
+            response = await client.get(f'/api/admin/audit?{query}', headers=H)
+            assert response.status_code == 200
+            return response.json()
+
+        first = await get('limit=2&source=panel')
+        assert [i['target'] for i in first['items']] == ['Источник 4', 'Источник 3'] and first['has_more']
+        last = await get('limit=2&offset=4&source=panel')
+        assert [i['target'] for i in last['items']] == ['Источник 0'] and not last['has_more']
+        assert [i['actor'] for i in (await get('source=bot'))['items']] == ['101']
+        assert len((await get('source=panel&days=30'))['items']) == 4
+        assert [i['target'] for i in (await get('q=источник%202'))['items']] == ['Источник 2']
+        # % и _ в поиске — обычные символы, а не шаблон LIKE
+        assert [i['target'] for i in (await get('q=50%25_'))['items']] == ['50%_off']
+        assert (await get('q=%25'))['items'][0]['target'] == '50%_off' and len((await get('q=%25'))['items']) == 1
+        await audit.record(c, 'panel', 'panel', 'POST /announcements/7/status')
+        assert sorted((await client.get('/api/admin/audit/actions', headers=H)).json()) == ['POST /announcements', 'admin.role', 'source.enable']
+        assert [i['action'] for i in (await get('action=POST%20/announcements'))['items']] == ['POST /announcements/7/status']
+
+
 async def test_preview_templates_import_and_report(db, monkeypatch):
     c = db[0]
     await prepare(c)

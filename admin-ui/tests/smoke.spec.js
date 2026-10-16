@@ -35,7 +35,7 @@ for (const section of SECTIONS) {
 }
 
 test('ошибка API показывается в разделе, а не ломает панель', async ({ page, api }) => {
-  api.on('GET', '/audit?limit=200', { status: 500, json: { detail: 'Сервис временно недоступен' } });
+  api.on('GET', /^\/audit\?/, { status: 500, json: { detail: 'Сервис временно недоступен' } });
   await login(page);
   await openSection(page, 'Журнал');
   await expect(page.getByText('Сервис временно недоступен')).toBeVisible();
