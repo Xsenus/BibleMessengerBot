@@ -111,3 +111,16 @@ test('тема переключается и запоминается', async ({
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   void api;
 });
+
+// Разделы, уже переведённые на новые компоненты, не должны быть шире экрана телефона.
+const RESPONSIVE = ['Состояние', 'Доставки', 'Отчёты'];
+test('переделанные разделы помещаются в ширину телефона', async ({ page, api }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  for (const label of RESPONSIVE) {
+    await openSection(page, label);
+    await api.settle();
+    const width = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(width, label).toBeLessThanOrEqual(390);
+  }
+});

@@ -29,7 +29,7 @@ export const readResponses = {
   '/overview': {
     platforms: [{ platform: 'telegram', count: 1840 }, { platform: 'max', count: 312 }, { platform: 'vk', count: 97 }],
     queue: { queued: 12, attention: 3, sent_24h: 4821 },
-    services: ['admin', 'bot', 'illustrator', 'maxbot', 'scheduler', 'vkbot'].map((service) => ({ service, last_seen: ago(service === 'illustrator' ? 30 : 1) })),
+    services: ['bot', 'composer', 'illustrator', 'maxbot', 'speaker', 'vkbot', 'worker'].map((service) => ({ service, last_seen: ago(service === 'illustrator' ? 30 : 1) })),
   },
   '/release': {
     build: { version: '1.15.0', commit: 'c04cdef1a2b3c4d5e6f708192a3b4c5d6e7f8091', built_at: ago(320), commit_url: 'https://github.com/Xsenus/BibleMessengerBot/commit/c04cdef' },
