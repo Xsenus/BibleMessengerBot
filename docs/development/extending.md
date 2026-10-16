@@ -30,7 +30,7 @@
 
 1. Маршруты — в `app/web/api*.py` (авторизация подключается зависимостью роутера).
 2. Страница — `admin-ui/src/pages/<Имя>.jsx` и строка в `PAGES` (`App.jsx`); справку оформляйте компонентом `Help`.
-3. Тест по образцу `tests/test_admin_system_api_postgres.py`; сборка — `npm run build` в `admin-ui/`.
+3. Тест по образцу `tests/test_admin_system_api_postgres.py`; сборка — `npm run build` в `admin-ui/`. Для панели — мок ответа в `admin-ui/tests/fixtures.js`, раздел в `admin-ui/tests/sections.js` и, если есть формы, проверка запроса в `admin-ui/tests/forms.spec.js`; запуск — `npm test` в `admin-ui/`.
 
 ## Добавить новый вид рассылки
 

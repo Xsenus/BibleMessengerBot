@@ -46,3 +46,6 @@ DELIVERY.json
 DELIVERY.md
 admin-ui/node_modules
 app/web/static/panel
+admin-ui/test-results
+admin-ui/playwright-report
+admin-ui/screenshots
