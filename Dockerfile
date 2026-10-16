@@ -18,6 +18,9 @@ RUN python -m pip install -c constraints-linux.txt -r requirements.txt -r requir
     && python -m pip check && python -m pip freeze > /app/BUILD-DEPENDENCIES.txt
 COPY . /app
 COPY --from=panel /panel /app/app/web/static/panel
+ARG PROJECT_REVISION=unknown
+LABEL org.opencontainers.image.revision=$PROJECT_REVISION
+RUN python -c 'import json,os; from datetime import datetime,timezone; json.dump({"commit":os.environ["PROJECT_REVISION"],"built_at":datetime.now(timezone.utc).isoformat()},open("/app/BUILD-METADATA.json","w"))'
 # The maintenance backup runs as root with all capabilities dropped, so it cannot
 # bypass owner-only source permissions inherited from a host with umask 077.
 RUN chmod a+rx /app && chmod -R a+rX /app/app \

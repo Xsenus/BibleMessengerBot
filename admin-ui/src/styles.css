@@ -40,3 +40,14 @@ code { background: var(--line); padding: 1px 5px; border-radius: 4px; }
 .backup-table th { white-space: nowrap; }
 .backup-table td:nth-child(3) { overflow-wrap: anywhere; min-width: 180px; }
 .backup-table td:last-child button { white-space: nowrap; }
+.release-heading { justify-content: space-between; }
+.release-heading h3 { margin: 0; }
+.release-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(205px, 1fr)); gap: 16px; }
+.release-grid h4 { margin: 14px 0 8px; }
+.release-grid p { margin: 6px 0; overflow-wrap: anywhere; }
+.badge.error { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.badge.pending { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.release-bots { overflow-x: auto; }
+.release-bots td, .release-bots th { min-width: 120px; }
+.release-footnote { font-size: 12px; margin-bottom: 0; }
+.release-notice { padding: 8px 12px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }

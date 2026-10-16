@@ -4,6 +4,8 @@ x-app: &app
   build:
     context: .
     dockerfile: Dockerfile
+    args:
+      PROJECT_REVISION: ${PROJECT_REVISION:-unknown}
   env_file: .env
   restart: unless-stopped
   stop_grace_period: 45s
@@ -143,6 +145,7 @@ services:
 
   admin:
     <<: *app
+    volumes: ['./runtime-evidence/deploy-status:/app/deploy-status:ro']
     mem_limit: 256m
     cpus: 0.5
     command: [uvicorn, app.web.main:app, --host, 0.0.0.0, --port, '8080', --no-proxy-headers]

@@ -19,6 +19,7 @@ from app.services.errors import UserError
 from app.services.metrics import collect as collect_metrics
 from app.services.verification import verify_database
 from app.web.api_backups import build_router as build_backups_router
+from app.web.api_release import build_router as build_release_router
 
 settings = Settings.from_env(require_bot_token=False)
 security = HTTPBasic()
@@ -74,6 +75,7 @@ app.include_router(build_net_router(require_key, lambda: create_pool(settings)))
 from app.web.api_ops import build_router as build_ops_router  # noqa: E402
 app.include_router(build_ops_router(require_key, lambda: create_pool(settings)))
 app.include_router(build_backups_router(require_key, lambda: create_pool(settings)))
+app.include_router(build_release_router(require_key, lambda: create_pool(settings)))
 
 
 PANEL_DIR = Path(__file__).parent / 'static' / 'panel'
