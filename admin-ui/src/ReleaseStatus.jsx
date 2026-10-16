@@ -50,6 +50,20 @@ function WorkflowReason({ run }) {
   return <span className={message ? '' : 'muted'}>{message || '—'}</span>;
 }
 
+function Changes({ item }) {
+  const changes = item.changes;
+  if (!changes) return <span className="muted">{item.status === 'running' ? 'После завершения установки' : 'Список не сохранялся'}</span>;
+  if (changes.state === 'unavailable') return <div className="muted">{({ previous_unknown: 'Предыдущий коммит не сохранён',
+    range_unavailable: 'Не удалось прочитать диапазон версий', description_unavailable: 'Краткое описание недоступно' })[changes.reason] || 'Нет данных'}
+    {changes.compare_url && <p><a href={changes.compare_url} target="_blank" rel="noreferrer">Сравнение версий ↗</a></p>}</div>;
+  return <details className="deployment-changes"><summary>Изменения{changes.items.length ? ` · ${changes.items.length}${changes.more ? '+' : ''}` : ''}</summary>
+    {item.status !== 'succeeded' && <p className="release-notice">Изменения запрошенной сборки. Их установка не подтверждена.</p>}
+    {changes.state === 'unchanged' ? <p>Новых изменений кода нет: повторная установка той же версии.</p> : <ul>{changes.items.map((text, index) => <li key={index}>{text}</li>)}</ul>}
+    {changes.more && <p className="muted">Остальные изменения доступны по ссылке сравнения.</p>}
+    {changes.compare_url && <a href={changes.compare_url} target="_blank" rel="noreferrer">Полное сравнение версий ↗</a>}
+  </details>;
+}
+
 function DeployHistory({ server, github, stale }) {
   const [limit, setLimit] = useState(5);
   const records = server.history || [];
@@ -59,12 +73,13 @@ function DeployHistory({ server, github, stale }) {
     {stale && <p className="error">История могла устареть: не удалось обновить данные.</p>}
     <h4>Установки на VPS</h4>
     {!records.length ? <p className="muted">Сохранённых установок пока нет.</p> : <>
-      <div className="deploy-history-table"><table><thead><tr><th>Начало / завершение</th><th>Коммит</th><th>Результат</th><th>Причина / этап</th></tr></thead><tbody>
+      <div className="deploy-history-table"><table><thead><tr><th>Начало / завершение</th><th>Коммит</th><th>Результат</th><th>Причина / этап</th><th>Изменения</th></tr></thead><tbody>
         {records.slice(0, limit).map((item) => <tr key={item.id}>
           <td>{when(item.started_at)}<br /><small className="muted">{when(item.finished_at)}</small></td>
           <td><Commit value={item.commit} url={item.commit_url} /></td>
           <td><Label value={item.stale ? ['Нет подтверждения', 'error'] : SERVER_STATES[item.status]} /></td>
           <td><Failure item={item} /></td>
+          <td><Changes item={item} /></td>
         </tr>)}
       </tbody></table></div>
       {records.length > limit && <button className="small" onClick={() => setLimit((value) => value + 10)}>Показать ещё</button>}

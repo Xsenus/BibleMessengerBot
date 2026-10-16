@@ -61,4 +61,8 @@ code { background: var(--line); padding: 1px 5px; border-radius: 4px; }
 .deploy-history-table td:last-child { min-width: 220px; max-width: 440px; overflow-wrap: anywhere; }
 .deploy-history details p { margin: 6px 0; }
 .deploy-history summary { cursor: pointer; }
+.deployment-changes { min-width: 220px; max-width: 440px; }
+.deployment-changes summary { white-space: nowrap; }
+.deployment-changes ul { padding-left: 20px; margin: 10px 0; }
+.deployment-changes li { margin: 6px 0; line-height: 1.5; }
 .github-history { margin-top: 18px; }
