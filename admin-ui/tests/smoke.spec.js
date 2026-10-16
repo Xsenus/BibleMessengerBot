@@ -141,3 +141,9 @@ test('поиск: на экране результат последнего за
   await page.waitForTimeout(1300);
   await expect(page.getByText('Устаревший ответ')).toHaveCount(0);
 });
+
+test('в меню у «Доставок» видно, сколько требуют решения', async ({ page, api }) => {
+  await login(page);
+  await expect(page.getByRole('link', { name: 'Доставки 3 требуют решения' })).toBeVisible();
+  void api;
+});

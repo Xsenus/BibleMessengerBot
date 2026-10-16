@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { CalendarClock, FileUp, Megaphone, X } from 'lucide-react';
+import { ask, askText } from '../feedback.jsx';
 import { api } from '../api.js';
 import { Help, AudienceEditor, Status, describeAudience, useAction, useData, when } from '../ui.jsx';
 import { Chip, EmptyState, Field, FilePicker, PageHeader, Panel, StatusBadge, TimeAgo, formatNumber } from '../components.jsx';
@@ -57,8 +58,8 @@ function Form({ onCreated }) {
     if (f.kind === 'interval') body.interval_minutes = Number(f.interval);
     if (await run(() => api('/announcements', { method: 'POST', body }), 'Объявление создано')) { setF(EMPTY); setPreview(null); }
   };
-  const saveTemplate = () => {
-    const name = prompt('Название шаблона');
+  const saveTemplate = async () => {
+    const name = await askText({ title: 'Сохранить как шаблон', label: 'Название шаблона', confirmText: 'Сохранить', initial: f.title });
     if (name) run(async () => { await api('/announcement-templates', { method: 'POST', body: { name, title: f.title, body: f.body } }); await templates.reload(); }, 'Шаблон сохранён');
   };
   const showPreview = () => run(async () => setPreview(await api('/announcements/preview', {
@@ -120,7 +121,7 @@ function Form({ onCreated }) {
           <button disabled={busy || !f.body.trim()}>Создать</button>
           <button type="button" className="small" disabled={busy || !f.body.trim()} onClick={showPreview}>Предпросмотр</button>
           <button type="button" className="small" disabled={busy || !f.body.trim()} onClick={saveTemplate}>Сохранить как шаблон</button>
-          {message && <span className="form-message" role="status">{message}</span>}
+          {message && <span className="form-message" role="alert">{message}</span>}
         </div>
       </form>
 
@@ -206,10 +207,10 @@ export default function Announcements() {
                       <td data-label="Следующий запуск">{a.next_run_at ? <>{when(a.next_run_at)}<div><small><TimeAgo value={a.next_run_at} /></small></div></> : <span className="muted">—</span>}</td>
                       <td className="cell-actions"><div className="actions">
                         {editable && <button className="small" onClick={() => setOpen(open === a.id ? null : a.id)} aria-expanded={open === a.id}>Править</button>}
-                        <button className="small" disabled={busy} onClick={() => confirm('Отправить это объявление сейчас всем получателям?') && run(() => api(`/announcements/${a.id}/run`, { method: 'POST' }), 'Отправлено')}>Сейчас</button>
+                        <button className="small" disabled={busy} onClick={async () => (await ask({ title: `Отправить «${a.title || `#${a.id}`}» сейчас?`, body: `Получатели: ${describeAudience(a.audience)}. Расписание не изменится.`, confirmText: 'Отправить сейчас' })) && run(() => api(`/announcements/${a.id}/run`, { method: 'POST' }), 'Отправлено')}>Сейчас</button>
                         {a.status === 'active' && <button className="small" disabled={busy} onClick={() => status(a.id, 'paused')}>Пауза</button>}
                         {a.status === 'paused' && <button className="small" disabled={busy} onClick={() => status(a.id, 'active')}>Возобновить</button>}
-                        {editable && <button className="small danger" disabled={busy} onClick={() => confirm('Отменить объявление? Новые запуски не будут выполняться.') && status(a.id, 'cancelled')}>Отмена</button>}
+                        {editable && <button className="small danger" disabled={busy} onClick={async () => (await ask({ title: `Отменить «${a.title || `#${a.id}`}»?`, body: 'Новые запуски не будут выполняться. Вернуть отменённое объявление нельзя.', confirmText: 'Отменить объявление', danger: true })) && status(a.id, 'cancelled')}>Отмена</button>}
                       </div></td>
                     </tr>,
                     open === a.id && <tr key={`e${a.id}`} className="row-editor"><td colSpan="4">
@@ -221,7 +222,7 @@ export default function Announcements() {
             </table>
           </div>
         )}
-        {message && <p className="form-message" role="status">{message}</p>}
+        {message && <p className="form-message" role="alert">{message}</p>}
       </Panel>
     </section>
   );

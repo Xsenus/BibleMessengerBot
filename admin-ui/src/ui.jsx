@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronRight, Info } from 'lucide-react';
 import { api } from './api.js';
+import { toast } from './feedback.jsx';
 
 const MESSAGES = {
   forbidden: 'Недостаточно прав', not_found: 'Не найдено', invalid: 'Проверьте введённые данные',
@@ -37,20 +38,22 @@ export function useDebounced(value, delay = 300) {
   return current;
 }
 
-/** Выполнить действие, показать результат и обновить данные. */
+/** Выполнить действие и обновить данные. Успех — всплывающее уведомление; ошибка — в message, чтобы показать её
+ * рядом с формой, где её видно и где её исправлять. */
 export function useAction(after) {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const run = async (fn, ok = 'Готово') => {
+  const run = async (fn, ok = 'Сохранено') => {
     setBusy(true); setMessage('');
-    try { await fn(); setMessage(ok); await after?.(); return true; }
-    catch (e) { setMessage('⚠ ' + explain(e)); return false; }
+    try { await fn(); toast(ok); await after?.(); return true; }
+    catch (e) { if (e.status !== 401) setMessage('⚠ ' + explain(e)); return false; }
     finally { setBusy(false); }
   };
   return { run, message, busy };
 }
 
-export const Status = ({ error, loading }) => (error ? <p className="error">{error}</p> : loading ? <p className="muted">Загрузка…</p> : null);
+export const Status = ({ error, loading }) => (error ? <p className="callout callout-danger" role="alert">{error}</p>
+  : loading ? <p className="loading" aria-live="polite"><span className="spinner" aria-hidden="true" />Загрузка…</p> : null);
 export const Badge = ({ on, yes = 'вкл', no = 'выкл' }) => <span className={`badge ${on ? 'ok' : 'off'}`}>{on ? yes : no}</span>;
 export const when = (value) => (value ? new Date(value).toLocaleString('ru-RU') : '—');
 

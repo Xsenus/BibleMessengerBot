@@ -50,7 +50,7 @@ export default function Backups() {
       <p className="callout callout-info"><DatabaseBackup size={16} aria-hidden="true" /><span>Скачивается готовый файл <code>.dump</code> с библейскими текстами, пользователями, расписаниями, картинками и озвучками: архив проверяется и расшифровывается автоматически. Наличие файлов в облаке проверяется отдельно; отсутствующие копии остаются в истории, но скачать их нельзя.</span></p>
       <Panel title={data ? `Копии (${formatNumber(data.total)})` : 'Копии'}>
         <Status error={error} loading={loading || (!data && !error)} />
-        {message && <p className="form-message" role="status">{message}</p>}
+        {message && <p className="form-message" role="alert">{message}</p>}
         {data && !data.download_enabled && <p className="callout callout-danger"><CircleX size={16} aria-hidden="true" />Скачивание недоступно: проверьте настройки S3 и ключа шифрования на сервере.</p>}
         {data?.items.length === 0 && <EmptyState icon={DatabaseBackup} title="Проверенных копий пока нет">После успешного резервирования они появятся здесь.</EmptyState>}
         {data?.items.length > 0 && (

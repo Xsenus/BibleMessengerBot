@@ -434,3 +434,35 @@ button.tab[aria-selected='true'] { background: var(--surface); color: var(--text
 @media (max-width: 720px) { .setting-row { flex-direction: column; gap: var(--space-2); } }
 .panel .table-wrap:not(:last-child) { margin-bottom: var(--space-3); border-bottom: 1px solid var(--border); }
 .item-card > .item-head { margin-bottom: var(--space-3); }
+
+/* ---------- Обратная связь: уведомления, окна, загрузка ---------- */
+.form-message { color: var(--danger); font-size: var(--text-sm); }
+.loading { display: flex; align-items: center; gap: var(--space-2); color: var(--text-3); font-size: var(--text-sm); }
+.spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent); animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.toaster { position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: 70; display: flex; flex-direction: column; gap: var(--space-2); width: min(380px, calc(100vw - 2 * var(--space-4))); pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: flex-start; gap: var(--space-2); padding: 10px 8px 10px 14px; border-radius: var(--radius-md);
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-lg); font-size: var(--text-sm); animation: toast-in .18s ease-out; }
+.toast > svg { flex: none; margin-top: 1px; }
+.toast > span { flex: 1; padding-top: 1px; }
+.toast .icon-button { width: 26px; height: 26px; margin: -3px 0; }
+.toast-ok > svg { color: var(--success); }
+.toast-error { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.toast-error > svg { color: var(--danger); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.dialog { width: min(440px, calc(100vw - 2 * var(--space-4))); padding: var(--space-5); border: 1px solid var(--border); border-radius: 14px;
+  background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg); }
+.dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+.dialog[open] { animation: toast-in .16s ease-out; }
+.dialog-head { display: flex; align-items: center; gap: var(--space-2); }
+.dialog-head h3 { margin: 0; font-size: var(--text-lg); }
+.dialog-icon { color: var(--danger); flex: none; }
+.dialog-body { color: var(--text-2); margin: var(--space-3) 0 0; }
+.dialog .field { margin: var(--space-4) 0 0; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
+button.button-danger { background: var(--danger); color: #fff; }
+button.button-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 85%, #000); }
+.nav-count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-full); background: var(--danger); color: #fff;
+  font-size: 11px; font-weight: 600; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; }

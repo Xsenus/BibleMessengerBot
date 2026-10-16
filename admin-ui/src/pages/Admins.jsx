@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Copy, Crown, ShieldCheck, UserPlus } from 'lucide-react';
+import { ask } from '../feedback.jsx';
 import { api } from '../api.js';
 import { Help, Status, useAction, useData } from '../ui.jsx';
 import { EmptyState, Field, PageHeader, Panel, StatusBadge } from '../components.jsx';
@@ -41,7 +42,7 @@ function Invite() {
             <button className="small" onClick={copy}><Copy size={14} aria-hidden="true" />{copied ? 'Скопировано' : 'Копировать'}</button></span>
         </div>
       )}
-      {message && <p className="form-message" role="status">{message}</p>}
+      {message && <p className="form-message" role="alert">{message}</p>}
     </Panel>
   );
 }
@@ -72,14 +73,14 @@ export default function Admins() {
                       <RoleSelect value={a.admin_role} disabled={busy} ariaLabel={`Роль: ${name}`}
                         onChange={(role) => run(() => api(`/admins/${a.telegram_user_id}/role`, { method: 'PUT', body: { role } }))} />)}</td>
                     <td className="cell-actions">{!a.is_owner && <button className="small danger" disabled={busy}
-                      onClick={() => confirm(`Снять права администратора с «${name}»?`) && run(() => api(`/admins/${a.telegram_user_id}`, { method: 'DELETE' }))}>Снять</button>}</td>
+                      onClick={async () => (await ask({ title: `Снять права с «${name}»?`, body: 'Меню /admin в боте станет ему недоступно. Назначить снова можно новым приглашением.', confirmText: 'Снять права', danger: true })) && run(() => api(`/admins/${a.telegram_user_id}`, { method: 'DELETE' }))}>Снять</button>}</td>
                   </tr>
                 );
               })}</tbody>
             </table>
           </div>
         )}
-        {message && <p className="form-message" role="status">{message}</p>}
+        {message && <p className="form-message" role="alert">{message}</p>}
         <dl className="role-list">{ROLES.map(([id, text, rights]) => <div key={id}><dt>{text}</dt><dd>{rights}</dd></div>)}
           <div><dt>владелец</dt><dd>всё, включая список администраторов</dd></div></dl>
       </Panel>

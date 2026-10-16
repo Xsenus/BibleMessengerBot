@@ -50,7 +50,7 @@ function ChatsTab() {
           </table>
         </div>
       )}
-      {message && <p className="form-message" role="status">{message}</p>}
+      {message && <p className="form-message" role="alert">{message}</p>}
     </>
   );
 }
@@ -86,7 +86,7 @@ function UsersTab() {
           </table>
         </div>
       )}
-      {message && <p className="form-message" role="status">{message}</p>}
+      {message && <p className="form-message" role="alert">{message}</p>}
     </>
   );
 }

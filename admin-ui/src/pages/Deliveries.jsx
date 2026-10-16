@@ -1,13 +1,14 @@
 import { CircleCheck } from 'lucide-react';
+import { ask } from '../feedback.jsx';
 import { api } from '../api.js';
 import { Help, Status, useAction, useData } from '../ui.jsx';
 import { DataTable, EmptyState, PageHeader, StatusBadge, TimeAgo } from '../components.jsx';
 import { DELIVERY_MODES, DELIVERY_STATUSES, label } from '../labels.js';
 
 const ACTIONS = [
-  ['sent', 'Дошло', 'Отметить задание как доставленное?'],
-  ['retry-duplicate-risk', 'Повторить', 'Отправить ещё раз? Если первое сообщение всё-таки дошло, получатель увидит дубль.'],
-  ['cancel', 'Отменить', 'Отменить задание? Сообщение не будет отправлено.'],
+  ['sent', 'Дошло', { title: 'Отметить как доставленное?', body: 'Задание закроется как отправленное. Используйте, если вы убедились, что сообщение получено.', confirmText: 'Дошло' }],
+  ['retry-duplicate-risk', 'Повторить', { title: 'Отправить ещё раз?', body: 'Если первое сообщение всё-таки дошло, получатель увидит дубль.', confirmText: 'Повторить', danger: true }],
+  ['cancel', 'Отменить', { title: 'Отменить задание?', body: 'Сообщение больше не будет отправляться.', confirmText: 'Отменить задание', danger: true }],
 ];
 
 export default function Deliveries() {
@@ -26,7 +27,7 @@ export default function Deliveries() {
     { key: 'actions', header: 'Решение', className: 'cell-actions', render: (d) => (
       <div className="actions">{ACTIONS.map(([action, text, question]) => (
         <button key={action} className={`small${action === 'cancel' ? ' danger' : ''}`} disabled={busy}
-          onClick={() => confirm(question) && run(() => api(`/deliveries/${d.id}/resolve`, { method: 'POST', body: { action } }))}>{text}</button>
+          onClick={async () => (await ask(question)) && run(() => api(`/deliveries/${d.id}/resolve`, { method: 'POST', body: { action } }))}>{text}</button>
       ))}</div>
     ) },
   ];
@@ -43,7 +44,7 @@ export default function Deliveries() {
       <Status error={error} loading={loading} />
       <DataTable columns={columns} rows={data} caption="Доставки, требующие решения" stack
         empty={<EmptyState icon={CircleCheck} title="Всё в порядке">Решений не требуется.</EmptyState>} />
-      {message && <p className="muted" role="status">{message}</p>}
+      {message && <p className="form-message" role="alert">{message}</p>}
     </section>
   );
 }

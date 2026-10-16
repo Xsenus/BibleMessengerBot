@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { BookOpen, LogOut, Menu, Monitor, Moon, Sun, X } from 'lucide-react';
 import { GROUPS } from './sections.js';
+import { api } from './api.js';
 import { useTheme } from './hooks.js';
 
 const THEME_LABELS = { system: ['Тема: как в системе', Monitor], light: ['Тема: светлая', Sun], dark: ['Тема: тёмная', Moon] };
@@ -14,6 +15,19 @@ function Brand() {
   );
 }
 
+/** Число доставок, требующих решения, для метки в меню. Обновляется раз в минуту; ошибки не мешают работе. */
+function useAttention() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const load = () => api('/overview').then((data) => { if (alive) setCount(data.queue.attention || 0); }).catch(() => {});
+    load();
+    const timer = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
+  return count;
+}
+
 /** Каркас панели: боковое меню с группами (на телефоне — выдвижное), шапка и область раздела. */
 export default function Shell({ current, onLogout, children }) {
   const [open, setOpen] = useState(false);
@@ -21,6 +35,8 @@ export default function Shell({ current, onLogout, children }) {
   const menuButton = useRef(null);
   const sidebar = useRef(null);
   const [themeLabel, ThemeIcon] = THEME_LABELS[theme];
+  const attention = useAttention();
+  const badges = { deliveries: attention };
 
   useEffect(() => { setOpen(false); window.scrollTo(0, 0); }, [current.id]);
   useEffect(() => {
@@ -52,6 +68,7 @@ export default function Shell({ current, onLogout, children }) {
                 <a key={id} href={`#/${id}`} className="nav-item" aria-current={id === current.id ? 'page' : undefined}
                   onClick={() => setOpen(false)}>
                   <Icon size={17} strokeWidth={1.9} aria-hidden="true" /><span>{label}</span>
+                  {badges[id] > 0 && <span className="nav-count" title="Требуют решения">{badges[id]}<span className="sr-only"> требуют решения</span></span>}
                 </a>
               ))}
             </div>

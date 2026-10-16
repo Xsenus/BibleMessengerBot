@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { CircleCheck, CircleHelp, CircleX, KeyRound, RotateCcw, TriangleAlert, WandSparkles } from 'lucide-react';
+import { ask } from '../feedback.jsx';
 import { api } from '../api.js';
 import { Help, Status, useAction, useData, when } from '../ui.jsx';
 import { DataTable, EmptyState, Field, PageHeader, Panel, Stat, StatusBadge, Switch, TimeAgo, formatNumber } from '../components.jsx';
@@ -101,10 +102,10 @@ function AddForm({ templates, onCreated, secretsReady }) {
               <Field label="В сутки, не более"><input type="number" value={f.daily_limit} min="1" onChange={(e) => set({ daily_limit: e.target.value })} /></Field>
             </div>
           </div>
-          <div className="form-actions"><button disabled={busy}>Добавить</button>{message && <span className="form-message" role="status">{message}</span>}</div>
+          <div className="form-actions"><button disabled={busy}>Добавить</button>{message && <span className="form-message" role="alert">{message}</span>}</div>
         </>
       )}
-      {!templateId && message && <p className="form-message" role="status">{message}</p>}
+      {!templateId && message && <p className="form-message" role="alert">{message}</p>}
     </form>
   );
 }
@@ -148,8 +149,8 @@ function Custom({ item, reload }) {
       <div className="item-actions">
         <button className="small" disabled={busy || !item.pricing_ready} onClick={test}>Проверить</button>
         <button className="small" aria-expanded={edit} onClick={() => setEdit(!edit)}>Настроить</button>
-        <button className="small danger" disabled={busy} onClick={() => confirm(`Удалить генератор «${name}»?`) && run(() => api(`/image-providers/${item.id}`, { method: 'DELETE' }))}>Удалить</button>
-        {message && <span className="form-message" role="status">{message}</span>}
+        <button className="small danger" disabled={busy} onClick={async () => (await ask({ title: `Удалить генератор «${name}»?`, body: 'Его ключ и настройки будут удалены. Статистика генераций сохранится.', confirmText: 'Удалить', danger: true })) && run(() => api(`/image-providers/${item.id}`, { method: 'DELETE' }))}>Удалить</button>
+        {message && <span className="form-message" role="alert">{message}</span>}
       </div>
       {edit && (
         <div className="inline-editor">
@@ -166,7 +167,7 @@ function Custom({ item, reload }) {
           </div>
           <div className="form-actions">
             <button disabled={busy} onClick={save}>Сохранить</button>
-            {item.has_key && <button className="small danger" disabled={busy} onClick={() => confirm('Удалить сохранённый ключ?') && patch({ clear_key: true })}>Удалить ключ</button>}
+            {item.has_key && <button className="small danger" disabled={busy} onClick={async () => (await ask({ title: 'Удалить сохранённый ключ?', body: 'Генератор не сможет работать, пока вы не зададите новый ключ.', confirmText: 'Удалить ключ', danger: true })) && patch({ clear_key: true })}>Удалить ключ</button>}
             <button className="small" onClick={() => { setEdit(false); setDraft({}); }}>Отмена</button>
           </div>
         </div>
@@ -214,7 +215,7 @@ export default function ImageProviders() {
                 <span className="stat-label">Очередь заданий</span>
                 <span className="job-list">{jobs.length ? jobs.map(([k, v]) => <span key={k}><b>{formatNumber(v)}</b> {JOBS[k] || k}</span>) : <span className="muted">пусто</span>}</span>
                 <button className="small" disabled={busy} onClick={() => run(() => api('/image-queue/retry', { method: 'POST' }), 'Задания возвращены в очередь')}><RotateCcw size={14} aria-hidden="true" />Повторить остановленные</button>
-                {message && <span className="stat-hint" role="status">{message}</span>}
+                {message && <span className="form-message" role="alert">{message}</span>}
               </div>
             </div>
           </div>

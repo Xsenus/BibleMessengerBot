@@ -20,7 +20,7 @@ export default function Settings() {
             <Switch checked={data.support_section} disabled={busy} on="показан" off="скрыт" label="Раздел «Поддержка проекта» показан"
               onChange={(value) => run(() => api('/settings', { method: 'PUT', body: { support_section: value } }))} />
           </div>
-          {message && <p className="form-message" role="status">{message}</p>}
+          {message && <p className="form-message" role="alert">{message}</p>}
         </Panel>
       )}
       <Panel title="Что настраивается где">
