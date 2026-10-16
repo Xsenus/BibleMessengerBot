@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "playwright test --project=smoke",
-    "screenshots": "playwright test --project=screenshots"
+    "screenshots": "playwright test --project=screenshots",
+    "screenshots:docs": "DOCS_SCREENSHOTS=1 playwright test --project=screenshots -g документации"
   },
   "dependencies": {
     "lucide-react": "1.49.0",
