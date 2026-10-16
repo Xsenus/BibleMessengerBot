@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import time
+from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,38 @@ REPOSITORY = 'https://github.com/Xsenus/BibleMessengerBot'
 SERVICES = {'worker', 'composer', 'bot', 'admin', 'max-web', 'maxbot', 'vkbot', 'illustrator', 'speaker'}
 STATES = {'running', 'succeeded', 'failed', 'rolled_back', 'manual_intervention', 'skipped'}
 STAGES = {'checking', 'backup', 'updating', 'verifying', 'completed', 'rollback', 'stopped', 'skipped'}
+FAILURES = {
+    'configuration_missing': 'На VPS отсутствует конфигурация проекта.',
+    'dirty_checkout': 'В рабочем каталоге VPS есть незакоммиченные изменения.',
+    'unexpected_branch': 'На VPS выбрана неожиданная рабочая ветка.',
+    'fetch_failed': 'Не удалось получить main из GitHub.',
+    'outdated_commit': 'Проверенный коммит уже заменён более новой main; установка пропущена.',
+    'ancestry_failed': 'Текущую версию нельзя обновить до выбранного коммита без слияния.',
+    'compose_invalid': 'Конфигурация Docker Compose не прошла проверку.',
+    'disk_space': 'На VPS меньше необходимых 4 ГиБ свободного места.',
+    'preflight_failed': 'Предварительная проверка VPS не пройдена.',
+    'backup_failed': 'Создание или проверка резервной копии БД завершились ошибкой.',
+    'activation_failed': 'Сборка или поочерёдное обновление служб завершились ошибкой.',
+    'configuration_changed': 'После обновления изменился контрольный хеш конфигурации.',
+    'postgres_changed': 'После обновления изменился контейнер PostgreSQL.',
+    'service_unhealthy': 'Служба не прошла проверку работоспособности.',
+    'revision_mismatch': 'Коммит образа службы не совпал с проверенным коммитом main.',
+    'migration_check_failed': 'Проверка применённых миграций БД завершилась ошибкой.',
+    'admin_unready': 'Админка не подтвердила готовность после обновления.',
+    'verification_failed': 'Итоговая проверка установки завершилась ошибкой.',
+    'interrupted': 'Процесс обновления получил сигнал прерывания.',
+    'legacy_unknown': 'Причина ошибки не сохранялась этой версией автодеплоя.',
+}
+
+
+def failure_info(value: Any) -> dict | None:
+    """Показать фиксированное описание кода ошибки; произвольный текст журналов никогда не возвращать."""
+    if not isinstance(value, dict) or not isinstance(value.get('code'), str) or value['code'] not in FAILURES:
+        return None
+    return {'code': value['code'], 'message': FAILURES[value['code']],
+            'stage': value.get('stage') if isinstance(value.get('stage'), str) and value['stage'] in STAGES else None,
+            'exit_code': value.get('exit_code') if type(value.get('exit_code')) is int and 0 <= value['exit_code'] <= 255 else None,
+            'service': value.get('service') if isinstance(value.get('service'), str) and value['service'] in SERVICES else None}
 
 
 def commit(value: Any) -> str | None:
@@ -79,14 +113,31 @@ def attempt(data: Any) -> dict | None:
     return {'commit': data['commit'], 'previous_commit': commit(data.get('previous_commit')),
             'status': data['status'], 'stage': data.get('stage') if isinstance(data.get('stage'), str) and data['stage'] in STAGES else None,
             'started_at': started, 'finished_at': finished, 'updated_at': moment(data.get('updated_at')),
-            'services': services, 'commit_url': f'{REPOSITORY}/commit/{data["commit"]}'}
+            'services': services, 'failure': failure_info(data.get('failure')) if data['status'] not in {'running', 'succeeded'} else None,
+            'legacy': data.get('legacy') is True, 'commit_url': f'{REPOSITORY}/commit/{data["commit"]}'}
+
+
+def history_records(data: dict) -> list[dict]:
+    """Проверить и упорядочить максимум 50 попыток; обновления этапа не создают дубликатов."""
+    rows = data.get('history', [])
+    candidates = (rows[:50] if isinstance(rows, list) else []) + [data.get('current'), data.get('last_attempt')]
+    unique = {}
+    for raw in candidates:
+        item = attempt(raw)
+        if item:
+            item.pop('services')
+            item['id'] = hashlib.sha256((item['commit'] + ' ' + item['started_at']).encode()).hexdigest()[:24]
+            item['stale'] = bool(item['status'] == 'running' and (datetime.now(UTC) - datetime.fromisoformat(
+                item['updated_at'] or item['started_at'])).total_seconds() > 5400)
+            unique[item['id']] = item
+    return sorted(unique.values(), key=lambda row: row['started_at'], reverse=True)[:50]
 
 
 def server_info() -> dict:
     """Прочитать единственную публичную квитанцию из отдельного каталога, подключённого только для чтения."""
     data = read_json(STATUS_FILE)
     if not data or data.get('schema') != 1:
-        return {'available': False, 'current': None, 'last_attempt': None, 'stale': False}
+        return {'available': False, 'current': None, 'last_attempt': None, 'stale': False, 'history': []}
     current = attempt(data.get('current'))
     if current and current['status'] != 'succeeded':
         current = None
@@ -94,7 +145,9 @@ def server_info() -> dict:
     updated = (latest['updated_at'] or latest['started_at']) if latest else None
     stale = bool(latest and latest['status'] == 'running' and updated
                  and (datetime.now(UTC) - datetime.fromisoformat(updated)).total_seconds() > 5400)
-    return {'available': bool(current or latest), 'current': current, 'last_attempt': latest, 'stale': stale}
+    history = history_records(data)
+    return {'available': bool(current or latest or history), 'current': current, 'last_attempt': latest, 'stale': stale,
+            'history': history}
 
 
 class GithubDeployments:
@@ -105,30 +158,71 @@ class GithubDeployments:
         self.transport = transport
         self.lock = asyncio.Lock()
         self.next_refresh = 0.0
-        self.result: dict = {'available': False, 'run': None, 'checked_at': None, 'stale': False}
+        self.requests: deque[float] = deque()
+        self.attempts: dict[tuple[int, int], dict] = {}
+        self.retry: dict[tuple[int, int], float] = {}
+        self.result: dict = {'available': False, 'run': None, 'checked_at': None, 'stale': False,
+                             'history': [], 'history_complete': False}
+
+    async def request(self, client: httpx.AsyncClient, path: str, params: dict | None = None) -> dict:
+        """Ограничить все запросы публичного API 50 в час на процесс; не пересылать ключ администратора."""
+        now = time.monotonic()
+        while self.requests and self.requests[0] <= now - 3600:
+            self.requests.popleft()
+        if len(self.requests) >= 50:
+            raise ValueError('request_budget')
+        self.requests.append(now)
+        response = await client.get('https://api.github.com/repos/Xsenus/BibleMessengerBot/actions/' + path,
+                                    params=params, headers={'Accept': 'application/vnd.github+json'})
+        response.raise_for_status()
+        if len(response.content) > 131072:
+            raise ValueError('oversized')
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError('invalid')
+        return data
+
+    async def older_attempts(self, client: httpx.AsyncClient, runs: list[dict]) -> tuple[list[dict], bool]:
+        """Восстановить предыдущие попытки после повторного запуска, кэшируя завершённые результаты отдельно."""
+        desired = [(row['id'], number) for row in runs for number in range(max(1, (row['attempt'] or 1) - 5), row['attempt'] or 1)]
+        allowed = set(desired)
+        self.attempts = {key: value for key, value in self.attempts.items() if key in allowed}
+        self.retry = {key: value for key, value in self.retry.items() if key in allowed}
+        # Не более одного дополнительного запроса за обновление; старые ошибки не вытесняют текущий статус.
+        for key in desired:
+            if key in self.attempts or self.retry.get(key, 0) > time.monotonic():
+                continue
+            try:
+                async with asyncio.timeout(3):
+                    item = self.public_run(await self.request(client, f'runs/{key[0]}/attempts/{key[1]}'))
+                original = next(row for row in runs if row['id'] == key[0])
+                if item['id'] != key[0] or item['attempt'] != key[1] or item['commit'] != original['commit'] or item['status'] != 'completed':
+                    raise ValueError('attempt_identity')
+                self.attempts[key] = item
+            except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError):
+                self.retry[key] = time.monotonic() + 3600
+            break
+        return list(self.attempts.values()), len(self.attempts) == len(allowed)
 
     async def get(self) -> dict:
-        """Не чаще одного запроса за две минуты; при ошибке сохранить прошлый результат как устаревший."""
+        """Обновить список раз в две минуты и одну старую попытку; при отказе пометить прошлые данные устаревшими."""
         if time.monotonic() < self.next_refresh:
             return dict(self.result)
         async with self.lock:
             if time.monotonic() < self.next_refresh:
                 return dict(self.result)
             try:
-                async with asyncio.timeout(4), httpx.AsyncClient(
+                async with asyncio.timeout(8), httpx.AsyncClient(
                         timeout=3, follow_redirects=False, trust_env=False, transport=self.transport) as client:
-                    response = await client.get(
-                        'https://api.github.com/repos/Xsenus/BibleMessengerBot/actions/workflows/deploy.yml/runs',
-                        params={'branch': 'main', 'per_page': 1}, headers={'Accept': 'application/vnd.github+json'})
-                    response.raise_for_status()
-                    if len(response.content) > 131072:
-                        raise ValueError('oversized')
-                    rows = response.json()['workflow_runs']
+                    rows = (await self.request(client, 'workflows/deploy.yml/runs', {'branch': 'main', 'per_page': 10}))['workflow_runs']
                     if not isinstance(rows, list):
                         raise ValueError('invalid')
-                    run = self.public_run(rows[0]) if rows else None
-                self.result = {'available': True, 'run': run,
-                               'checked_at': datetime.now(UTC).isoformat(), 'stale': False}
+                    runs = [self.public_run(row) for row in rows[:10]]
+                    older, complete = await self.older_attempts(client, runs)
+                    history = sorted(runs + older, key=lambda row: (row['started_at'] or '', row['id'], row['attempt'] or 0), reverse=True)
+                self.result = {'available': True, 'run': runs[0] if runs else None,
+                               'checked_at': datetime.now(UTC).isoformat(), 'stale': False,
+                               'history': history, 'history_complete': complete}
             except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError):
                 self.result = {**self.result, 'available': False, 'stale': bool(self.result['checked_at'])}
             self.next_refresh = time.monotonic() + 120
@@ -147,7 +241,10 @@ class GithubDeployments:
         conclusion = data.get('conclusion')
         if conclusion not in {'success', 'failure', 'timed_out', 'cancelled', 'skipped', 'action_required', 'startup_failure', 'stale', 'neutral'}:
             conclusion = None
+        attempt = data.get('run_attempt')
+        attempt = attempt if type(attempt) is int and 1 <= attempt <= 10000 else None
         return {'id': data['id'], 'commit': data['head_sha'], 'status': status, 'conclusion': conclusion,
                 'started_at': moment(data.get('run_started_at')), 'updated_at': moment(data.get('updated_at')),
-                'attempt': data.get('run_attempt') if type(data.get('run_attempt')) is int else None,
-                'url': f'{REPOSITORY}/actions/runs/{data["id"]}'}
+                'attempt': attempt,
+                'url': f'{REPOSITORY}/actions/runs/{data["id"]}',
+                'attempt_url': f'{REPOSITORY}/actions/runs/{data["id"]}/attempts/{attempt}' if attempt else None}

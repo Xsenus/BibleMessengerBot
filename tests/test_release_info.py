@@ -86,18 +86,18 @@ async def test_github_has_one_request_for_concurrent_readers_and_safe_urls():
     async def handler(request):
         calls.append(request)
         await asyncio.sleep(0.01)
-        return httpx.Response(200,json={'workflow_runs':[run_record()]})
+        return httpx.Response(200,json={'workflow_runs':[run_record(run_attempt=1)]})
     cache = info.GithubDeployments(httpx.MockTransport(handler))
     results = await asyncio.gather(*(cache.get() for _ in range(10)))
     assert len(calls) == 1 and all(result['available'] for result in results)
     assert results[0]['run']['url'] == info.REPOSITORY+'/actions/runs/1234'
     assert 'malicious' not in json.dumps(results) and 'never expose' not in json.dumps(results)
-    assert 'authorization' not in calls[0].headers and calls[0].url.params['per_page']=='1'
+    assert 'authorization' not in calls[0].headers and calls[0].url.params['per_page']=='10'
 
 
 @pytest.mark.asyncio
 async def test_github_error_is_marked_stale_and_not_cached_as_current_success():
-    responses = [httpx.Response(200,json={'workflow_runs':[run_record()]}), httpx.Response(403,text='secret error')]
+    responses = [httpx.Response(200,json={'workflow_runs':[run_record(run_attempt=1)]}), httpx.Response(403,text='secret error')]
     cache = info.GithubDeployments(httpx.MockTransport(lambda _:responses.pop(0)))
     first = await cache.get()
     cache.next_refresh = 0
@@ -168,3 +168,83 @@ async def test_release_endpoint_auth_and_independent_bot_checks(monkeypatch, tmp
     assert data['bots'][2]['expected'] is False
     assert not data['github']['available'] and data['build']['commit']==SHA
     assert 'private connection' not in response.text
+
+
+def test_history_sanitizes_errors_and_keeps_multiple_attempts_for_same_commit(monkeypatch, tmp_path):
+    _, status = files(monkeypatch, tmp_path, snapshot())
+    failed = snapshot(status='rolled_back')
+    failed['started_at'] = '2026-10-16T03:00:00+00:00'
+    failed['failure'] = {'code':'revision_mismatch','stage':'verifying','service':'bot','exit_code':1,
+                         'message':'private token in arbitrary message'}
+    failed['log'] = 'private token'
+    status.write_text(json.dumps({'schema':1,'current':snapshot(),'last_attempt':failed,
+                                 'history':[snapshot(),failed,{**failed,'status':[]}, {'private':'private token'}]}))
+    result = info.server_info()
+    assert len(result['history']) == 2 and len({row['id'] for row in result['history']}) == 2
+    assert result['history'][0]['status'] == 'rolled_back'
+    assert result['history'][0]['failure']['message'] == info.FAILURES['revision_mismatch']
+    assert result['history'][0]['failure']['service'] == 'bot'
+    assert 'private token' not in json.dumps(result)
+    assert info.failure_info({'code':[]}) is None
+    assert info.failure_info({'code':'untrusted','message':'private token'}) is None
+    assert info.failure_info({'code':'backup_failed','exit_code':True,'service':'/private'})['exit_code'] is None
+
+
+@pytest.mark.asyncio
+async def test_github_recovers_failed_previous_attempt_and_caches_it():
+    calls = []
+    def handler(request):
+        calls.append(request)
+        if '/attempts/' in request.url.path:
+            return httpx.Response(200,json=run_record(run_attempt=1,conclusion='failure'))
+        return httpx.Response(200,json={'workflow_runs':[run_record(run_attempt=2)]})
+    cache = info.GithubDeployments(httpx.MockTransport(handler))
+    first = await cache.get()
+    assert first['available'] and first['history_complete'] and len(first['history'])==2
+    previous = next(row for row in first['history'] if row['attempt']==1)
+    assert previous['conclusion']=='failure' and previous['attempt_url'].endswith('/1234/attempts/1')
+    assert 'malicious' not in json.dumps(first)
+    cache.next_refresh=0
+    second=await cache.get()
+    assert len(calls)==3 and second['history_complete']
+    assert sum('/attempts/' in request.url.path for request in calls)==1
+
+
+@pytest.mark.asyncio
+async def test_github_previous_attempt_failure_does_not_hide_latest_success():
+    calls=[]
+    def handler(request):
+        calls.append(request)
+        if '/attempts/' in request.url.path:
+            return httpx.Response(429,text='private response')
+        return httpx.Response(200,json={'workflow_runs':[run_record(run_attempt=2)]})
+    cache=info.GithubDeployments(httpx.MockTransport(handler))
+    first=await cache.get()
+    cache.next_refresh=0
+    second=await cache.get()
+    assert first['available'] and first['run']['conclusion']=='success' and not first['history_complete']
+    assert second['available'] and len(calls)==3
+    assert 'private response' not in json.dumps(second)
+
+
+@pytest.mark.asyncio
+async def test_github_history_has_shared_hourly_request_budget():
+    calls=[]
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200,json={'workflow_runs':[run_record(run_attempt=1)]})
+    cache=info.GithubDeployments(httpx.MockTransport(handler))
+    for _ in range(51):
+        cache.next_refresh=0
+        result=await cache.get()
+    assert len(calls)==50 and not result['available'] and result['stale']
+
+
+@pytest.mark.asyncio
+async def test_github_previous_attempt_must_match_requested_identity():
+    def handler(request):
+        if '/attempts/' in request.url.path:
+            return httpx.Response(200,json=run_record(id=9999,run_attempt=1,conclusion='failure'))
+        return httpx.Response(200,json={'workflow_runs':[run_record()]})
+    result=await info.GithubDeployments(httpx.MockTransport(handler)).get()
+    assert result['available'] and not result['history_complete'] and len(result['history'])==1

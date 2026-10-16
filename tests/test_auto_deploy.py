@@ -125,6 +125,10 @@ def test_failed_update_restores_previous_images_and_checkout(deployment, failure
     assert not (project / 'runtime-evidence/auto-deploy/deployed-commit').exists()
     status = json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())
     assert status['last_attempt']['status'] == 'rolled_back' and status['current'] is None
+    expected = 'activation_failed' if 'ACTIVATION_EXIT' in failure else 'revision_mismatch' if 'WRONG_REVISION' in failure else 'service_unhealthy'
+    assert status['last_attempt']['failure']['code'] == expected
+    assert status['last_attempt']['failure']['stage'] == ('updating' if 'ACTIVATION_EXIT' in failure else 'verifying')
+    assert status['history'][0]['failure'] == status['last_attempt']['failure']
 
 
 def test_changed_schema_stops_workers_without_automatic_restore(deployment):
@@ -136,6 +140,9 @@ def test_changed_schema_stops_workers_without_automatic_restore(deployment):
     calls = [shlex.split(line) for line in trace.read_text().splitlines()]
     assert any('stop' in call and 'bot' in call and 'worker' in call for call in calls)
     assert not any('rollback-images.yml' in ' '.join(call) or 'pg_restore' in call for call in calls)
+    status = json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())
+    assert status['last_attempt']['status'] == 'manual_intervention'
+    assert status['last_attempt']['failure']['code'] == 'activation_failed'
 
 
 def test_backup_failure_never_changes_running_release(deployment):
@@ -145,6 +152,8 @@ def test_backup_failure_never_changes_running_release(deployment):
     assert git('rev-parse', 'HEAD') == previous
     assert 'activation' not in trace.read_text()
     assert json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())['last_attempt']['status'] == 'failed'
+    failure = json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())['history'][0]['failure']
+    assert failure['code'] == 'backup_failed' and failure['exit_code'] == 23 and failure['stage'] == 'backup'
 
 
 def test_insufficient_disk_never_starts_backup_or_activation(deployment):
@@ -152,6 +161,7 @@ def test_insufficient_disk_never_starts_backup_or_activation(deployment):
     result = run(FREE_KIB='1024')
     assert result.returncode != 0 and git('rev-parse', 'HEAD') == previous
     assert 'backup' not in trace.read_text() and 'activation' not in trace.read_text()
+    assert json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())['history'][0]['failure']['code'] == 'disk_space'
 
 
 def test_outdated_ci_commit_is_skipped(deployment):
@@ -161,6 +171,9 @@ def test_outdated_ci_commit_is_skipped(deployment):
     assert result.returncode == 0 and 'SKIPPED' in result.stdout
     assert git('rev-parse', 'HEAD') == previous
     assert 'backup' not in trace.read_text() and 'activation' not in trace.read_text()
+    status = json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())
+    assert status['last_attempt']['status'] == 'skipped' and status['history'][0]['failure']['code'] == 'outdated_commit'
+    assert not (project / 'runtime-evidence/auto-deploy/deployed-commit').exists()
 
 
 def test_dirty_checkout_is_preserved_and_refused(deployment):
@@ -171,6 +184,7 @@ def test_dirty_checkout_is_preserved_and_refused(deployment):
     assert git('rev-parse', 'HEAD') == previous
     assert (project / 'operator-notes.txt').exists()
     assert not trace.exists() or 'activation' not in trace.read_text()
+    assert json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())['history'][0]['failure']['code'] == 'dirty_checkout'
 
 
 @pytest.mark.parametrize('command', ['main', 'a'*39, 'a'*40+';id', 'git-upload-pack /tmp/repo', ''])

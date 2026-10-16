@@ -15,20 +15,8 @@ project="${BIBLE_DEPLOY_PROJECT_DIR:-/opt/bible-messenger-bot}"
 cd "$project"
 exec 9>"${BIBLE_DEPLOY_LOCK:-/run/lock/bible-auto-deploy.lock}"
 flock -w 4800 9
-[[ -f .env && -z "$(git status --porcelain)" ]] || { echo 'Missing configuration or dirty checkout.' >&2; exit 1; }
-branch="$(git branch --show-current)"
-[[ -z "$branch" || "$branch" == main ]] || { echo 'Unexpected working branch.' >&2; exit 1; }
-git fetch origin main
-if [[ "$(git rev-parse origin/main)" != "$target" ]]; then
-  echo 'SKIPPED: checked commit is no longer the head of main.'
-  exit 0
-fi
 previous="$(git rev-parse HEAD)"
-git merge-base --is-ancestor "$previous" "$target"
 compose=(docker compose --profile '*')
-"${compose[@]}" config --quiet
-free_kib="$(df -Pk . | awk 'NR==2 {print $4}')"
-[[ "$free_kib" =~ ^[0-9]+$ && "$free_kib" -ge 4194304 ]] || { echo 'At least 4 GiB free disk space is required.' >&2; exit 1; }
 state="$project/runtime-evidence/auto-deploy/$(date -u +%Y%m%dT%H%M%SZ)-${target:0:12}-$$"
 mkdir -p "$state"
 exec > >(tee -a "$state/deploy.log") 2>&1
@@ -37,10 +25,20 @@ running=()
 declare -A old_images old_tags
 changed=false
 stage=checking
+failure_code=preflight_failed
+failure_service=''
+failed_stage=''
+failure_exit=''
+outcome_override=''
 publish_status() {
   # В админку передаётся отдельная квитанция, а не приватные файлы runtime-evidence.
+  local reason='' failed='' code='' service=''
+  if [[ "$1" != running && "$1" != succeeded ]]; then
+    reason="$failure_code"; failed="$failed_stage"; code="$failure_exit"; service="$failure_service"
+  fi
   python3 "${BIBLE_DEPLOY_STATUS_WRITER:-/usr/local/libexec/bible-deploy-status}" \
-    "$project/runtime-evidence/deploy-status" "$state" "$target" "$previous" "$1" "$2"
+    "$project/runtime-evidence/deploy-status" "$state" "$target" "$previous" "$1" "$2" \
+    "$reason" "$failed" "$code" "$service"
 }
 schema_fingerprint() {
   # Только хеш применённых миграций; нет пользовательских данных и SQL восстановления.
@@ -49,6 +47,8 @@ schema_fingerprint() {
 rollback() {
   code=$?
   trap - EXIT
+  failed_stage="$stage"
+  failure_exit="$code"
   outcome=failed
   if (( code != 0 )) && [[ "$changed" == true ]]; then
     if current_schema="$(schema_fingerprint)" && [[ "$current_schema" == "$schema_before" ]]; then
@@ -71,8 +71,9 @@ rollback() {
     fi
   fi
   if (( code == 0 )); then outcome=succeeded; stage=completed; fi
+  if [[ -n "$outcome_override" ]]; then outcome="$outcome_override"; stage=skipped; fi
   publish_status "$outcome" "$stage" || code=1
-  if (( code == 0 )); then
+  if (( code == 0 )) && [[ "$outcome" == succeeded ]]; then
     printf '%s\n' "$target" > "$state/deployed-commit"
     printf '%s\n' "$target" > runtime-evidence/auto-deploy/deployed-commit
     echo "DEPLOYED: $target; application services healthy; PostgreSQL and configuration preserved."
@@ -81,7 +82,32 @@ rollback() {
   exit "$code"
 }
 trap rollback EXIT
+trap 'failure_code=interrupted; exit 143' TERM
+trap 'failure_code=interrupted; exit 130' INT
 publish_status running checking
+failure_code=configuration_missing
+[[ -f .env ]] || { echo 'Missing configuration.' >&2; exit 1; }
+failure_code=dirty_checkout
+[[ -z "$(git status --porcelain)" ]] || { echo 'Dirty checkout.' >&2; exit 1; }
+failure_code=unexpected_branch
+branch="$(git branch --show-current)"
+[[ -z "$branch" || "$branch" == main ]] || { echo 'Unexpected working branch.' >&2; exit 1; }
+failure_code=fetch_failed
+git fetch origin main
+if [[ "$(git rev-parse origin/main)" != "$target" ]]; then
+  failure_code=outdated_commit
+  outcome_override=skipped
+  echo 'SKIPPED: checked commit is no longer the head of main.'
+  exit 0
+fi
+failure_code=ancestry_failed
+git merge-base --is-ancestor "$previous" "$target"
+failure_code=compose_invalid
+"${compose[@]}" config --quiet
+failure_code=disk_space
+free_kib="$(df -Pk . | awk 'NR==2 {print $4}')"
+[[ "$free_kib" =~ ^[0-9]+$ && "$free_kib" -ge 4194304 ]] || { echo 'At least 4 GiB free disk space is required.' >&2; exit 1; }
+failure_code=preflight_failed
 sha256sum .env > "$state/environment.sha256"
 cp docker-compose.yml "$state/previous-compose.yml"
 "${compose[@]}" ps --format json > "$state/services-before.jsonl"
@@ -95,7 +121,10 @@ while IFS= read -r service; do
     *) continue;;
   esac
   container="$("${compose[@]}" ps -q "$service")"
+  failure_code=service_unhealthy
+  failure_service="$service"
   [[ "$(docker inspect --format '{{.State.Health.Status}}' "$container")" == healthy ]]
+  failure_code=preflight_failed
   old_images["$service"]="$(docker inspect --format '{{.Image}}' "$container")"
   old_tags["$service"]="$(docker inspect --format '{{.Config.Image}}' "$container")"
   docker tag "${old_images[$service]}" "bible-messenger-bot:rollback-${previous:0:12}-$service"
@@ -103,30 +132,42 @@ while IFS= read -r service; do
   running+=("$service")
 done < <("${compose[@]}" ps --services --filter status=running)
 (( ${#running[@]} > 0 ))
+failure_service=''
 echo 'Creating and verifying the cloud database backup before deployment.'
 stage=backup
 publish_status running "$stage"
+failure_code=backup_failed
 BACKUP_LOCAL_ONLY=0 bash backup.sh
 changed=true
 stage=updating
 publish_status running "$stage"
+failure_code=activation_failed
 git switch main
 git merge --ff-only "$target"
 bash deploy/rolling-update.sh --yes
 stage=verifying
 publish_status running "$stage"
+failure_code=configuration_changed
 sha256sum --check "$state/environment.sha256"
+failure_code=postgres_changed
 [[ "$("${compose[@]}" ps -q postgres)" == "$postgres_id" ]]
 for service in "${running[@]}"; do
+  failure_service="$service"
+  failure_code=service_unhealthy
   container="$("${compose[@]}" ps -q "$service")"
   [[ "$(docker inspect --format '{{.State.Health.Status}}' "$container")" == healthy ]]
+  failure_code=revision_mismatch
   revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$container")"
   [[ "$revision" == "$target" ]]
   printf '{"name":"%s","health":"healthy","commit":"%s"}\n' "$service" "$revision" >> "$state/checked-services.jsonl"
 done
+failure_service=''
+failure_code=migration_check_failed
 "${compose[@]}" exec -T "${running[0]}" python -m app.cli migrate --check
 if [[ " ${running[*]} " == *' admin '* ]]; then
+  failure_code=admin_unready
   address="$("${compose[@]}" port admin 8080)"
   curl --fail --silent --show-error "http://$address/ready"
 fi
+failure_code=verification_failed
 "${compose[@]}" ps --format json > "$state/services-after.jsonl"

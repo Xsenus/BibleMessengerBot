@@ -27,6 +27,65 @@ function workflowState(run) {
     startup_failure: ['Ошибка запуска', 'error'] })[run.conclusion] || ['Результат неизвестен', 'off'];
 }
 
+function Failure({ item }) {
+  const problem = item.failure;
+  if (problem) return <><span>{problem.message}</span><details><summary>Подробности ошибки</summary>
+    <p>Этап: {STAGES[problem.stage] || 'Неизвестен'}{problem.service && ` · служба ${problem.service}`}</p>
+    <p>Код: <code>{problem.code}</code>{problem.exit_code !== null && ` · код выхода ${problem.exit_code}`}</p>
+    {item.status === 'rolled_back' && <p>Предыдущая версия восстановлена.</p>}
+    {item.status === 'failed' && item.stage === 'rollback' && <p>Откат не подтверждён: требуется проверка оператора.</p>}
+    {item.status === 'manual_intervention' && <p>Автоматический откат не выполнен: требуется проверка оператора.</p>}
+  </details></>;
+  if (item.stale) return <span className="error">Нет подтверждения завершения более 90 минут.</span>;
+  if (['failed', 'rolled_back', 'manual_intervention'].includes(item.status)) return <span>Причина не сохранялась этой версией автодеплоя. Проверьте соответствующий журнал GitHub Actions.</span>;
+  return <span className="muted">{item.status === 'running' ? STAGES[item.stage] || 'Выполняется' : item.legacy ? 'Подтверждено архивным маркером установки.' : '—'}</span>;
+}
+
+function WorkflowReason({ run }) {
+  if (run.status !== 'completed') return <span className="muted">Ожидает запуска или выполняется.</span>;
+  const message = { failure: 'GitHub Actions завершился с ошибкой. Подробности — в журнале этой попытки.',
+    timed_out: 'GitHub Actions прервал выполнение по лимиту времени.', cancelled: 'Запуск отменён в GitHub Actions.',
+    startup_failure: 'GitHub Actions не смог запустить задачу.', action_required: 'GitHub Actions ожидает действия оператора.',
+    skipped: 'Задача пропущена условиями workflow.', stale: 'GitHub пометил запуск как устаревший.' }[run.conclusion];
+  return <span className={message ? '' : 'muted'}>{message || '—'}</span>;
+}
+
+function DeployHistory({ server, github, stale }) {
+  const [limit, setLimit] = useState(5);
+  const records = server.history || [];
+  const runs = github.history || [];
+  return <section className="deploy-history" aria-label="История автодеплоев">
+    <h3>История автодеплоев</h3>
+    {stale && <p className="error">История могла устареть: не удалось обновить данные.</p>}
+    <h4>Установки на VPS</h4>
+    {!records.length ? <p className="muted">Сохранённых установок пока нет.</p> : <>
+      <div className="deploy-history-table"><table><thead><tr><th>Начало / завершение</th><th>Коммит</th><th>Результат</th><th>Причина / этап</th></tr></thead><tbody>
+        {records.slice(0, limit).map((item) => <tr key={item.id}>
+          <td>{when(item.started_at)}<br /><small className="muted">{when(item.finished_at)}</small></td>
+          <td><Commit value={item.commit} url={item.commit_url} /></td>
+          <td><Label value={item.stale ? ['Нет подтверждения', 'error'] : SERVER_STATES[item.status]} /></td>
+          <td><Failure item={item} /></td>
+        </tr>)}
+      </tbody></table></div>
+      {records.length > limit && <button className="small" onClick={() => setLimit((value) => value + 10)}>Показать ещё</button>}
+    </>}
+    <p className="muted release-footnote">Сохраняются последние 50 попыток установки, включая ошибки и откаты.</p>
+    <details className="github-history"><summary>Запуски GitHub Actions ({runs.length})</summary>
+      <p className="muted">Здесь видны и ошибки до подключения к VPS. Результат GitHub Actions и подтверждение установки на сервере показаны отдельно.</p>
+      {!github.available && <p className="error">GitHub временно недоступен.{runs.length > 0 && ' Показаны ранее полученные данные.'}</p>}
+      {github.available && github.history_complete === false && <p className="muted">Часть предыдущих повторных попыток пока недоступна. Их можно открыть в GitHub.</p>}
+      {!runs.length ? <p className="muted">Нет данных о запусках.</p> : <div className="deploy-history-table"><table><thead><tr><th>Начало / обновлён</th><th>Коммит</th><th>Результат</th><th>Причина / журнал</th></tr></thead><tbody>
+        {runs.map((run) => <tr key={`${run.id}-${run.attempt}`}>
+          <td>{when(run.started_at)}<br /><small className="muted">{when(run.updated_at)}</small></td>
+          <td><Commit value={run.commit} url={`https://github.com/Xsenus/BibleMessengerBot/commit/${run.commit}`} /></td>
+          <td><Label value={workflowState(run)} /></td>
+          <td><WorkflowReason run={run} /><p><a href={run.attempt_url || run.url} target="_blank" rel="noreferrer">Журнал{run.attempt ? ` · попытка ${run.attempt}` : ''} ↗</a></p></td>
+        </tr>)}
+      </tbody></table></div>}
+    </details>
+  </section>;
+}
+
 export default function ReleaseStatus() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -65,6 +124,7 @@ export default function ReleaseStatus() {
             {latest ? <><p><Commit value={latest.commit} url={latest.commit_url} /></p>
               <p>Начало: {when(latest.started_at)}<br />Завершение: {when(latest.finished_at)}</p>
               {latest.status === 'running' && <p className="muted">{data.server.stale ? 'Квитанция не обновлялась более 90 минут. Проверьте запуск и сервер.' : STAGES[latest.stage] || 'Выполняется'}</p>}
+              {latest.failure && <p className="error">{latest.failure.message}</p>}
             </> : <p className="muted">Квитанция установки ещё не получена.</p>}</div>
           <div><h4>Последний запуск GitHub Actions</h4><p><Label value={data.github.available ? workflowState(run) : run ? ['Данные устарели', 'off'] : null} /></p>
             {run && <><p><a href={run.url} target="_blank" rel="noreferrer">Открыть запуск ↗</a>{run.attempt && ` · попытка ${run.attempt}`}</p>
@@ -80,6 +140,7 @@ export default function ReleaseStatus() {
             <td>{bot.expected === false ? <span className="muted">—</span> : <><Label value={error || bot.live === null ? ['Нет данных', 'off'] : bot.live ? ['Свежий сигнал', 'ok'] : ['Нет свежего сигнала', 'error']} /><br /><small>{when(bot.last_seen)}</small></>}</td></tr>)}
         </tbody></table></div>
         <p className="muted release-footnote">Состояние обновляется каждые 30 секунд, данные GitHub — не чаще раза в 2 минуты. Время: {Intl.DateTimeFormat().resolvedOptions().timeZone}. Сигнал подтверждает работу процесса, но не проверяет доставку сообщений.</p>
+        <DeployHistory server={data.server} github={data.github} stale={Boolean(error)} />
       </>}
     </div>
   );

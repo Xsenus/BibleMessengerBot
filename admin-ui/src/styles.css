@@ -51,3 +51,14 @@ code { background: var(--line); padding: 1px 5px; border-radius: 4px; }
 .release-bots td, .release-bots th { min-width: 120px; }
 .release-footnote { font-size: 12px; margin-bottom: 0; }
 .release-notice { padding: 8px 12px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.deploy-history { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
+.deploy-history h3 { margin: 0 0 16px; }
+.deploy-history h4 { margin: 12px 0; }
+.deploy-history-table { overflow-x: auto; margin-bottom: 12px; }
+.deploy-history-table th { white-space: nowrap; }
+.deploy-history-table td { vertical-align: top; }
+.deploy-history-table td:first-child { min-width: 150px; }
+.deploy-history-table td:last-child { min-width: 220px; max-width: 440px; overflow-wrap: anywhere; }
+.deploy-history details p { margin: 6px 0; }
+.deploy-history summary { cursor: pointer; }
+.github-history { margin-top: 18px; }
