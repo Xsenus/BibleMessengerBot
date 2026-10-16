@@ -11,6 +11,7 @@
     "screenshots": "playwright test --project=screenshots"
   },
   "dependencies": {
+    "lucide-react": "1.49.0",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },

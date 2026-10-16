@@ -82,9 +82,11 @@ export async function login(page, key = KEY) {
   await page.getByRole('button', { name: 'Войти' }).click();
 }
 
-/** Открыть раздел через меню. */
+/** Открыть раздел через меню; на узком экране меню сначала выдвигается кнопкой. */
 export async function openSection(page, label) {
-  await page.getByRole('navigation').getByRole('button', { name: label, exact: true }).click();
+  const toggle = page.getByRole('button', { name: 'Открыть меню' });
+  if (await toggle.isVisible()) await toggle.click();
+  await page.getByRole('navigation', { name: 'Разделы' }).getByRole('link', { name: label, exact: true }).click();
 }
 
 /** Принять (или отклонить) следующее окно confirm/prompt; для prompt можно передать ответ. */
