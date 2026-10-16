@@ -219,3 +219,20 @@ test('настройки: скрытие раздела поддержки', asy
   await expect.poll(() => api.writes().length).toBe(1);
   expect(api.writes()).toMatchObject([{ method: 'PUT', path: '/settings', body: { support_section: false } }]);
 });
+
+test('состояние: «Обновить» перечитывает сводку и версию, «Требуют внимания» ведёт в доставки', async ({ page, api }) => {
+  await api.settle();
+  const count = (path) => api.requests.filter((r) => r.path === path).length;
+  const before = [count('/overview'), count('/release')];
+  await page.getByRole('button', { name: 'Обновить' }).click();
+  await expect.poll(() => [count('/overview'), count('/release')]).toEqual([before[0] + 1, before[1] + 1]);
+  await page.getByRole('link', { name: /Требуют внимания/ }).click();
+  await expect(page).toHaveURL(/#\/deliveries$/);
+});
+
+test('доставки: пустой список показывает «Всё в порядке»', async ({ page, api }) => {
+  api.on('GET', '/deliveries/attention', []);
+  await openSection(page, 'Доставки');
+  await expect(page.getByText('Всё в порядке')).toBeVisible();
+  await expect(page.getByRole('table')).toHaveCount(0);
+});

@@ -101,10 +101,10 @@ function DeployHistory({ server, github, stale }) {
   </section>;
 }
 
-export default function ReleaseStatus() {
+/** Версия и автодеплой. refreshKey — обновить вне очереди (кнопка «Обновить» раздела). */
+export default function ReleaseStatus({ refreshKey = 0 }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     let busy = false;
@@ -120,14 +120,13 @@ export default function ReleaseStatus() {
     load();
     const timer = setInterval(load, 30000);
     return () => { controller.abort(); clearInterval(timer); };
-  }, [refresh]);
+  }, [refreshKey]);
   const latest = data?.server.last_attempt;
   const current = data?.server.current;
   const run = data?.github.run;
   return (
     <div className="card release-status" aria-label="Версия и автодеплой">
-      <div className="row release-heading"><h3>Версия и автодеплой</h3>
-        <button className="small" onClick={() => setRefresh((x) => x + 1)}>Обновить статус</button></div>
+      <div className="row release-heading"><h3>Версия и автодеплой</h3></div>
       {error && <p className="error">Не удалось обновить статус: {error}. Показанные ниже данные могут устареть.</p>}
       {!data && !error && <p className="muted">Загрузка версии и статуса…</p>}
       {data && <>
