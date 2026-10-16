@@ -71,7 +71,7 @@ sed 's/+cpu$//' constraints-neural-linux.txt > /tmp/neural-audit.txt
 pip-audit --no-deps --disable-pip --strict -r constraints-linux.txt -r /tmp/neural-audit.txt
 ```
 
-Веб-панель (`admin-ui`, React + Vite). Линтера у панели нет — проверяются установка, аудит, сборка и smoke-тесты Playwright на моках API (сервер и БД не нужны):
+Веб-панель (`admin-ui`, React + Vite). Линтера у панели нет — проверяются установка, аудит, сборка и smoke-тесты Playwright на моках API, включая проверку доступности axe-core (сервер и БД не нужны):
 ```bash
 npm ci --prefix admin-ui
 npm audit --prefix admin-ui --audit-level=moderate
