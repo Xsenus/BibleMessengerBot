@@ -22,3 +22,5 @@ export const DELIVERY_STATUSES = {
 export const RUN_STATUSES = { sending: ['Отправляется', 'pending'], done: ['Завершён', 'ok'], skipped_late: ['Пропущен: опоздал', 'off'] };
 
 export const label = (dictionary, code) => dictionary[code] || code || '—';
+
+export const CHAT_TYPES = { private: 'личный', group: 'группа', supergroup: 'супергруппа', channel: 'канал' };

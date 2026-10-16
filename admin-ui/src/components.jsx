@@ -135,3 +135,23 @@ export function Switch({ checked, onChange, label, on = 'вкл', off = 'вык�
     </button>
   );
 }
+
+/** Вкладки: tabs — [[id, подпись]]. Стрелки ←/→ переключают вкладку. */
+export function Tabs({ tabs, value, onChange, label }) {
+  const onKey = (event) => {
+    const index = tabs.findIndex(([id]) => id === value);
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if (!step) return;
+    const next = tabs[(index + step + tabs.length) % tabs.length][0];
+    onChange(next);
+    event.currentTarget.parentElement.querySelector(`[data-tab="${next}"]`)?.focus();
+  };
+  return (
+    <div className="tabs" role="tablist" aria-label={label}>
+      {tabs.map(([id, text]) => (
+        <button key={id} type="button" role="tab" data-tab={id} aria-selected={id === value} tabIndex={id === value ? 0 : -1}
+          className="tab" onClick={() => onChange(id)} onKeyDown={onKey}>{text}</button>
+      ))}
+    </div>
+  );
+}

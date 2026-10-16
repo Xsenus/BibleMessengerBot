@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
+import { ChevronLeft, ChevronRight, CircleX, DatabaseBackup, Download, RefreshCw } from 'lucide-react';
 import { api, downloadBackup } from '../api.js';
 import { Status, explain, useData, when } from '../ui.jsx';
+import { EmptyState, PageHeader, Panel, StatusBadge, formatNumber } from '../components.jsx';
 
 const PAGE_SIZE = 30;
 const size = (bytes) => {
   const factor = bytes >= 1024 ** 2 ? 1024 ** 2 : bytes >= 1024 ? 1024 : 1;
   return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(bytes / factor) + (factor === 1 ? ' Б' : factor === 1024 ? ' КБ' : ' МБ');
 };
-const STATES = { available: 'В наличии', missing: 'Файл отсутствует', invalid: 'Ошибка метаданных', unavailable: 'Не удалось проверить' };
+const STATES = { available: ['В наличии', 'ok'], missing: ['Файл отсутствует', 'error'], invalid: ['Ошибка метаданных', 'error'], unavailable: ['Не удалось проверить', 'warning'] };
 
 export default function Backups() {
   const [offset, setOffset] = useState(0);
@@ -40,32 +42,46 @@ export default function Backups() {
     catch (e) { setMessage('⚠ ' + explain(e)); }
     finally { setBusy(null); }
   };
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return (
     <section>
-      <h2>Резервные копии</h2>
-      <p className="muted">Проверенные копии базы данных в облаке. Время показано в вашем часовом поясе ({Intl.DateTimeFormat().resolvedOptions().timeZone}).</p>
-      <p>Скачивается готовый файл .dump с библейскими текстами, пользователями, расписаниями, картинками и озвучками. Архив проверяется и расшифровывается автоматически.</p>
-      <p className="muted">Наличие файлов проверяется отдельно. Отсутствующие копии остаются в истории; скачать их нельзя. «Обновить список» повторяет проверку.</p>
-      <button onClick={reload} disabled={loading}>Обновить список</button>
-      <Status error={error} loading={loading || (!data && !error)} />
-      {message && <p role="status">{message}</p>}
-      {data && (<>
-        {!data.download_enabled && <p className="error">Скачивание недоступно: проверьте настройки S3 и ключа шифрования на сервере.</p>}
-        <p className="muted">Всего копий: {data.total}</p>
-        {data.items.length === 0 ? <p>Проверенных копий пока нет. После успешного резервирования они появятся здесь.</p> : (
-          <div className="backup-table"><table><thead><tr><th>Создана</th><th>Проверена в облаке</th><th>Файл</th><th>Размер</th><th>Доступность</th><th></th></tr></thead>
-            <tbody>{data.items.map((item) => <tr key={item.id}>
-              <td>{when(item.created_at)}</td><td>{when(item.verified_at)}</td><td>{item.filename}</td><td>{size(item.size_bytes)}</td>
-              <td>{data.download_enabled ? (STATES[availability[item.id]] || 'Проверяем…') : 'Не настроено'}</td>
-              <td><button aria-label={`Скачать ${item.filename}`} disabled={busy !== null || availability[item.id] !== 'available' || !data.download_enabled} onClick={() => download(item)}>{busy === item.id ? 'Скачивание…' : 'Скачать .dump'}</button></td>
-            </tr>)}</tbody></table></div>
+      <PageHeader title="Резервные копии" description={`Проверенные копии базы данных в облаке. Время — в вашем часовом поясе (${zone}).`}
+        actions={<button className="small" onClick={reload} disabled={loading}><RefreshCw size={15} aria-hidden="true" />Обновить список</button>} />
+      <p className="callout callout-info"><DatabaseBackup size={16} aria-hidden="true" /><span>Скачивается готовый файл <code>.dump</code> с библейскими текстами, пользователями, расписаниями, картинками и озвучками: архив проверяется и расшифровывается автоматически. Наличие файлов в облаке проверяется отдельно; отсутствующие копии остаются в истории, но скачать их нельзя.</span></p>
+      <Panel title={data ? `Копии (${formatNumber(data.total)})` : 'Копии'}>
+        <Status error={error} loading={loading || (!data && !error)} />
+        {message && <p className="form-message" role="status">{message}</p>}
+        {data && !data.download_enabled && <p className="callout callout-danger"><CircleX size={16} aria-hidden="true" />Скачивание недоступно: проверьте настройки S3 и ключа шифрования на сервере.</p>}
+        {data?.items.length === 0 && <EmptyState icon={DatabaseBackup} title="Проверенных копий пока нет">После успешного резервирования они появятся здесь.</EmptyState>}
+        {data?.items.length > 0 && (
+          <div className="table-wrap">
+            <table className="data-table table-stack">
+              <thead><tr><th scope="col">Создана</th><th scope="col">Проверена в облаке</th><th scope="col">Файл</th><th scope="col" className="align-end">Размер</th><th scope="col">Доступность</th><th scope="col"><span className="sr-only">Скачать</span></th></tr></thead>
+              <tbody>{data.items.map((item) => {
+                const [text, tone] = data.download_enabled ? (STATES[availability[item.id]] || ['Проверяем…', 'pending']) : ['Не настроено', 'off'];
+                return (
+                  <tr key={item.id}>
+                    <td data-label="Создана">{when(item.created_at)}</td>
+                    <td data-label="Проверена в облаке">{when(item.verified_at)}</td>
+                    <td data-label="Файл" className="cell-file"><code>{item.filename}</code></td>
+                    <td data-label="Размер" className="align-end">{size(item.size_bytes)}</td>
+                    <td data-label="Доступность"><StatusBadge tone={tone}>{text}</StatusBadge></td>
+                    <td className="cell-actions"><button className="small" aria-label={`Скачать ${item.filename}`} disabled={busy !== null || availability[item.id] !== 'available' || !data.download_enabled} onClick={() => download(item)}>
+                      <Download size={14} aria-hidden="true" />{busy === item.id ? 'Скачивание…' : 'Скачать .dump'}</button></td>
+                  </tr>
+                );
+              })}</tbody>
+            </table>
+          </div>
         )}
-        {data.total > 0 && <div className="row">
-          <button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>← Назад</button>
-          <span>{offset + 1}–{Math.min(offset + data.items.length, data.total)} из {data.total}</span>
-          <button disabled={offset + data.items.length >= data.total} onClick={() => setOffset(offset + PAGE_SIZE)}>Далее →</button>
-        </div>}
-      </>)}
+        {data?.total > 0 && (
+          <div className="pager">
+            <button className="small" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}><ChevronLeft size={15} aria-hidden="true" />Назад</button>
+            <span className="muted">{offset + 1}–{Math.min(offset + data.items.length, data.total)} из {data.total}</span>
+            <button className="small" disabled={offset + data.items.length >= data.total} onClick={() => setOffset(offset + PAGE_SIZE)}>Далее<ChevronRight size={15} aria-hidden="true" /></button>
+          </div>
+        )}
+      </Panel>
     </section>
   );
 }
