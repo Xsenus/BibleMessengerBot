@@ -31,7 +31,7 @@ def read(path):
 def command(args):
     """Выполнить ограниченную диагностическую команду без shell и без вывода stderr/секретов."""
     try:
-        value = subprocess.run(args, capture_output=True, text=True, check=True, timeout=5).stdout
+        value = subprocess.run(args, capture_output=True, text=True, encoding='utf-8', errors='replace', check=True, timeout=5).stdout
         return value if len(value) <= 16384 else None
     except (OSError, subprocess.SubprocessError):
         return None
@@ -43,6 +43,44 @@ def version(project, sha):
         return None
     value = (command(['git', '-C', str(project), 'show', sha + ':VERSION']) or '').strip()
     return value if re.fullmatch(r'[0-9][A-Za-z0-9.+_-]{0,39}', value) else None
+
+
+def changes(project, previous, target):
+    """Кратко перечислить новые пункты CHANGELOG между точными SHA; иначе взять заголовки коммитов, без сети и shell."""
+    if not all(isinstance(sha, str) and re.fullmatch('[0-9a-f]{40}', sha) for sha in (previous, target)):
+        return ['Список изменений недоступен: предыдущая версия не подтверждена.']
+    if previous == target:
+        return ['Новых изменений кода нет: повторная установка той же версии.']
+    git = ['git', '-C', str(project)]
+    if command([*git, 'merge-base', '--is-ancestor', previous, target]) is None:
+        return ['Список изменений недоступен: не удалось подтвердить диапазон версий.']
+    patch = command([*git, 'diff', '--no-ext-diff', '--no-textconv', '--unified=0', previous, target, '--', 'CHANGELOG.md'])
+    entries = []
+    continuing = False
+    if patch is not None:
+        for line in patch.splitlines():
+            if line.startswith('+- '):
+                entries.append(line[3:])
+                continuing = True
+            elif continuing and line.startswith(('+  ', '+\t')):
+                entries[-1] += ' ' + line[1:].strip()
+            else:
+                continuing = False
+    if not entries:
+        subjects = command([*git, '-c', 'i18n.logOutputEncoding=UTF-8', 'log', '--no-color', '--first-parent', '--format=%s', '-n', '6', previous + '..' + target])
+        entries = subjects.splitlines() if subjects else []
+    notes = []
+    for entry in entries:
+        plain = re.sub(r'\[([^\]]+)\]\([^\n)]*\)', r'\1', entry).replace('`', '').replace('**', '')
+        plain = ' '.join(''.join(char for char in plain if char.isprintable() or char.isspace()).split())
+        if plain and plain not in notes:
+            notes.append(plain)
+    lines = ['• ' + (note if len(note) <= 180 else note[:177].rsplit(' ', 1)[0] + '…') for note in notes[:5]]
+    if not lines:
+        lines = ['Краткое описание изменений недоступно.']
+    if len(notes) > 5:
+        lines.append('… Остальные изменения доступны по ссылке ниже.')
+    return [*lines, 'Сравнение версий: https://github.com/Xsenus/BibleMessengerBot/compare/' + previous + '...' + target]
 
 
 def bots(project):
@@ -100,6 +138,9 @@ def message(receipt, project, runtime, reasons):
         lines.append('Безопасный откат не подтверждён; обработчики остановлены. Требуется проверка оператора.')
     elif status == 'failed' and receipt.get('stage') == 'rollback':
         lines.append('Откат не подтверждён. Требуется проверка оператора.')
+    confirmed = status == 'succeeded' and bool(runtime) and all(item['commit'] == sha for item in runtime)
+    lines += ['', 'Что обновилось:' if confirmed else 'В запрошенной сборке (установка изменений не подтверждена):',
+              *changes(project, receipt.get('previous_commit'), sha)]
     lines += ['', 'История и состояние: https://bible.blagodaty.ru/panel/',
               'Коммит: https://github.com/Xsenus/BibleMessengerBot/commit/' + sha]
     return '\n'.join(lines)
