@@ -52,6 +52,15 @@ exit "${ACTIVATION_EXIT:-0}"
     git('switch', 'main')
     trace = tmp_path / 'commands.txt'
     activated = tmp_path / 'activated'
+    notifier = tmp_path / 'notifier.py'
+    notifier.write_text('''import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location('notifier', ''' + repr(str(ROOT / 'deploy/notify-deployment.py')) + ''')
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+# Docker здесь управляется Bash-функцией; сетевую отправку проверяют отдельные fake-transport тесты.
+module.bots = lambda project: [{'name': name, 'state': 'unknown', 'commit': None} for name in ['Telegram', 'MAX']]
+module.notify(pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), {}, {})
+''', encoding='utf-8')
     commands = tmp_path / 'commands.sh'
     commands.write_text('''
 record() { printf '%q ' "$@" >> "$DEPLOY_TRACE"; printf '\\n' >> "$DEPLOY_TRACE"; }
@@ -88,6 +97,9 @@ docker() {
            'DEPLOY_TRACE':trace.as_posix(), 'DEPLOY_ACTIVATED':activated.as_posix(),
            'DEPLOY_TEST_PYTHON':sys.executable, 'DEPLOY_TARGET_SHA':target,
            'BIBLE_DEPLOY_STATUS_WRITER':(ROOT / 'deploy/write-deployment-status.py').as_posix(),
+           'BIBLE_DEPLOY_NOTIFIER':notifier.as_posix(),
+           'BIBLE_DEPLOY_NOTIFY_CONFIG':(tmp_path / 'disabled-notifications.json').as_posix(),
+           'BIBLE_DEPLOY_NOTIFY_MESSAGES':(ROOT / 'deploy/deployment-failures.json').as_posix(),
            'GIT_CONFIG_NOSYSTEM':'1'}
 
     def run(**changes):
@@ -102,6 +114,7 @@ def test_success_deploys_exact_commit_and_preserves_configuration(deployment):
     project, git, previous, target, trace, run = deployment
     result = run()
     assert result.returncode == 0, result.stderr + result.stdout
+    assert 'BIBLE_DEPLOY_NOTICE=disabled' in result.stdout
     assert git('rev-parse', 'HEAD') == target
     assert (project / '.env').read_text() == 'SYNTHETIC_ONLY=yes\n'
     assert (project / 'runtime-evidence/auto-deploy/deployed-commit').read_text().strip() == target
@@ -154,6 +167,17 @@ def test_backup_failure_never_changes_running_release(deployment):
     assert json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())['last_attempt']['status'] == 'failed'
     failure = json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())['history'][0]['failure']
     assert failure['code'] == 'backup_failed' and failure['exit_code'] == 23 and failure['stage'] == 'backup'
+    assert 'BIBLE_DEPLOY_NOTICE=disabled' in result.stdout
+
+
+def test_notification_failure_does_not_rollback_successful_update(deployment, tmp_path):
+    project, git, previous, target, trace, run = deployment
+    notifier = tmp_path / 'broken-notifier.py'
+    notifier.write_text('raise SystemExit(12)\n')
+    result = run(BIBLE_DEPLOY_NOTIFIER=notifier.as_posix())
+    assert result.returncode == 0 and git('rev-parse', 'HEAD') == target
+    assert 'BIBLE_DEPLOY_NOTICE=unavailable' in result.stdout
+    assert json.loads((project / 'runtime-evidence/deploy-status/status.json').read_text())['last_attempt']['status'] == 'succeeded'
 
 
 def test_insufficient_disk_never_starts_backup_or_activation(deployment):

@@ -11,6 +11,9 @@ install -d -m 755 /usr/local/libexec
 install -m 755 "$source_dir/ssh-deploy.sh" /usr/local/libexec/bible-deploy-ssh
 install -m 755 "$source_dir/auto-deploy.sh" /usr/local/sbin/bible-auto-deploy
 install -m 755 "$source_dir/write-deployment-status.py" /usr/local/libexec/bible-deploy-status
+install -m 755 "$source_dir/notify-deployment.py" /usr/local/libexec/bible-deploy-notify
+install -d -m 755 /usr/local/share/bible-messenger-bot
+install -m 644 "$source_dir/deployment-failures.json" /usr/local/share/bible-messenger-bot/deployment-failures.json
 install -d -m 755 /opt/bible-messenger-bot/runtime-evidence/deploy-status
 install -d -m 700 -o bibledeploy -g bibledeploy /var/lib/bible-deploy/.ssh
 printf 'restrict,command="/usr/local/libexec/bible-deploy-ssh" %s\n' "$public_key" > /var/lib/bible-deploy/.ssh/authorized_keys

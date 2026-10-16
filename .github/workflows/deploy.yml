@@ -21,9 +21,14 @@ jobs:
     environment:
       name: production
       url: https://bible.blagodaty.ru/panel/
+    outputs:
+      notice: ${{ steps.install.outputs.notice }}
+      report: ${{ steps.install.outputs.report }}
+      ssh_exit: ${{ steps.install.outputs.ssh_exit }}
     steps:
       # No checkout, downloaded artifacts, or PR code in this privileged workflow.
       - name: Deploy the exact commit checked by CI
+        id: install
         env:
           DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
           VPS_HOST: ${{ vars.VPS_HOST }}
@@ -37,11 +42,88 @@ jobs:
           test -n "$VPS_SSH_KEY" && test -n "$VPS_KNOWN_HOSTS"
           umask 077
           ssh_dir="$(mktemp -d)"
-          trap 'rm -rf "$ssh_dir"' EXIT
+          finish() {
+            command_status=$?
+            trap - EXIT
+            notice=$(sed -nE 's/^BIBLE_DEPLOY_NOTICE=(sent|failed|unknown|disabled|unavailable)$/\1/p' "$ssh_dir/result.log" | tail -1)
+            report=$(sed -nE 's/^BIBLE_DEPLOY_REPORT=([A-Za-z0-9+/=]+)$/\1/p' "$ssh_dir/result.log" | tail -1)
+            printf 'notice=%s\nreport=%s\nssh_exit=%s\n' "$notice" "$report" "$command_status" >> "$GITHUB_OUTPUT"
+            rm -rf "$ssh_dir"
+            exit "$command_status"
+          }
+          : > "$ssh_dir/result.log"
+          trap finish EXIT
           printf '%s\n' "$VPS_SSH_KEY" > "$ssh_dir/id_ed25519"
           printf '%s\n' "$VPS_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
           ssh -T -i "$ssh_dir/id_ed25519" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
             -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 \
-            "bibledeploy@$VPS_HOST" "$DEPLOY_SHA"
+            "bibledeploy@$VPS_HOST" "$DEPLOY_SHA" | tee "$ssh_dir/result.log"
+
+  notify-fallback:
+    needs: deploy
+    if: >-
+      always() &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      needs.deploy.outputs.notice != 'sent' && needs.deploy.outputs.notice != 'unknown'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    environment: production
+    steps:
+      # Независимо от SSH/VPS; без checkout, артефактов, сторонних Actions и сырых журналов.
+      - name: Notify Telegram when the server could not confirm delivery
+        env:
+          BOT_TOKEN: ${{ secrets.DEPLOY_TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.DEPLOY_TELEGRAM_CHAT_ID }}
+          REPORT: ${{ needs.deploy.outputs.report }}
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+          CI_RESULT: ${{ github.event.workflow_run.conclusion }}
+          CI_RUN: ${{ github.event.workflow_run.id }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, re, urllib.error, urllib.request
+          token, chat = os.environ['BOT_TOKEN'], os.environ['CHAT_ID']
+          if not token or not re.fullmatch(r'[1-9][0-9]{0,15}', chat):
+              print('::warning::Telegram deployment notifications are not configured.')
+              raise SystemExit(0)
+          sha = os.environ['DEPLOY_SHA']
+          if not re.fullmatch('[0-9a-f]{40}', sha):
+              raise SystemExit('Invalid deployment identity')
+          text = None
+          raw = os.environ.get('REPORT', '')
+          if raw and len(raw) < 16384:
+              try:
+                  value = json.loads(base64.b64decode(raw, validate=True)).get('text')
+                  if isinstance(value, str) and 0 < len(value) < 3500 and sha[:8] in value:
+                      text = value
+              except (ValueError, AttributeError):
+                  pass
+          if text is None:
+              ci = os.environ['CI_RESULT']
+              if ci != 'success':
+                  text = '❌ Обновление не запускалось: проверка CI завершилась со статусом ' + ci + '.\n'
+                  text += 'Коммит: ' + sha[:8] + '\nРабота ботов не проверялась.\n'
+                  text += 'Проверка: https://github.com/Xsenus/BibleMessengerBot/actions/runs/' + os.environ['CI_RUN']
+              else:
+                  text = '⚠️ Нет подтверждения результата автодеплоя.\nКоммит: ' + sha[:8]
+                  text += '\nSSH/VPS не вернул подтверждение. Обновление могло продолжиться на сервере.'
+                  text += '\nУстановленная версия и работа ботов пока неизвестны.'
+          text += '\nЖурнал: ' + os.environ['RUN_URL']
+          payload = json.dumps({'chat_id': int(chat), 'text': text, 'link_preview_options': {'is_disabled': True}}).encode()
+          request = urllib.request.Request('https://api.telegram.org/bot' + token + '/sendMessage', data=payload,
+                                           headers={'Content-Type': 'application/json'}, method='POST')
+          try:
+              opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+              with opener.open(request, timeout=15) as response:
+                  result = json.loads(response.read(65537))
+              if result.get('ok') is not True:
+                  print('::warning::Telegram did not confirm the deployment notification.')
+              else:
+                  print('Telegram deployment notification accepted.')
+          except Exception:
+              print('::warning::Telegram notification delivery is unconfirmed; no automatic retry.')
+          PY
