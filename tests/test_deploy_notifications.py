@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import socket
+import subprocess
 import urllib.error
 
 import pytest
@@ -29,6 +30,94 @@ def notifier():
 
 def test_failure_catalog_matches_admin():
     assert json.loads((ROOT / 'deploy/deployment-failures.json').read_text(encoding='utf-8')) == FAILURES
+
+
+@pytest.fixture
+def history(tmp_path):
+    def git(*args):
+        return subprocess.run(['git', '-C', str(tmp_path), *args], capture_output=True, text=True,
+                              encoding='utf-8', check=True).stdout.strip()
+
+    git('init', '-b', 'main')
+    git('config', 'user.name', 'Synthetic notes test')
+    git('config', 'user.email', 'synthetic@example.invalid')
+    git('config', 'core.autocrlf', 'false')
+    (tmp_path / 'VERSION').write_text('1.20.0\n', encoding='utf-8')
+    (tmp_path / 'CHANGELOG.md').write_text('# История\n\n- Старое изменение.\n', encoding='utf-8')
+    git('add', '.')
+    git('commit', '-m', 'Synthetic old release')
+    previous = git('rev-parse', 'HEAD')
+
+    def release(changelog=None, title='Добавить поиск по стихам'):
+        if changelog is not None:
+            (tmp_path / 'CHANGELOG.md').write_text(changelog, encoding='utf-8')
+        (tmp_path / 'VERSION').write_text('1.21.0\n', encoding='utf-8')
+        git('add', '.')
+        git('commit', '-m', title)
+        return git('rev-parse', 'HEAD')
+
+    return tmp_path, previous, git, release
+
+
+def test_change_summary_uses_exact_changelog_delta_and_wrapped_entries(notifier, history):
+    project, previous, git, release = history
+    target = release('# История\n\n- Исправлен поиск.\n  По главе и стиху.\n- Добавлен голос.\n- Добавлен голос.\n\n- Старое изменение.\n')
+    notes = notifier.changes(project, previous, target)
+    assert notes[:2] == ['• Исправлен поиск. По главе и стиху.', '• Добавлен голос.']
+    assert len(notes) == 3 and 'Старое изменение' not in '\n'.join(notes)
+    assert notes[-1].endswith(previous + '...' + target)
+    git('switch', '--detach', previous)
+    assert notifier.changes(project, previous, target) == notes
+
+
+def test_commit_titles_fallback_is_utf8_and_excludes_old_history(notifier, history):
+    project, previous, git, release = history
+    target = release()
+    notes = notifier.changes(project, previous, target)
+    assert notes[0] == '• Добавить поиск по стихам'
+    assert len(notes) == 2 and 'Synthetic old release' not in '\n'.join(notes)
+
+
+def test_summary_is_short_plain_text_and_links_to_remaining_changes(notifier, history, monkeypatch):
+    project, previous, git, release = history
+    entries = ['- **Пункт ' + str(i) + '** [поиска](https://example.invalid) \u202e' + 'подробности ' * 40 for i in range(8)]
+    target = release('# История\n\n' + '\n'.join(entries) + '\n\n- Старое изменение.\n')
+    notes = notifier.changes(project, previous, target)
+    assert len([line for line in notes if line.startswith('• ')]) == 5
+    assert max(len(line) for line in notes if line.startswith('• ')) <= 182
+    assert 'Остальные изменения' in notes[-2]
+    assert all(symbol not in '\n'.join(notes) for symbol in ['**', '[поиска]', '\u202e', 'example.invalid'])
+    monkeypatch.setattr(notifier, 'version', lambda *args: '1.21.0')
+    runtime = [dict(item, commit=target) for item in RUNTIME]
+    text = notifier.message({'commit': target, 'previous_commit': previous, 'status': 'succeeded'}, project, runtime, FAILURES)
+    assert 'Что обновилось:' in text and len(text) < 3500
+
+
+@pytest.mark.parametrize('previous', [None, 'invalid', 'f' * 40])
+def test_unconfirmed_base_never_lists_entire_history(notifier, history, previous):
+    project, _, git, release = history
+    target = release()
+    text = '\n'.join(notifier.changes(project, previous, target))
+    assert 'недоступен' in text and 'Добавить поиск' not in text and 'Synthetic old' not in text
+
+
+def test_repeat_and_divergent_history_are_explicit(notifier, history):
+    project, previous, git, release = history
+    target = release()
+    assert notifier.changes(project, target, target) == ['Новых изменений кода нет: повторная установка той же версии.']
+    git('switch', '-c', 'synthetic-divergent', previous)
+    divergent = release(title='Different synthetic branch')
+    assert 'не удалось подтвердить диапазон' in '\n'.join(notifier.changes(project, target, divergent))
+
+
+@pytest.mark.parametrize('status', ['failed', 'rolled_back', 'skipped', 'manual_intervention', 'succeeded'])
+def test_uninstalled_changes_are_not_presented_as_deployed(notifier, monkeypatch, status):
+    monkeypatch.setattr(notifier, 'version', lambda *args: '1.20.0')
+    monkeypatch.setattr(notifier, 'changes', lambda *args: ['• Добавлен поиск.'])
+    runtime = [dict(item, commit=OLD) for item in RUNTIME]
+    text = notifier.message({'commit': SHA, 'previous_commit': OLD, 'status': status}, ROOT, runtime, FAILURES)
+    assert 'Что обновилось:' not in text and 'установка изменений не подтверждена' in text
+    assert '• Добавлен поиск.' in text and '1.20.0 · bbbbbbbb' in text
 
 
 def test_actual_version_and_health_are_independent_of_requested_commit(notifier, monkeypatch):
@@ -164,6 +253,7 @@ def test_unconfigured_recipient_does_not_send(notifier, monkeypatch, attempt):
     ('success', '', 'Обновление могло продолжиться на сервере'),
     ('success', 'invalid!', 'Установленная версия и работа ботов пока неизвестны'),
     ('success', base64.b64encode(json.dumps({'text': 'Сбой backup aaaaaaaa'}).encode()).decode(), 'Сбой backup aaaaaaaa'),
+    ('success', base64.b64encode(json.dumps({'text': 'Обновлено aaaaaaaa\nЧто обновилось:\n• Исправлен поиск.'}).encode()).decode(), 'Что обновилось:\n• Исправлен поиск.'),
 ])
 def test_independent_github_fallback_reports_ci_ssh_and_host_failure(monkeypatch, capsys, ci, report, expected):
     workflow = yaml.safe_load((ROOT / '.github/workflows/deploy.yml').read_text(encoding='utf-8'))
