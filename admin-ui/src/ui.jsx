@@ -10,8 +10,31 @@ const MESSAGES = {
   invalid_days: 'Неверные дни недели', owner_not_set: 'Владелец бота ещё не назначен (/claim в боте)',
   unsupported_image: 'Нужна картинка PNG, JPEG или WebP', too_large: 'Файл слишком большой',
   nothing_to_change: 'Нечего менять', no_result: 'Не найдено',
+  name_taken: 'Прокси с таким названием уже есть — выберите другое',
+  slug_taken: 'Генератор с таким коротким именем уже есть — выберите другое',
+  secrets_key_missing: 'На сервере не задан SECRETS_KEY: ключи и пароли нельзя сохранить',
+  secret_unreadable: 'Сохранённый ключ не расшифровывается (сменился SECRETS_KEY?) — введите его заново',
+  variant_unavailable: 'Новый вариант этой картинки заказать нельзя: вариантов уже максимум или нет исходного задания',
+  invalid_asset: 'Картинка не найдена — загрузите её заново',
+  invalid_service: 'Неизвестная служба', invalid_proxy: 'Прокси не найден — обновите страницу',
+  duplicate_route: 'Один прокси указан в маршрутах дважды',
+  unsupported_telegram_proxy_scheme: 'Для Telegram подходит только прокси HTTP или SOCKS5, не HTTPS',
+  invalid_proxy_url: 'Неверный адрес прокси', invalid_proxy_port: 'Неверный порт прокси',
+  invalid_adapter: 'Неизвестный тип генератора', invalid_slug: 'Короткое имя: латиница, цифры и дефис',
+  invalid_base_url: 'Укажите адрес API', 'invalid_Unsafe service address': 'Адрес API должен быть HTTPS и не во внутренней сети',
+  invalid_model: 'Проверьте название модели', invalid_account_id: 'Account ID — 32 символа 0–9 и a–f',
+  invalid_billing_mode: 'Неизвестный режим оплаты', invalid_pricing: 'Для этого режима оплаты укажите стоимость запроса',
+  invalid_image_settings: 'Настройки генераторов на сервере повреждены — проверьте журнал службы',
+  'Database unavailable': 'База данных недоступна — попробуйте позже',
 };
-export const explain = (error) => MESSAGES[error.message] || (error.status === 401 ? 'Неверный ключ' : error.message || 'Ошибка');
+
+/** Понятный текст ошибки API. Импорт объявлений сообщает номер строки: «item_3:invalid_days». */
+export function explain(error) {
+  const text = error.message;
+  const item = /^item_(\d+):(.+)$/.exec(text || '');
+  if (item) return `Объявление № ${item[1]}: ${MESSAGES[item[2]] || item[2]}`;
+  return MESSAGES[text] || (error.status === 401 ? 'Неверный ключ' : text || 'Ошибка');
+}
 
 /** Загрузка списка с обновлением и показом ошибки. Ответ на устаревший запрос (например, при быстром вводе
  * в поиске) отбрасывается: на экране всегда результат последнего запроса. */

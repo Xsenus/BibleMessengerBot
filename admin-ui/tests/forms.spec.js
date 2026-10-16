@@ -331,3 +331,20 @@ test('ключ перестал подходить посреди работы �
   await expect(page.getByText('Ключ больше не подходит')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Войти' })).toBeVisible();
 });
+
+test('коды ошибок API показываются понятным текстом', async ({ page, api }) => {
+  api.on('POST', '/net/proxies', { status: 409, json: { detail: 'name_taken' } });
+  api.on('POST', '/announcements/import', { status: 422, json: { detail: 'item_2:invalid_days' } });
+  await openSection(page, 'Сеть и прокси');
+  await page.getByPlaceholder('Название (например, NL-1)').fill('NL-1');
+  await page.getByPlaceholder('Хост').fill('nl1.example.net');
+  await page.getByPlaceholder('Порт').fill('1080');
+  await page.getByRole('button', { name: 'Добавить' }).click();
+  await expect(page.getByText('⚠ Прокси с таким названием уже есть — выберите другое')).toBeVisible();
+
+  await openSection(page, 'Объявления');
+  const items = [{ body: 'Первое', kind: 'once' }, { body: 'Второе', kind: 'weekly' }];
+  await page.getByLabel('Импорт JSON').setInputFiles({ name: 'plan.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(items)) });
+  await expect(page.getByText('Объявление № 2: Неверные дни недели')).toBeVisible();
+  api.problems = api.problems.filter((p) => !/status of (409|422)/.test(p));
+});
