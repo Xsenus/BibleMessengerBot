@@ -1,6 +1,6 @@
 // Базовые компоненты разделов. Стили — в styles.css (блок «Компоненты»).
 import { useEffect, useRef, useState } from 'react';
-import { Inbox, Upload } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Inbox, Upload } from 'lucide-react';
 
 const number = new Intl.NumberFormat('ru-RU');
 export const formatNumber = (value) => (typeof value === 'number' ? number.format(value) : value ?? '—');
@@ -176,5 +176,22 @@ export function Tabs({ tabs, value, onChange, label }) {
           className="tab" onClick={() => onChange(id)} onKeyDown={onKey}>{text}</button>
       ))}
     </div>
+  );
+}
+
+/**
+ * Листание страниц. shown — сколько строк на текущей странице, hasMore — есть ли следующая.
+ * Если всё уместилось на одной странице, ничего не показывает.
+ */
+export function Pager({ offset, size, shown, hasMore, onChange, disabled, label, noun = 'Записи', prev = 'Назад', next = 'Дальше' }) {
+  if (!offset && !hasMore) return null;
+  return (
+    <nav className="pager" aria-label={label}>
+      <button className="small" disabled={!offset || disabled} onClick={() => onChange(Math.max(0, offset - size))}>
+        <ChevronLeft size={15} aria-hidden="true" />{prev}</button>
+      <span className="muted">{shown ? `${noun} ${offset + 1}–${offset + shown}` : 'Дальше ничего нет'}</span>
+      <button className="small" disabled={!hasMore || disabled} onClick={() => onChange(offset + size)}>
+        {next}<ChevronRight size={15} aria-hidden="true" /></button>
+    </nav>
   );
 }

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ImageOff, Images, Pin, Search } from 'lucide-react';
 import { api, getKey } from '../api.js';
-import { Help, Status, useAction, useData } from '../ui.jsx';
-import { DataTable, EmptyState, Field, PageHeader, Panel, StatusBadge, TimeAgo, formatNumber } from '../components.jsx';
+import { Help, Status, useAction, useData, usePaged } from '../ui.jsx';
+import { DataTable, EmptyState, Field, PageHeader, Pager, Panel, StatusBadge, TimeAgo, formatNumber } from '../components.jsx';
 
 const pct = (value) => (value === null || value === undefined ? '—' : `${Math.round(value * 100)} %`);
 
@@ -60,9 +60,12 @@ function Tuning() {
   );
 }
 
+const PAGE = 24;
+
 export default function Gallery() {
   const [book, setBook] = useState('');
-  const { data, error, loading, reload } = useData(`/illustrations?q=${encodeURIComponent(book)}&limit=24`);
+  const { rows, offset, hasMore, setOffset, error, loading, reload } = usePaged(
+    (from, limit) => `/illustrations?q=${encodeURIComponent(book)}&limit=${limit}&offset=${from}`, book, PAGE);
   const { run, message, busy } = useAction(reload);
   return (
     <section>
@@ -75,9 +78,9 @@ export default function Gallery() {
         <label className="input-with-icon search-box"><Search size={15} aria-hidden="true" />
           <input value={book} onChange={(e) => setBook(e.target.value.toUpperCase())} placeholder="Код книги, например JHN" aria-label="Книга (код, например JHN)" /></label>}>
         <Status error={error} loading={loading} />
-        {data?.items.length === 0 && <EmptyState icon={Images} title="Картинок не найдено">{book ? 'Проверьте код книги.' : 'Они появятся после первых генераций.'}</EmptyState>}
+        {rows?.length === 0 && !offset && <EmptyState icon={Images} title="Картинок не найдено">{book ? 'Проверьте код книги.' : 'Они появятся после первых генераций.'}</EmptyState>}
         <div className="gallery">
-          {(data?.items || []).map((i) => (
+          {(rows || []).map((i) => (
             <figure key={i.id} className={`gallery-item${i.quarantined_at ? ' is-quarantined' : ''}`}>
               <Thumb id={i.id} />
               <figcaption>
@@ -94,6 +97,7 @@ export default function Gallery() {
             </figure>
           ))}
         </div>
+        {rows && <Pager label="Страницы картинок" noun="Картинки" offset={offset} size={PAGE} shown={rows.length} hasMore={hasMore} disabled={loading} onChange={setOffset} />}
         {message && <p className="form-message" role="alert">{message}</p>}
       </Panel>
     </section>

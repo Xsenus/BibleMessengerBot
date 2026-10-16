@@ -51,6 +51,22 @@ export function useData(path) {
   return { ...state, reload: load };
 }
 
+/**
+ * Список по страницам. build(offset, limit) строит адрес запроса; при смене filterKey (фильтры, поиск) — снова
+ * первая страница. Сервер просят на одну запись больше страницы: так видно, есть ли следующая.
+ * Ответ — массив или объект с items.
+ */
+export function usePaged(build, filterKey, size) {
+  const [page, setPage] = useState({ key: filterKey, offset: 0 });
+  const offset = page.key === filterKey ? page.offset : 0;
+  const result = useData(build(offset, size + 1));
+  const all = Array.isArray(result.data) ? result.data : result.data?.items;
+  return {
+    ...result, offset, rows: all ? all.slice(0, size) : null, hasMore: Boolean(all && all.length > size),
+    setOffset: (value) => setPage({ key: filterKey, offset: value }),
+  };
+}
+
 /** Значение, которое обновляется только после паузы в вводе (для поиска). */
 export function useDebounced(value, delay = 300) {
   const [current, setCurrent] = useState(value);

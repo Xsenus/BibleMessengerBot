@@ -1,9 +1,11 @@
 import { CircleCheck } from 'lucide-react';
 import { ask } from '../feedback.jsx';
 import { api } from '../api.js';
-import { Help, Status, useAction, useData } from '../ui.jsx';
-import { DataTable, EmptyState, PageHeader, StatusBadge, TimeAgo } from '../components.jsx';
+import { Help, Status, useAction, usePaged } from '../ui.jsx';
+import { DataTable, EmptyState, PageHeader, Pager, StatusBadge, TimeAgo } from '../components.jsx';
 import { DELIVERY_MODES, DELIVERY_STATUSES, label } from '../labels.js';
+
+const PAGE = 50;
 
 const ACTIONS = [
   ['sent', 'Дошло', { title: 'Отметить как доставленное?', body: 'Задание закроется как отправленное. Используйте, если вы убедились, что сообщение получено.', confirmText: 'Дошло' }],
@@ -12,7 +14,8 @@ const ACTIONS = [
 ];
 
 export default function Deliveries() {
-  const { data, error, loading, reload } = useData('/deliveries/attention');
+  const { rows: data, offset, hasMore, setOffset, error, loading, reload } = usePaged(
+    (from, limit) => `/deliveries/attention?limit=${limit}&offset=${from}`, '', PAGE);
   const { run, message, busy } = useAction(reload);
   const columns = [
     { key: 'id', header: 'Задание', render: (d) => <code>#{d.id}</code> },
@@ -43,7 +46,8 @@ export default function Deliveries() {
       </Help>
       <Status error={error} loading={loading} />
       <DataTable columns={columns} rows={data} caption="Доставки, требующие решения" stack
-        empty={<EmptyState icon={CircleCheck} title="Всё в порядке">Решений не требуется.</EmptyState>} />
+        empty={offset ? null : <EmptyState icon={CircleCheck} title="Всё в порядке">Решений не требуется.</EmptyState>} />
+      {data && <Pager label="Страницы доставок" offset={offset} size={PAGE} shown={data.length} hasMore={hasMore} disabled={loading} onChange={setOffset} />}
       {message && <p className="form-message" role="alert">{message}</p>}
     </section>
   );

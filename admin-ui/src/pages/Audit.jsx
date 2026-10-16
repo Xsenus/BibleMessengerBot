@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, RefreshCw, ScrollText, Search } from 'lucide-react';
+import { RefreshCw, ScrollText, Search } from 'lucide-react';
 import { Status, useData, useDebounced, when } from '../ui.jsx';
-import { DataTable, EmptyState, PageHeader, Panel, StatusBadge } from '../components.jsx';
+import { DataTable, EmptyState, PageHeader, Pager, Panel, StatusBadge } from '../components.jsx';
 
 const SOURCES = { panel: 'веб-панель', bot: 'бот' };
 const PERIODS = [[0, 'За всё время'], [1, 'За сутки'], [7, 'За 7 дней'], [30, 'За 30 дней']];
@@ -53,15 +53,8 @@ export default function Audit() {
             { key: 'action', header: 'Действие', render: (i) => <code>{i.action}</code> },
             { key: 'target', header: 'Объект', render: (i) => i.target || <span className="muted">—</span> },
           ]} />
-        {items && (items.length > 0 || offset > 0) && (
-          <nav className="pager" aria-label="Страницы журнала">
-            <button className="small" disabled={!offset || loading} onClick={() => setOffset(Math.max(0, offset - PAGE))}>
-              <ChevronLeft size={15} aria-hidden="true" />Новее</button>
-            <span className="muted">{items.length ? `Записи ${offset + 1}–${offset + items.length}` : 'Дальше записей нет'}</span>
-            <button className="small" disabled={!data.has_more || loading} onClick={() => setOffset(offset + PAGE)}>
-              Старее<ChevronRight size={15} aria-hidden="true" /></button>
-          </nav>
-        )}
+        {items && <Pager label="Страницы журнала" offset={offset} size={PAGE} shown={items.length} hasMore={data.has_more}
+          disabled={loading} onChange={setOffset} prev="Новее" next="Старее" />}
       </Panel>
     </section>
   );

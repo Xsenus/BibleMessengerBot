@@ -361,12 +361,12 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
 
     # --- Чаты и пользователи ----------------------------------------------------------------------
     @router.get('/chats')
-    async def list_chats(platform: str = '', q: str = '', conn: Any = Conn) -> list[dict]:
-        """Назначения (личные чаты, группы, каналы) с фильтром по платформе и поиском по названию."""
+    async def list_chats(platform: str = '', q: str = '', limit: int = 200, offset: int = 0, conn: Any = Conn) -> list[dict]:
+        """Назначения (личные чаты, группы, каналы) с фильтром по платформе и поиском по названию; по страницам."""
         rows = await conn.fetch('''SELECT telegram_chat_id AS id,platform,chat_type,COALESCE(title,'') AS title,COALESCE(username,'') AS username,
             ui_language,timezone,is_active,updated_at FROM telegram_chats
             WHERE ($1='' OR platform=$1) AND ($2='' OR title ILIKE '%'||$2||'%' OR username ILIKE '%'||$2||'%')
-            ORDER BY updated_at DESC LIMIT 200''', platform, q[:50])
+            ORDER BY updated_at DESC,telegram_chat_id LIMIT $3 OFFSET $4''', platform, q[:50], max(1, min(limit, 200)), max(0, offset))
         return [dict(r, updated_at=r['updated_at'].isoformat()) for r in rows]
 
     @router.put('/chats/{chat_id}/active')
@@ -380,12 +380,13 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
         return {'ok': True}
 
     @router.get('/users')
-    async def list_users(q: str = '', conn: Any = Conn) -> list[dict]:
-        """Пользователи: администраторы и заблокированные первыми; поиск по имени."""
+    async def list_users(q: str = '', limit: int = 200, offset: int = 0, conn: Any = Conn) -> list[dict]:
+        """Пользователи: администраторы и заблокированные первыми; поиск по имени; по страницам."""
         rows = await conn.fetch('''SELECT telegram_user_id AS id,platform,COALESCE(username,'') AS username,COALESCE(first_name,'') AS first_name,
             is_owner,is_admin,is_blocked FROM telegram_users
             WHERE $1='' OR first_name ILIKE '%'||$1||'%' OR username ILIKE '%'||$1||'%'
-            ORDER BY is_owner DESC,is_admin DESC,is_blocked DESC,updated_at DESC LIMIT 200''', q[:50])
+            ORDER BY is_owner DESC,is_admin DESC,is_blocked DESC,updated_at DESC,telegram_user_id LIMIT $2 OFFSET $3''',
+            q[:50], max(1, min(limit, 200)), max(0, offset))
         return [dict(r) for r in rows]
 
     @router.put('/users/{user_id}/blocked')
@@ -397,10 +398,11 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
 
     # --- Доставка ---------------------------------------------------------------------------------
     @router.get('/deliveries/attention')
-    async def deliveries_attention(conn: Any = Conn) -> list[dict]:
-        """Доставки, которым нужно решение: неудачные и с неопределённым исходом."""
+    async def deliveries_attention(limit: int = 100, offset: int = 0, conn: Any = Conn) -> list[dict]:
+        """Доставки, которым нужно решение: неудачные и с неопределённым исходом; по страницам."""
         rows = await conn.fetch('''SELECT id,telegram_chat_id AS chat_id,mode,status,error_code,attempt_count,updated_at FROM delivery_log
-            WHERE status IN ('failed','uncertain') ORDER BY updated_at DESC LIMIT 100''')
+            WHERE status IN ('failed','uncertain') ORDER BY updated_at DESC,id DESC LIMIT $1 OFFSET $2''',
+            max(1, min(limit, 100)), max(0, offset))
         return [dict(r, updated_at=r['updated_at'].isoformat()) for r in rows]
 
     @router.post('/deliveries/{delivery_id}/resolve')

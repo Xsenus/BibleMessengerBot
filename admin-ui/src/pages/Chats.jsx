@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { MessagesSquare, Search, Users } from 'lucide-react';
 import { api } from '../api.js';
-import { Help, PLATFORMS as PLATFORM_OPTIONS, Status, useAction, useData, useDebounced } from '../ui.jsx';
-import { EmptyState, PageHeader, Panel, StatusBadge, Switch, Tabs, TimeAgo } from '../components.jsx';
+import { Help, PLATFORMS as PLATFORM_OPTIONS, Status, useAction, useDebounced, usePaged } from '../ui.jsx';
+import { EmptyState, PageHeader, Pager, Panel, StatusBadge, Switch, Tabs, TimeAgo } from '../components.jsx';
 import { CHAT_TYPES, PLATFORMS, label } from '../labels.js';
+
+const PAGE = 50;
 
 function SearchBox({ value, onChange, placeholder }) {
   return (
@@ -16,7 +18,8 @@ function ChatsTab() {
   const [platform, setPlatform] = useState('');
   const [q, setQ] = useState('');
   const query = useDebounced(q);
-  const { data, error, loading, reload } = useData(`/chats?platform=${platform}&q=${encodeURIComponent(query)}`);
+  const { rows: data, offset, hasMore, setOffset, error, loading, reload } = usePaged(
+    (from, limit) => `/chats?platform=${platform}&q=${encodeURIComponent(query)}&limit=${limit}&offset=${from}`, `${platform}|${query}`, PAGE);
   const { run, message, busy } = useAction(reload);
   return (
     <>
@@ -25,10 +28,9 @@ function ChatsTab() {
           <option value="">Все платформы</option>{PLATFORM_OPTIONS.map(([id, text]) => <option key={id} value={id}>{text}</option>)}
         </select>
         <SearchBox value={q} onChange={setQ} placeholder="Поиск по названию" />
-        {data && <span className="muted">Показано: {data.length}{data.length >= 200 ? ' (первые 200)' : ''}</span>}
       </div>
       <Status error={error} loading={loading} />
-      {data?.length === 0 && <EmptyState icon={MessagesSquare} title="Чатов не найдено">{q || platform ? 'Измените условия поиска.' : 'Чаты появятся, когда бота добавят в мессенджеры.'}</EmptyState>}
+      {data?.length === 0 && !offset && <EmptyState icon={MessagesSquare} title="Чатов не найдено">{q || platform ? 'Измените условия поиска.' : 'Чаты появятся, когда бота добавят в мессенджеры.'}</EmptyState>}
       {data?.length > 0 && (
         <div className="table-wrap">
           <table className="data-table table-stack">
@@ -50,6 +52,7 @@ function ChatsTab() {
           </table>
         </div>
       )}
+      {data && <Pager label="Страницы чатов" noun="Чаты" offset={offset} size={PAGE} shown={data.length} hasMore={hasMore} disabled={loading} onChange={setOffset} />}
       {message && <p className="form-message" role="alert">{message}</p>}
     </>
   );
@@ -58,14 +61,14 @@ function ChatsTab() {
 function UsersTab() {
   const [q, setQ] = useState('');
   const query = useDebounced(q);
-  const { data, error, loading, reload } = useData(`/users?q=${encodeURIComponent(query)}`);
+  const { rows: data, offset, hasMore, setOffset, error, loading, reload } = usePaged(
+    (from, limit) => `/users?q=${encodeURIComponent(query)}&limit=${limit}&offset=${from}`, query, PAGE);
   const { run, message, busy } = useAction(reload);
   return (
     <>
-      <div className="toolbar"><SearchBox value={q} onChange={setQ} placeholder="Поиск по имени" />
-        {data && <span className="muted">Показано: {data.length}{data.length >= 200 ? ' (первые 200)' : ''}</span>}</div>
+      <div className="toolbar"><SearchBox value={q} onChange={setQ} placeholder="Поиск по имени" /></div>
       <Status error={error} loading={loading} />
-      {data?.length === 0 && <EmptyState icon={Users} title="Пользователей не найдено" />}
+      {data?.length === 0 && !offset && <EmptyState icon={Users} title="Пользователей не найдено" />}
       {data?.length > 0 && (
         <div className="table-wrap">
           <table className="data-table table-stack">
@@ -86,6 +89,7 @@ function UsersTab() {
           </table>
         </div>
       )}
+      {data && <Pager label="Страницы пользователей" noun="Пользователи" offset={offset} size={PAGE} shown={data.length} hasMore={hasMore} disabled={loading} onChange={setOffset} />}
       {message && <p className="form-message" role="alert">{message}</p>}
     </>
   );

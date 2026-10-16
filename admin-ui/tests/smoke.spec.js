@@ -129,7 +129,7 @@ test('переделанные разделы помещаются в ширин
 });
 
 test('поиск: на экране результат последнего запроса, даже если старый ответ пришёл позже', async ({ page, api }) => {
-  api.on('GET', /^\/chats\?platform=&q=%D0%B4$/, async () => {
+  api.on('GET', /^\/chats\?platform=&q=%D0%B4&limit=51&offset=0$/, async () => {
     await new Promise((resolve) => setTimeout(resolve, 1200));
     return [{ id: 1, platform: 'telegram', chat_type: 'group', title: 'Устаревший ответ', username: '', ui_language: 'ru', timezone: 'UTC', is_active: true, updated_at: null }];
   });
