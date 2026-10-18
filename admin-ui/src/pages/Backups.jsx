@@ -66,8 +66,10 @@ export default function Backups() {
                     <td data-label="Файл" className="cell-file"><code>{item.filename}</code></td>
                     <td data-label="Размер" className="align-end">{size(item.size_bytes)}</td>
                     <td data-label="Доступность"><StatusBadge tone={tone}>{text}</StatusBadge></td>
-                    <td className="cell-actions"><button className="small" aria-label={`Скачать ${item.filename}`} disabled={busy !== null || availability[item.id] !== 'available' || !data.download_enabled} onClick={() => download(item)}>
-                      <Download size={14} aria-hidden="true" />{busy === item.id ? 'Скачивание…' : 'Скачать .dump'}</button></td>
+                    {/* Имя файла — скрытым текстом после видимого: название кнопки начинается с того, что на ней написано
+                        (WCAG 2.5.3), и при этом различает строки. */}
+                    <td className="cell-actions"><button className="small" disabled={busy !== null || availability[item.id] !== 'available' || !data.download_enabled} onClick={() => download(item)}>
+                      <Download size={14} aria-hidden="true" />{busy === item.id ? 'Скачивание…' : 'Скачать .dump'}<span className="sr-only"> {item.filename}</span></button></td>
                   </tr>
                 );
               })}</tbody>

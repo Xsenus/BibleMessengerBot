@@ -25,6 +25,14 @@ updates:
         patterns: [transformers, tokenizers, huggingface-hub, sympy, filelock, fsspec, onnxruntime, piper-tts]
       minor-and-patch:
         update-types: [minor, patch]
+  # Admin panel: exact pins in package-lock.json; CI builds it and runs Playwright with axe-core.
+  - package-ecosystem: npm
+    directory: /admin-ui
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 5
+    groups:
+      panel-minor-and-patch:
+        update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
     schedule: {interval: monthly}
