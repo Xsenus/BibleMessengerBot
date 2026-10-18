@@ -64,7 +64,7 @@ export const readResponses = {
     { id: 1, platform: 'telegram', external_id: -1001234567890, title: 'Слово на каждый день', chat_id: null, mode: 'approve', audience: audience(), prefix: '', min_length: 40, is_enabled: true, created_at: ago(9000) },
     { id: 2, platform: 'vk', external_id: 123456, title: 'Община', chat_id: null, mode: 'capture', audience: audience({ platforms: ['vk'] }), prefix: '', min_length: 1, is_enabled: false, created_at: ago(8000) },
   ],
-  '/posts?status=new': [{ id: 7, source_id: 1, body: '«Придите ко Мне, все труждающиеся и обремененные, и Я успокою вас» (Мф 11:28).', status: 'new', posted_at: ago(90), source_title: 'Слово на каждый день', platform: 'telegram' }],
+  '/posts': [{ id: 7, source_id: 1, body: '«Придите ко Мне, все труждающиеся и обремененные, и Я успокою вас» (Мф 11:28).', status: 'new', posted_at: ago(90), source_title: 'Слово на каждый день', platform: 'telegram' }],
   '/videos': [
     { id: 1, platform: 'youtube', handle: 'UCabcdefghijklmnopqrstuv', title: 'Библейские уроки', is_enabled: true, notify: true, audience: audience(), template: '', interval_minutes: 60, baselined: true, next_check_at: ago(-40), last_checked_at: ago(20), error_count: 0, last_error: '', created_at: ago(9000) },
     { id: 2, platform: 'rutube', handle: '12345', title: '', is_enabled: true, notify: false, audience: audience(), template: '', interval_minutes: 180, baselined: true, next_check_at: ago(-80), last_checked_at: ago(100), error_count: 2, last_error: 'HTTP 503 от rutube.ru', created_at: ago(9000) },

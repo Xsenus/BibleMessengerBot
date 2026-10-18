@@ -98,8 +98,8 @@ GitHub: Docker socket, `.env`, журналы и приватные артефа
 | Группа | Маршруты |
 |---|---|
 | Состояние | `GET /overview` |
-| Объявления | `GET/POST /announcements`, `PATCH /announcements/{id}`, `POST /announcements/{id}/status`, `POST /announcements/{id}/run`, `POST /media` (тело — файл PNG/JPEG/WebP) |
-| Источники | `GET /sources`, `PATCH /sources/{id}`, `GET /posts`, `POST /posts/{id}/publish`, `POST /posts/{id}/ignore` |
+| Объявления | `GET /announcements?limit=&offset=` (новые сверху, `limit` до 200, по умолчанию 200), `POST /announcements`, `PATCH /announcements/{id}`, `POST /announcements/{id}/status`, `POST /announcements/{id}/run`, `POST /media` (тело — файл PNG/JPEG/WebP) |
+| Источники | `GET /sources`, `PATCH /sources/{id}`, `GET /posts?status=&limit=&offset=` (`limit` до 100, по умолчанию 100), `POST /posts/{id}/publish`, `POST /posts/{id}/ignore` |
 | Видео | `GET/POST /videos`, `PATCH/DELETE /videos/{id}` |
 | Генераторы | `GET/POST /image-providers`, `PATCH/DELETE /image-providers/{id}`, `POST /image-providers/{id}/test`, `GET /image-queue`, `POST /image-queue/retry` |
 | Настройки | `GET/PUT /settings` |

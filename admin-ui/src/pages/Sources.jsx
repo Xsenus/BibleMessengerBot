@@ -2,19 +2,20 @@ import { useState } from 'react';
 import { Newspaper, Rss } from 'lucide-react';
 import { ask } from '../feedback.jsx';
 import { api } from '../api.js';
-import { Help, AudienceEditor, Status, describeAudience, useAction, useData } from '../ui.jsx';
-import { EmptyState, Field, PageHeader, Panel, Switch, TimeAgo } from '../components.jsx';
+import { Help, AudienceEditor, Status, describeAudience, useAction, useData, usePaged } from '../ui.jsx';
+import { EmptyState, Field, PageHeader, Pager, Panel, Switch, TimeAgo } from '../components.jsx';
 import { PLATFORMS, label } from '../labels.js';
 
+const PAGE = 20;
 const MODES = { capture: 'только сохранять', approve: 'с подтверждением', auto: 'отправлять сразу' };
 
 function Posts() {
-  const { data, error, loading, reload } = useData('/posts?status=new');
+  const { rows: data, offset, hasMore, setOffset, error, loading, reload } = usePaged((from, limit) => `/posts?status=new&limit=${limit}&offset=${from}`, '', PAGE);
   const { run, message, busy } = useAction(reload);
   return (
-    <Panel title={`Новые посты${data ? ` (${data.length})` : ''}`}>
+    <Panel title={`Новые посты${data && !offset && !hasMore ? ` (${data.length})` : ''}`}>
       <Status error={error} loading={loading} />
-      {data?.length === 0 && <EmptyState icon={Newspaper} title="Новых постов нет">Посты появятся здесь, когда выйдут в подключённых источниках.</EmptyState>}
+      {data?.length === 0 && !offset && <EmptyState icon={Newspaper} title="Новых постов нет">Посты появятся здесь, когда выйдут в подключённых источниках.</EmptyState>}
       <div className="item-list">
         {(data || []).map((p) => (
           <article className="item-card" key={p.id}>
@@ -27,6 +28,8 @@ function Posts() {
           </article>
         ))}
       </div>
+      {data && <Pager label="Страницы постов" noun="Посты" offset={offset} size={PAGE} shown={data.length} hasMore={hasMore}
+        disabled={loading} onChange={setOffset} prev="Новее" next="Старее" />}
       {message && <p className="form-message" role="alert">{message}</p>}
     </Panel>
   );

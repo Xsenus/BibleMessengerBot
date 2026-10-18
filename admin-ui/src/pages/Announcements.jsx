@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { CalendarClock, FileUp, Megaphone, X } from 'lucide-react';
 import { ask, askText } from '../feedback.jsx';
 import { api } from '../api.js';
-import { Help, AudienceEditor, Status, describeAudience, useAction, useData, when } from '../ui.jsx';
-import { Chip, EmptyState, Field, FilePicker, PageHeader, Panel, StatusBadge, TimeAgo, formatNumber } from '../components.jsx';
+import { Help, AudienceEditor, Status, describeAudience, useAction, useData, usePaged, when } from '../ui.jsx';
+import { Chip, EmptyState, Field, FilePicker, PageHeader, Pager, Panel, StatusBadge, TimeAgo, formatNumber } from '../components.jsx';
 import { PLATFORMS } from '../labels.js';
 
 const KINDS = { once: 'Один раз', daily: 'Каждый день', weekly: 'По дням недели', monthly: 'Раз в месяц', interval: 'Через интервал' };
@@ -13,6 +13,7 @@ const TIMEZONES = ['Europe/Moscow', 'Europe/Kaliningrad', 'Europe/Samara', 'Asia
   'Asia/Krasnoyarsk', 'Asia/Irkutsk', 'Asia/Yakutsk', 'Asia/Vladivostok', 'Asia/Magadan', 'Asia/Kamchatka',
   'Europe/Minsk', 'Europe/Kyiv', 'Asia/Almaty', 'Asia/Tashkent', 'Asia/Tbilisi', 'Asia/Yerevan', 'UTC'];
 const BODY_LIMIT = 3500;
+const PAGE = 50;
 const EMPTY = { title: '', body: '', kind: 'weekly', time: '10:00', timezone: 'Europe/Moscow', days: [6], dayOfMonth: 1,
   interval: 60, start: '', maxRuns: '', platforms: [], assetId: null };
 
@@ -171,7 +172,7 @@ function ImportButton({ run, busy }) {
 
 export default function Announcements() {
   const [open, setOpen] = useState(null);
-  const { data, error, loading, reload } = useData('/announcements');
+  const { rows: data, offset, hasMore, setOffset, error, loading, reload } = usePaged((from, limit) => `/announcements?limit=${limit}&offset=${from}`, '', PAGE);
   const { run, message, busy } = useAction(reload);
   const status = (id, value) => run(() => api(`/announcements/${id}/status`, { method: 'POST', body: { status: value } }));
   return (
@@ -186,10 +187,11 @@ export default function Announcements() {
           <li>В списке ниже: «Сейчас» — отправить немедленно, «Пауза», «Править» (текст и аудитория), «Отмена». Если служба была остановлена, опоздавший больше чем на час запуск пропускается, а не высылается пачкой.</li>
         </ol>
       </Help>
-      <Form onCreated={reload} />
-      <Panel title={`Объявления${data ? ` (${data.length})` : ''}`}>
+      {/* Новое объявление — в начале списка: показываем первую страницу. */}
+      <Form onCreated={() => (offset ? setOffset(0) : reload())} />
+      <Panel title={`Объявления${data && !offset && !hasMore ? ` (${data.length})` : ''}`}>
         <Status error={error} loading={loading} />
-        {data?.length === 0 && <EmptyState icon={Megaphone} title="Объявлений пока нет">Создайте первое в форме выше.</EmptyState>}
+        {data?.length === 0 && !offset && <EmptyState icon={Megaphone} title="Объявлений пока нет">Создайте первое в форме выше.</EmptyState>}
         {data?.length > 0 && (
           <div className="table-wrap">
             <table className="data-table table-stack">
@@ -222,6 +224,8 @@ export default function Announcements() {
             </table>
           </div>
         )}
+        {data && <Pager label="Страницы объявлений" noun="Объявления" offset={offset} size={PAGE} shown={data.length} hasMore={hasMore}
+          disabled={loading} onChange={setOffset} prev="Новее" next="Старее" />}
         {message && <p className="form-message" role="alert">{message}</p>}
       </Panel>
     </section>

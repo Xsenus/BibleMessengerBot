@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, CircleX, DatabaseBackup, Download, RefreshCw } from 'lucide-react';
+import { CircleX, DatabaseBackup, Download, RefreshCw } from 'lucide-react';
 import { api, downloadBackup } from '../api.js';
 import { Status, explain, useData, when } from '../ui.jsx';
-import { EmptyState, PageHeader, Panel, StatusBadge, formatNumber } from '../components.jsx';
+import { EmptyState, PageHeader, Pager, Panel, StatusBadge, formatNumber } from '../components.jsx';
 
 const PAGE_SIZE = 30;
 const size = (bytes) => {
@@ -74,13 +74,8 @@ export default function Backups() {
             </table>
           </div>
         )}
-        {data?.total > 0 && (
-          <div className="pager">
-            <button className="small" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}><ChevronLeft size={15} aria-hidden="true" />Назад</button>
-            <span className="muted">{offset + 1}–{Math.min(offset + data.items.length, data.total)} из {data.total}</span>
-            <button className="small" disabled={offset + data.items.length >= data.total} onClick={() => setOffset(offset + PAGE_SIZE)}>Далее<ChevronRight size={15} aria-hidden="true" /></button>
-          </div>
-        )}
+        {data && <Pager label="Страницы копий" noun="Копии" offset={offset} size={PAGE_SIZE} shown={data.items.length}
+          hasMore={offset + data.items.length < data.total} disabled={loading} onChange={setOffset} prev="Новее" next="Старее" />}
       </Panel>
     </section>
   );
