@@ -1,0 +1,85 @@
+name: Release
+# Выпуск по кнопке: Actions → Release → Run workflow (ветка main).
+# Берёт версию из VERSION и раздел «## X.Y.Z — дата» из CHANGELOG.md, требует успешный CI (Test) этого коммита,
+# собирает и проверяет образ так же, как CI, публикует его в GHCR (X.Y.Z и latest), затем создаёт тег vX.Y.Z и релиз.
+# Тег, созданный здесь через GITHUB_TOKEN, по правилам GitHub не запускает другие workflow, поэтому образ
+# публикуется в этом же запуске, а не шагом ci.yml по тегу.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write   # тег и релиз
+      packages: write   # GHCR
+      actions: read     # результат CI этого коммита
+    steps:
+      - uses: actions/checkout@v7
+      - name: Version, release notes and CI result
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::VERSION '$version' is not X.Y.Z"; exit 1; }
+          tag="v$version"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::Tag $tag already exists; bump VERSION and CHANGELOG first"; exit 1
+          fi
+          title=$(awk -v h="## $version " 'index($0, h) == 1 { print substr($0, 4); exit }' CHANGELOG.md)
+          awk -v h="## $version " 'index($0, h) == 1 { on = 1; next } on && /^## / { exit } on' CHANGELOG.md > release-notes.md
+          if [ -z "$title" ] || ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::CHANGELOG.md has no non-empty section '## $version — …'"; exit 1
+          fi
+          conclusion=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --event push \
+            --json conclusion --jq '.[0].conclusion // ""')
+          [ "$conclusion" = success ] || { echo "::error::CI (Test) for $GITHUB_SHA is '${conclusion:-not found}', not success"; exit 1; }
+          { echo "version=$version"; echo "tag=$tag"; echo "title=$title"; } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - name: Reproduce private checkout permissions
+        run: find app -type f -exec chmod 600 {} +
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: bible-messenger-bot:release
+          build-args: PROJECT_REVISION=${{ github.sha }}
+          cache-from: type=gha
+      - name: Image reports the released commit
+        run: |
+          docker run --rm -e EXPECTED_REVISION="$GITHUB_SHA" bible-messenger-bot:release python -c 'import os; from app.services.release_info import build_info; assert build_info()["commit"] == os.environ["EXPECTED_REVISION"]'
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: bible-messenger-bot:release
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish to GHCR
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker tag bible-messenger-bot:release "$image:$VERSION"
+          docker tag bible-messenger-bot:release "$image:latest"
+          docker push "$image:$VERSION"
+          docker push "$image:latest"
+      - name: Tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          TITLE: ${{ steps.meta.outputs.title }}
+        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TITLE" --notes-file release-notes.md
