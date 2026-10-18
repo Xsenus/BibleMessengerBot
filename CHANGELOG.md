@@ -2,6 +2,8 @@
 
 ## Не выпущено
 
+- Выпуск версии одной кнопкой: Actions → Release (`release.yml`) проверяет `VERSION`, раздел `CHANGELOG.md` и успешный CI коммита `main`, собирает и сканирует образ, публикует его в GHCR (`X.Y.Z`, `latest`), затем создаёт тег `vX.Y.Z` и релиз. См. [releases.md](docs/operations/releases.md).
+
 ## 1.21.0 — 2026-10-16
 
 Главное:

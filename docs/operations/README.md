@@ -6,6 +6,7 @@
 |---|---|
 | Ежедневное обслуживание, резервные копии, восстановление, обновление | [operations.md](operations.md) |
 | Автодеплой проверенной main на VPS, SSH-доступ и откат | [automatic-deploy.md](automatic-deploy.md) |
+| Выпуск версии: тег, релиз и образ в GHCR одной кнопкой | [releases.md](releases.md) |
 | Метрики, оповещения, хранение данных | [monitoring.md](monitoring.md) |
 | Зашифрованные копии в S3 | [s3-backup.md](s3-backup.md) |
 | Безопасность и модель угроз | [security.md](security.md) |
