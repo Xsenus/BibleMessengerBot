@@ -6,7 +6,7 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
-from app.services import features, free_image_providers
+from app.services import chat_sources, features, free_image_providers
 from tests.test_admin_api_postgres import H, make, prepare
 from tests.test_postgres_integration import db as db  # noqa: F401
 
@@ -140,6 +140,31 @@ async def test_chats_users_and_deliveries_page_without_gaps(db, monkeypatch):
         assert await all_pages('/api/admin/deliveries/attention', len(attention)) == attention and len(attention) == 7
         assert (await client.get('/api/admin/chats?limit=0&offset=-5', headers=H)).status_code == 200      # границы зажимаются
 
+
+async def test_announcements_and_source_posts_page_without_gaps(db, monkeypatch):
+    c = db[0]
+    await prepare(c)
+    source = await chat_sources.ensure_source(c, 'telegram', -100500, 'Канал')
+    await c.execute("UPDATE content_sources SET is_enabled=true, mode='capture', min_length=1 WHERE id=$1", source['id'])
+    for n in range(7):
+        assert await chat_sources.ingest_post(c, 'telegram', -100500, str(n), f'Пост {n}')
+    async with make(monkeypatch, c) as client:
+        for n in range(7):
+            assert (await client.post('/api/admin/announcements', headers=H, json={'body': f'Объявление {n}', 'kind': 'daily', 'send_time': '10:00:00'})).status_code == 201
+
+        async def all_pages(path: str) -> list:
+            seen = []
+            for offset in range(0, 12, 3):
+                page = (await client.get(f'{path}{"&" if "?" in path else "?"}limit=3&offset={offset}', headers=H)).json()
+                assert len(page) <= 3
+                seen += [x['id'] for x in page]
+            return seen
+
+        everything = [x['id'] for x in (await client.get('/api/admin/announcements', headers=H)).json()]
+        assert await all_pages('/api/admin/announcements') == everything == sorted(everything, reverse=True) and len(everything) == 7
+        posts = [x['id'] for x in (await client.get('/api/admin/posts', headers=H)).json()]
+        assert await all_pages('/api/admin/posts?status=new') == posts and len(posts) == 7
+        assert (await client.get('/api/admin/posts?limit=0&offset=-5', headers=H)).json()[0]['id'] == posts[0]  # границы зажимаются
 
 async def test_announcement_edit_and_image_queue_retry(db, monkeypatch):
     c = db[0]

@@ -146,9 +146,10 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
 
     # --- Объявления ---------------------------------------------------------------------------
     @router.get('/announcements')
-    async def list_announcements(conn: Any = Conn) -> list[dict]:
-        """Последние объявления с расписанием и ближайшим запуском."""
-        return rows(await conn.fetch('SELECT * FROM announcements ORDER BY id DESC LIMIT 200'))
+    async def list_announcements(limit: int = 200, offset: int = 0, conn: Any = Conn) -> list[dict]:
+        """Объявления с расписанием и ближайшим запуском, новые первыми; страница — limit/offset."""
+        return rows(await conn.fetch('SELECT * FROM announcements ORDER BY id DESC LIMIT $1 OFFSET $2',
+                                     max(1, min(limit, 200)), max(0, offset)))
 
     @router.post('/announcements', status_code=201)
     async def create_announcement(payload: AnnouncementIn, conn: Any = Conn) -> dict:
@@ -264,10 +265,12 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
         return {'ok': True}
 
     @router.get('/posts')
-    async def list_posts(status: Literal['new', 'published', 'ignored'] = 'new', conn: Any = Conn) -> list[dict]:
-        """Собранные посты источников."""
+    async def list_posts(status: Literal['new', 'published', 'ignored'] = 'new', limit: int = 100, offset: int = 0,
+                         conn: Any = Conn) -> list[dict]:
+        """Собранные посты источников, новые первыми; страница — limit/offset."""
         return rows(await conn.fetch('''SELECT p.id,p.source_id,p.body,p.status,p.posted_at,s.title AS source_title,s.platform
-            FROM source_posts p JOIN content_sources s ON s.id=p.source_id WHERE p.status=$1 ORDER BY p.id DESC LIMIT 100''', status))
+            FROM source_posts p JOIN content_sources s ON s.id=p.source_id WHERE p.status=$1 ORDER BY p.id DESC LIMIT $2 OFFSET $3''',
+            status, max(1, min(limit, 100)), max(0, offset)))
 
     @router.post('/posts/{post_id}/publish')
     async def publish_post(post_id: int, conn: Any = Conn) -> dict:

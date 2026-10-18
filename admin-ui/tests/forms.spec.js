@@ -415,3 +415,52 @@ test('доставки и картинки: кнопки страниц появ
   expect(api.requests.some((r) => r.path === '/deliveries/attention?limit=51&offset=0')).toBe(true);
   expect(api.requests.some((r) => r.path === '/illustrations?q=&limit=25&offset=0')).toBe(true);
 });
+
+test('объявления, очередь постов и резервные копии листаются страницами', async ({ page, api }) => {
+  const params = (path) => Object.fromEntries(new URLSearchParams(path.split('?')[1]));
+  const many = (count, make, from = 1) => Array.from({ length: count }, (_, i) => make(from + i));
+  const note = (n) => ({ ...api.data['/announcements'][1], id: 1000 - n, title: `Объявление ${n}` });
+  const post = (n) => ({ ...api.data['/posts'][0], id: 1000 - n, body: `Пост ${n}` });
+  api.on('GET', /^\/announcements\?/, ({ path }) => (params(path).offset === '0' ? many(51, note) : many(3, note, 51)));
+  api.on('GET', /^\/posts\?/, ({ path }) => (params(path).offset === '0' ? many(21, post) : many(1, post, 21)));
+  const copy = (n) => ({ id: 100 - n, filename: `biblebot-${n}.dump.age`, created_at: null, verified_at: null, size_bytes: 1024 });
+  api.on('GET', /^\/backups\?/, ({ path }) => {
+    const offset = Number(params(path).offset);
+    return { total: 35, limit: 30, offset, download_enabled: false, items: many(Math.min(30, 35 - offset), copy, offset + 1) };
+  });
+
+  await openSection(page, 'Объявления');
+  const notes = page.getByRole('navigation', { name: 'Страницы объявлений' });
+  await expect(notes.getByText('Объявления 1–50')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Объявления', exact: true, level: 2 })).toBeVisible();   // без числа: оно неполное
+  await notes.getByRole('button', { name: 'Старее' }).click();
+  await expect(notes.getByText('Объявления 51–53')).toBeVisible();
+  await expect(page.getByText('Объявление 53', { exact: true })).toBeVisible();
+
+  await openSection(page, 'Источники');
+  const posts = page.getByRole('navigation', { name: 'Страницы постов' });
+  await posts.getByRole('button', { name: 'Старее' }).click();
+  await expect(posts.getByText('Посты 21–21')).toBeVisible();
+  await expect(page.getByText('Пост 21', { exact: true })).toBeVisible();
+
+  await openSection(page, 'Резервные копии');
+  const copies = page.getByRole('navigation', { name: 'Страницы копий' });
+  await copies.getByRole('button', { name: 'Старее' }).click();
+  await expect(copies.getByText('Копии 31–35')).toBeVisible();
+  await expect(copies.getByRole('button', { name: 'Старее' })).toBeDisabled();
+  await api.settle();
+
+  const asked = (prefix) => api.requests.filter((r) => r.path.startsWith(prefix)).map((r) => params(r.path));
+  expect(asked('/announcements?').map((p) => [p.limit, p.offset])).toEqual([['51', '0'], ['51', '50']]);
+  expect(asked('/posts?').map((p) => [p.status, p.limit, p.offset])).toEqual([['new', '21', '0'], ['new', '21', '20']]);
+  expect(asked('/backups?').map((p) => p.offset)).toEqual(['0', '30']);
+});
+
+test('одна страница — без кнопок и с числом записей в заголовке', async ({ page }) => {
+  await openSection(page, 'Объявления');
+  await expect(page.getByRole('heading', { name: 'Объявления (3)' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Страницы объявлений' })).toHaveCount(0);
+  await openSection(page, 'Резервные копии');
+  await expect(page.getByRole('heading', { name: 'Копии (2)' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Страницы копий' })).toHaveCount(0);
+});
