@@ -47,7 +47,7 @@ pip-audit -r requirements.txt --disable-pip
 ```
 
 Список `[[tool.mypy.overrides]]` в `pyproject.toml` — «храповик»: исправив модуль, удалите его из списка; новый код проверяется полностью.
-Не смешивайте массовое форматирование старого кода с функциональным исправлением. Dependabot предлагает обновления pip/Actions/Docker; образ собирается и сканируется Trivy,
+Не смешивайте массовое форматирование старого кода с функциональным исправлением. Dependabot предлагает обновления pip, npm веб-панели (`admin-ui`), Actions и Docker; образ собирается и сканируется Trivy,
 по тегу `v*` публикуется в GHCR. Тесты с `RUN_DB_TESTS=1` требуют PostgreSQL ([VALIDATION](docs/operations/validation.md)); OCR-проверки картинок — пакета `tesseract-ocr`.
 
 ## Что прикладывать к issue

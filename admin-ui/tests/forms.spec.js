@@ -211,7 +211,7 @@ test('сеть: порядок маршрутов сохраняется', async
 test('резервные копии: скачивание файла', async ({ page, api }) => {
   await openSection(page, 'Резервные копии');
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Скачать biblebot-2026-10-16.dump.age' }).click();
+  await page.getByRole('button', { name: 'Скачать .dump biblebot-2026-10-16.dump.age' }).click();
   expect((await download).suggestedFilename()).toBe('biblebot-2026-10-16.dump');
   expect(api.writes()).toMatchObject([{ method: 'POST', path: '/backups/2/download' }]);
 });
