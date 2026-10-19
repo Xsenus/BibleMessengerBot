@@ -1,4 +1,4 @@
-filelock==4.1.1
+filelock==4.2.0
 flatbuffers==25.12.19
 fsspec==2026.9.0
 hf-xet==1.7.0
