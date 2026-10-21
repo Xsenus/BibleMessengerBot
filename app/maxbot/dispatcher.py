@@ -20,6 +20,7 @@ from app.services.features import support_enabled
 from app.services.errors import UserError
 from app.services.i18n import initial_ui, tr
 from app.services.locks import chat_lock
+from app.services.subscriptions import pause_unavailable, resume_paused
 from app.worker.delivery import insert_payload
 
 NAVIGATION = {'/' + name for name, _emoji in BUTTONS} | {'/start', '/menu'}
@@ -145,7 +146,7 @@ class MaxDispatcher:
                 if chat is not None:
                     async with chat_lock(connection,chat),connection.transaction():
                         await connection.execute("UPDATE telegram_chats SET is_active=false WHERE telegram_chat_id=$1 AND platform='max'",chat)
-                        await connection.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE telegram_chat_id=$1',chat)
+                        await pause_unavailable(connection,chat,'max:'+kind)
             return
         if kind in {'chat_title_changed','bot_admin_permissions_changed'}:
             async with self.pool.acquire() as connection:
@@ -161,8 +162,10 @@ class MaxDispatcher:
                 chat = None
             async with self.pool.acquire() as connection,chat_lock(connection,chat_id),connection.transaction():
                 await connection.execute('UPDATE telegram_chats SET is_active=$2,title=COALESCE($3,title) WHERE telegram_chat_id=$1 AND platform=\'max\'',chat_id,active,chat.title if chat else None)
-                if not active:
-                    await connection.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE telegram_chat_id=$1',chat_id)
+                if active:
+                    await resume_paused(connection,chat_id,'max:'+kind)
+                else:
+                    await pause_unavailable(connection,chat_id,'max:'+kind)
             return
         if kind in {'bot_started','bot_added'}:
             source_user = event['user']
@@ -170,6 +173,9 @@ class MaxDispatcher:
                 return
             chat_type = 'private' if kind=='bot_started' else 'channel' if event.get('is_channel') else 'group'
             actor, chat = await self._context(source_user,event['chat_id'],chat_type,locale)
+            # Бота снова запустили или вернули в чат: рассылки, приостановленные из-за его недоступности, включаются.
+            async with self.pool.acquire() as connection,chat_lock(connection,chat.id),connection.transaction():
+                await resume_paused(connection,chat.id,'max:'+kind)
             if kind=='bot_added':
                 await handlers.authorize(self.bridge,chat,actor.id)
                 return

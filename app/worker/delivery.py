@@ -341,5 +341,5 @@ async def resolve_uncertain(connection: Any, delivery_id: int, chat_id: int, act
         else:
             await connection.execute("UPDATE delivery_log SET status=$2,sending_chunk=NULL,retry_at=NULL,error_code='operator_resolved',updated_at=now() WHERE id=$1",delivery_id,'pending' if action=='retry-duplicate-risk' else 'cancelled')
         if row['subscription_id'] and action!='cancel':
-            await connection.execute('UPDATE subscriptions SET is_enabled=NOT completed WHERE id=$1',row['subscription_id'])
+            await connection.execute('UPDATE subscriptions SET is_enabled=NOT completed,paused_reason=NULL WHERE id=$1',row['subscription_id'])
         await connection.execute("INSERT INTO operator_events(actor_id,chat_id,action,details) VALUES($1,$2,'resolve_delivery',$3::jsonb)",actor_id,chat_id,json.dumps({'delivery_id':delivery_id,'action':action,'chunk':row['next_chunk']}))

@@ -18,6 +18,7 @@ from app.services.chat_sources import ingest_post
 from app.services.errors import UserError
 from app.services.i18n import tr
 from app.services.locks import chat_lock
+from app.services.subscriptions import pause_unavailable, resume_paused
 from app.platforms.bridge import ReplyContext
 from app.vkbot.bridge import CONVERSATION_BASE, VkBotBridge
 from app.vkbot.client import VkAPIError
@@ -151,14 +152,16 @@ class VkDispatcher:
             async with self.pool.acquire() as connection:
                 chat = await lookup(connection, 'chat', user_id)
                 if chat:
-                    await connection.execute("UPDATE telegram_chats SET is_active=true WHERE telegram_chat_id=$1 AND platform='vk'", chat)
+                    async with chat_lock(connection, chat), connection.transaction():
+                        await connection.execute("UPDATE telegram_chats SET is_active=true WHERE telegram_chat_id=$1 AND platform='vk'", chat)
+                        await resume_paused(connection, chat, 'vk:message_allow')
             return
         async with self.pool.acquire() as connection:
             chat = await lookup(connection, 'chat', user_id)
             if chat is not None:
                 async with chat_lock(connection, chat), connection.transaction():
                     await connection.execute("UPDATE telegram_chats SET is_active=false WHERE telegram_chat_id=$1 AND platform='vk'", chat)
-                    await connection.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE telegram_chat_id=$1', chat)
+                    await pause_unavailable(connection, chat, 'vk:message_deny')
 
     async def _message_new(self, message: dict, chat_holder: list) -> None:
         """Новое сообщение: добавление или удаление бота в беседе, команда, адрес стиха или подсказка меню."""
@@ -174,11 +177,13 @@ class VkDispatcher:
                 if chat_id is not None:
                     async with chat_lock(connection, chat_id), connection.transaction():
                         await connection.execute("UPDATE telegram_chats SET is_active=false WHERE telegram_chat_id=$1 AND platform='vk'", chat_id)
-                        await connection.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE telegram_chat_id=$1', chat_id)
+                        await pause_unavailable(connection, chat_id, 'vk:chat_kick')
             return
         actor, chat = await self._context(sender, peer)
         chat_holder.append(chat)
         if action.get('type') == 'chat_invite_user' and action.get('member_id') == -self.bridge.id:
+            async with self.pool.acquire() as connection, chat_lock(connection, chat.id), connection.transaction():
+                await resume_paused(connection, chat.id, 'vk:chat_invite')
             await handlers.authorize(self.bridge, chat, actor.id)
             return
         text = MENTION.sub('', message.get('text') or '').strip()

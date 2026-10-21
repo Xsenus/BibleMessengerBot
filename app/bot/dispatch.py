@@ -272,7 +272,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             await cancel_queued(connection,chat['telegram_chat_id'])
             await connection.execute('DELETE FROM chat_reading_progress WHERE telegram_chat_id=$1',chat['telegram_chat_id'])
             await connection.execute('''UPDATE subscriptions SET current_book_code=NULL,current_chapter=NULL,current_verse=NULL,
-                plan_day=0,completed=false,is_enabled=false,next_run_at=NULL,revision=revision+1 WHERE telegram_chat_id=$1''',chat['telegram_chat_id'])
+                plan_day=0,completed=false,is_enabled=false,next_run_at=NULL,paused_reason=NULL,revision=revision+1 WHERE telegram_chat_id=$1''',chat['telegram_chat_id'])
             await connection.execute("INSERT INTO operator_events(actor_id,chat_id,action) VALUES($1,$2,'reset_progress')",user.id,chat['telegram_chat_id'])
         return tr(locale,'saved')+'\n/resume',settings_keyboard(chat)
     # /resolve ID действие — решение оператора по неопределённой доставке

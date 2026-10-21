@@ -1,5 +1,6 @@
 """Проверенные подписки с ревизиями и настоящей длительностью планов."""
 from __future__ import annotations
+import json
 from datetime import time
 from typing import Any
 from app.services.scheduling import next_reading, validate_timezone
@@ -56,7 +57,7 @@ async def create_or_update_subscription(connection: Any, *, chat_id: int, create
             send_time,timezone,plan_code,next_run_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
             ON CONFLICT(telegram_chat_id,mode) DO UPDATE SET created_by=EXCLUDED.created_by,
             translation_id=EXCLUDED.translation_id,send_time=EXCLUDED.send_time,timezone=EXCLUDED.timezone,
-            plan_code=EXCLUDED.plan_code,next_run_at=EXCLUDED.next_run_at,is_enabled=true,
+            plan_code=EXCLUDED.plan_code,next_run_at=EXCLUDED.next_run_at,is_enabled=true,paused_reason=NULL,
             revision=subscriptions.revision+1,retry_at=NULL,
             plan_day=CASE WHEN $9 THEN 0 ELSE subscriptions.plan_day END,
             current_book_code=CASE WHEN $9 THEN NULL ELSE subscriptions.current_book_code END,
@@ -81,11 +82,56 @@ async def set_enabled(connection: Any, chat_id: int, enabled: bool, mode: str | 
             if enabled and row['completed']:
                 continue
             next_run = next_reading(row['mode'],row['send_time'],row['timezone'],list(row['days_of_week'])) if enabled else None
-            await connection.execute('''UPDATE subscriptions SET is_enabled=$2,next_run_at=$3,
+            await connection.execute('''UPDATE subscriptions SET is_enabled=$2,next_run_at=$3,paused_reason=NULL,
                 updated_at=now() WHERE id=$1''',row['id'],enabled,next_run)
             count += 1
     return count
 
+
+BOT_UNAVAILABLE = 'bot_unavailable'
+REVIEW_PENDING = "SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND (status IN ('sending','uncertain') OR (status='failed' AND next_chunk>0)))"
+
+
+async def pause_unavailable(connection: Any, chat_id: int, cause: str) -> int:
+    """Бота остановили, заблокировали или удалили из чата: выключить включённые подписки с пометкой, что их можно
+    вернуть сами, и записать событие. Уже выключенные вручную не трогаются. Вызывать под chat_lock в транзакции."""
+    result = await connection.execute("""UPDATE subscriptions SET is_enabled=false,next_run_at=NULL,paused_reason=$2,updated_at=now()
+        WHERE telegram_chat_id=$1 AND is_enabled""", chat_id, BOT_UNAVAILABLE)
+    count = int(result.split()[-1])
+    if count:
+        await connection.execute("INSERT INTO operator_events(chat_id,action,details) VALUES($1,'subscriptions_paused',$2::jsonb)",
+                                 chat_id, json.dumps({'reason': BOT_UNAVAILABLE, 'cause': cause, 'count': count}))
+    return count
+
+
+async def resume_paused(connection: Any, chat_id: int, cause: str, *, any_reason: bool = False) -> int:
+    """Снова включить выключенные подписки чата: по умолчанию только выключенные из-за недоступности бота,
+    с any_reason — все незавершённые. Задания, срок которых прошёл за время паузы, пропускаются, чтобы не прислать
+    пачку старых сообщений. При неопределённой отправке ничего не включается (нужно решение оператора).
+    Вызывать под chat_lock в транзакции. Возвращает число включённых."""
+    if await connection.fetchval(REVIEW_PENDING, chat_id):
+        return 0
+    rows = await connection.fetch("""SELECT * FROM subscriptions WHERE telegram_chat_id=$1 AND NOT is_enabled AND NOT completed
+        AND ($2 OR paused_reason=$3) ORDER BY id""", chat_id, any_reason, BOT_UNAVAILABLE)
+    if not rows:
+        return 0
+    ids = [row['id'] for row in rows]
+    await connection.execute("""UPDATE delivery_log SET status='skipped',error_code='stale_after_pause',updated_at=now()
+        WHERE subscription_id=ANY($1::bigint[]) AND status IN ('pending','retry') AND scheduled_for<now()""", ids)
+    for row in rows:
+        next_run = next_reading(row['mode'],row['send_time'],row['timezone'],list(row['days_of_week']))
+        await connection.execute('UPDATE subscriptions SET is_enabled=true,next_run_at=$2,paused_reason=NULL,updated_at=now() WHERE id=$1',
+                                 row['id'], next_run)
+    await connection.execute("INSERT INTO operator_events(chat_id,action,details) VALUES($1,'subscriptions_resumed',$2::jsonb)",
+                             chat_id, json.dumps({'cause': cause, 'modes': [row['mode'] for row in rows]}))
+    return len(rows)
+
+
+def resumed_notice(locale: str | None) -> str:
+    """Сообщение в чат после автоматического возврата рассылок."""
+    if (locale or 'ru') == 'ru':
+        return '🔔 Рассылки снова включены — бот продолжит присылать их по прежнему расписанию. Приостановить: /pause'
+    return '🔔 Your subscriptions are back on and will follow the previous schedule. Pause them with /pause'
 
 async def delete_subscriptions(connection: Any, chat_id: int, mode: str | None = None) -> int:
     """Удалить подписки (все или один режим) и отменить их задания; опечатка в режиме не удаляет всё. Отписка возможна всегда, в том числе после неопределённой отправки. Возвращает число удалённых."""
