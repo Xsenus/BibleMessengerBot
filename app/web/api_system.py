@@ -376,7 +376,7 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             if await conn.execute('UPDATE telegram_chats SET is_active=$2 WHERE telegram_chat_id=$1', chat_id, payload.value) != 'UPDATE 1':
                 raise HTTPException(404, 'not_found')
             if not payload.value:
-                await conn.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE telegram_chat_id=$1', chat_id)
+                await conn.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL,paused_reason=NULL WHERE telegram_chat_id=$1', chat_id)
         return {'ok': True}
 
     @router.get('/users')

@@ -63,6 +63,37 @@ async def db_stats(settings: Settings) -> dict[str, Any]:
         await connection.close()
 
 
+async def resume_subscriptions(settings: Settings, *, any_reason: bool, apply: bool) -> dict[str, Any]:
+    """Найти выключенные подписки активных чатов и (с apply) включить их снова. Без any_reason — только выключенные
+    из-за недоступности бота; с any_reason — все незавершённые, кроме чатов с неопределённой отправкой."""
+    from app.services.locks import chat_lock
+    from app.services.subscriptions import BOT_UNAVAILABLE, REVIEW_PENDING, resume_paused
+    connection = await asyncpg.connect(normalize_asyncpg_dsn(settings.database_url), timeout=30)
+    try:
+        rows = await connection.fetch("""SELECT s.id,s.telegram_chat_id,s.mode,s.paused_reason,c.platform,
+                coalesce(c.title,c.username,'') AS name
+            FROM subscriptions s JOIN telegram_chats c USING (telegram_chat_id)
+            WHERE NOT s.is_enabled AND NOT s.completed AND c.is_active AND ($1 OR s.paused_reason=$2)
+            ORDER BY s.telegram_chat_id,s.mode""", any_reason, BOT_UNAVAILABLE)
+        chats: dict[int, list[Any]] = {}
+        for row in rows:
+            chats.setdefault(row['telegram_chat_id'], []).append(row)
+        report = []
+        for chat_id, items in chats.items():
+            entry = {'chat': chat_id, 'platform': items[0]['platform'], 'name': items[0]['name'],
+                     'modes': [i['mode'] for i in items], 'status': 'would_resume'}
+            if await connection.fetchval(REVIEW_PENDING, chat_id):
+                entry['status'] = 'needs_review'      # неопределённая отправка: решить в панели («Доставки»)
+            elif apply:
+                async with chat_lock(connection, chat_id), connection.transaction():
+                    entry['status'] = 'resumed' if await resume_paused(connection, chat_id, 'cli', any_reason=any_reason) else 'skipped'
+            report.append(entry)
+        return {'status': 'ok', 'applied': apply, 'chats': report,
+                'resumed': sum(len(e['modes']) for e in report if e['status'] == 'resumed')}
+    finally:
+        await connection.close()
+
+
 async def seed_only(settings: Settings) -> dict[str, str]:
     """Применить схему и загрузить справочные данные (книги, темы и т. п.) под блокировкой обслуживания, без импорта текстов."""
     await wait_for_database(settings)
@@ -76,11 +107,14 @@ async def seed_only(settings: Settings) -> dict[str, str]:
 def parser() -> argparse.ArgumentParser:
     """Собрать разбор аргументов командной строки (команда, профиль, максимум изданий, обновление, файл вывода)."""
     result = argparse.ArgumentParser(description="BibleMessengerBot operations")
-    result.add_argument("command", choices=("bootstrap", "import", "preview", "stats", "seed", "audit", "migrate"))
+    result.add_argument("command", choices=("bootstrap", "import", "preview", "stats", "seed", "audit", "migrate", "resume-subscriptions"))
     result.add_argument("--profile", choices=("core", "extended", "all-open", "none"))
     result.add_argument("--max-editions", type=int)
     result.add_argument("--refresh", action="store_true")
     result.add_argument("--check", action="store_true", help="migrate: только проверить ожидающие миграции, ничего не меняя")
+    result.add_argument("--all", action="store_true",
+                        help="resume-subscriptions: все выключенные подписки активных чатов, а не только выключенные из-за остановки бота")
+    result.add_argument("--apply", action="store_true", help="resume-subscriptions: применить (без флага только показать)")
     result.add_argument("--output", type=Path)
     return result
 
@@ -128,6 +162,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         return await db_stats(settings)
     if args.command == "seed":
         return await seed_only(settings)
+    if args.command == "resume-subscriptions":
+        await wait_for_database(settings)
+        return await resume_subscriptions(settings, any_reason=args.all, apply=args.apply)
     raise AssertionError(args.command)
 
 

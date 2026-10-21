@@ -20,7 +20,7 @@ from app.services.formatting import escape
 from app.services.i18n import initial_ui,native_ui_name,tr,ui_for_language
 from app.services.locks import chat_lock
 from app.services.scheduling import parse_hhmm
-from app.services.subscriptions import create_or_update_subscription,set_enabled
+from app.services.subscriptions import create_or_update_subscription,pause_unavailable,resume_paused,resumed_notice,set_enabled
 from app.bot.common import authorize,button,destination,enum_value,register_context,reply  # noqa: F401
 from app.bot.branding import commands_for
 from app.bot.dispatch import run_command
@@ -297,17 +297,29 @@ async def group_message_handler(message: Message,db_pool: Any) -> None:
 
 @router.my_chat_member()
 async def membership_handler(event: ChatMemberUpdated,db_pool: Any) -> None:
-    """Изменение статуса бота в чате: при удалении или потере права публикации чат отключается и рассылки останавливаются, прогресс сохраняется."""
+    """Изменение статуса бота в чате: при остановке, блокировке, удалении или потере права публикации чат отключается
+    и рассылки приостанавливаются (прогресс сохраняется); когда бота снова запускают или возвращают права, рассылки,
+    приостановленные по этой причине, включаются сами, и в чат приходит сообщение об этом."""
     status = enum_value(event.new_chat_member.status)
     active = status in {'administrator','creator'}
     if enum_value(event.chat.type)=='private':
         active = status=='member'
     if enum_value(event.chat.type)=='channel':
         active = active and getattr(event.new_chat_member,'can_post_messages',False)
-    async with db_pool.acquire() as connection,chat_lock(connection,event.chat.id),connection.transaction():
-        await connection.execute('UPDATE telegram_chats SET is_active=$2 WHERE telegram_chat_id=$1',event.chat.id,active)
-        if not active:
-            await connection.execute('UPDATE subscriptions SET is_enabled=false,next_run_at=NULL WHERE telegram_chat_id=$1',event.chat.id)
+    resumed = 0
+    async with db_pool.acquire() as connection:
+        async with chat_lock(connection,event.chat.id),connection.transaction():
+            await connection.execute('UPDATE telegram_chats SET is_active=$2 WHERE telegram_chat_id=$1',event.chat.id,active)
+            if active:
+                resumed = await resume_paused(connection,event.chat.id,'telegram:'+status)
+            else:
+                await pause_unavailable(connection,event.chat.id,'telegram:'+status)
+        locale = await connection.fetchval('SELECT ui_language FROM telegram_chats WHERE telegram_chat_id=$1',event.chat.id) if resumed else None
+    if resumed:
+        try:
+            await event.bot.send_message(event.chat.id,resumed_notice(locale))
+        except TelegramAPIError:
+            LOGGER.warning('Resume notice for chat %s was not delivered', event.chat.id)
 
 
 @router.message(F.migrate_to_chat_id)
