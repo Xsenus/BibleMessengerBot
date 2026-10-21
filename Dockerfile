@@ -11,6 +11,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tini espeak-ng ffmpeg tesseract-ocr tesseract-ocr-rus \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system app && useradd --system --gid app --home-dir /app app
+# pip из базового образа содержит собственную копию certifi (Trivy проверяет и её): обновляем до версии
+# с исправленным certifi, а не ждём нового базового образа.
+RUN python -m pip install pip==26.2.2
 COPY requirements.txt requirements-test.txt constraints-linux.txt ./
 COPY requirements-neural.txt constraints-neural-linux.txt ./
 RUN python -m pip install -r requirements-neural.txt
