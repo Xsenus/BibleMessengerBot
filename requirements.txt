@@ -2,7 +2,7 @@ aiogram==3.31.0
 asyncpg>=0.32.0,<1
 httpx[socks]>=0.27,<1
 aiohttp-socks>=0.10,<1
-fastapi>=0.143.2,<1
+fastapi>=0.143.3,<1
 uvicorn[standard]>=0.54.0,<1
 # Aiogram 3.31 requires Pydantic below 2.14.
 pydantic>=2.8,<2.14
