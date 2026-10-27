@@ -12,7 +12,7 @@
     "screenshots:docs": "DOCS_SCREENSHOTS=1 playwright test --project=screenshots -g документации"
   },
   "dependencies": {
-    "lucide-react": "1.59.0",
+    "lucide-react": "1.61.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
@@ -20,6 +20,6 @@
     "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.64.1",
     "@vitejs/plugin-react": "6.1.2",
-    "vite": "8.3.4"
+    "vite": "8.3.5"
   }
 }
