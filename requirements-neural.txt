@@ -2,5 +2,5 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 -c constraints-neural-linux.txt
 torch==2.14.1+cpu
-transformers==5.20.1
+transformers==5.20.2
 piper-tts==1.8.0

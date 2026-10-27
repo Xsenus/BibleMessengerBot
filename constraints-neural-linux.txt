@@ -1,8 +1,8 @@
-filelock==4.2.1
+filelock==4.2.4
 flatbuffers==25.12.19
 fsspec==2026.9.0
 hf-xet==1.7.0
-huggingface_hub==2.2.0
+huggingface_hub==2.3.0
 httpx2==2.13.1
 httpcore2==2.13.1
 truststore==0.10.5
@@ -27,5 +27,5 @@ sympy==1.14.0
 tokenizers==0.23.3
 torch==2.14.1+cpu
 tqdm==4.70.1
-transformers==5.20.1
+transformers==5.20.2
 typer==0.27.3
