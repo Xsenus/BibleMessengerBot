@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from boto3.s3.transfer import TransferConfig
+from botocore.exceptions import ClientError
 
 from app.services import cloud_backup
 
@@ -35,8 +36,8 @@ def public(record: Any) -> dict[str, Any]:
             'verified_at': record['verified_at'].isoformat(), 'size_bytes': record['byte_count']}
 
 
-def details(record: Any, settings: cloud_backup.CloudSettings) -> tuple[str, int]:
-    """Проверить область ключа, допустимый размер и ключ шифрования до обращений к S3."""
+def details(record: Any, settings: cloud_backup.CloudSettings, *, decrypt: bool = True) -> tuple[str, int]:
+    """Проверить область ключа, допустимый размер и при скачивании ключ шифрования."""
     key = str(record['object_key'])
     prefix = cloud_backup.PREFIX + 'database/'
     if (record['kind'] != 'database' or not key.startswith(prefix)
@@ -46,15 +47,58 @@ def details(record: Any, settings: cloud_backup.CloudSettings) -> tuple[str, int
     size = int(record['byte_count'])
     if size < 34 or size > 16 * 1024**3:
         raise ValueError('invalid_backup_size')
-    cloud_backup.encryption_bytes(settings.encryption_key)
+    if decrypt:
+        cloud_backup.encryption_bytes(settings.encryption_key)
     return key, size
 
 
-def metadata(client: Any, settings: cloud_backup.CloudSettings, record: Any, key: str, size: int) -> None:
+def metadata(client: Any, settings: cloud_backup.CloudSettings, record: Any, key: str, size: int) -> dict:
     """Проверить наличие и метаданные архива; HEAD не заменяет полную проверку содержимого перед скачиванием."""
     head = client.head_object(Bucket=settings.bucket, Key=key)
     if head['ContentLength'] != size or head.get('Metadata', {}).get('sha256') != record['sha256']:
         raise ValueError('backup_metadata_mismatch')
+    return dict(head)
+
+
+def missing(error: ClientError) -> bool:
+    """Кандидат на отсутствие объекта по HEAD. Ошибки корзины и доступа требуют другой обработки."""
+    return error.response.get('Error', {}).get('Code') in {'404', 'NoSuchKey', 'NotFound'}
+
+
+def current_object(client: Any, settings: cloud_backup.CloudSettings, record: Any, key: str, size: int) -> dict | None:
+    """Признать объект отсутствующим только после HEAD и успешной сверки точного ключа в корзине."""
+    try:
+        return metadata(client, settings, record, key, size)
+    except ClientError as error:
+        if not missing(error):
+            raise
+    result = client.list_objects_v2(Bucket=settings.bucket, Prefix=key, MaxKeys=1)
+    if (result.get('Name') != settings.bucket or result.get('Prefix') != key
+            or result.get('IsTruncated') is not False or result.get('KeyCount') != 0
+            or result.get('Contents')):
+        raise RuntimeError('backup_absence_unconfirmed')
+    return None
+
+
+def reconcile(record: Any, settings: cloud_backup.CloudSettings, *, delete: bool = False) -> bool:
+    """Сверить архив и по запросу удалить один объект. True означает подтверждённое отсутствие."""
+    key, size = details(record, settings, decrypt=False)
+    client = settings.client()
+    try:
+        head = current_object(client, settings, record, key, size)
+        if head is None:
+            return True
+        if not delete:
+            return False
+        etag = head.get('ETag')
+        if not isinstance(etag, str) or not etag:
+            raise ValueError('backup_etag_missing')
+        client.delete_object(Bucket=settings.bucket, Key=key, IfMatch=etag)
+        if current_object(client, settings, record, key, size) is not None:
+            raise RuntimeError('backup_remains_available')
+        return True
+    finally:
+        client.close()
 
 
 def probe(record: Any, settings: cloud_backup.CloudSettings) -> None:

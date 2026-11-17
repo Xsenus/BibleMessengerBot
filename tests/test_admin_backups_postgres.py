@@ -37,6 +37,8 @@ async def fixture(c, tmp_path, monkeypatch, payload=None):
     class Client:
         def __init__(self):
             self.downloads = 0
+            self.deletions = 0
+            self.listings = 0
             self.closed = False
             self.corrupt = False
             self.missing = False
@@ -45,7 +47,18 @@ async def fixture(c, tmp_path, monkeypatch, payload=None):
             assert kwargs == {'Bucket':'fixture', 'Key':object_key}
             if self.missing:
                 raise ClientError({'Error':{'Code':'NoSuchKey', 'Message':'fixture-secret https://signed.fixture.invalid/?secret'}}, 'HeadObject')
-            return {'ContentLength':len(cipher), 'Metadata':{'sha256':hashlib.sha256(cipher).hexdigest()}}
+            return {'ContentLength':len(cipher), 'Metadata':{'sha256':hashlib.sha256(cipher).hexdigest()}, 'ETag':'"fixture-tag"'}
+
+        def list_objects_v2(self, **kwargs):
+            assert kwargs == {'Bucket':'fixture', 'Prefix':object_key, 'MaxKeys':1}
+            self.listings += 1
+            return {'Name':'fixture', 'Prefix':object_key, 'IsTruncated':False,
+                    'KeyCount':0 if self.missing else 1, 'Contents':[] if self.missing else [{'Key':object_key}]}
+
+        def delete_object(self, **kwargs):
+            assert kwargs == {'Bucket':'fixture', 'Key':object_key, 'IfMatch':'"fixture-tag"'}
+            self.deletions += 1
+            self.missing = True
 
         def download_file(self, bucket, name, path, **kwargs):
             assert bucket == 'fixture' and name == object_key
@@ -77,7 +90,10 @@ async def test_backup_catalog_and_download_require_header_key(db, monkeypatch, t
         assert (await api.get(f'/api/admin/backups/{identifier}/availability')).status_code == 401
         assert (await api.post(f'/api/admin/backups/{identifier}/download')).status_code == 401
         assert (await api.post(f'/api/admin/backups/{identifier}/download', headers={'X-Admin-Key':'wrong'})).status_code == 401
+        assert (await api.delete(f'/api/admin/backups/{identifier}')).status_code == 401
+        assert (await api.post('/api/admin/backups/reconcile', json={'ids':[identifier]})).status_code == 401
         assert s3.downloads == 0
+        assert s3.deletions == 0 and s3.listings == 0
 
 
 async def test_backup_catalog_has_snapshot_and_verification_dates_and_pagination(db, monkeypatch, tmp_path):
@@ -240,3 +256,66 @@ async def test_availability_is_limited_to_three_and_does_not_block_list_or_downl
             assert counts == {'active': 0, 'peak': 3, 'calls': 4}
     finally:
         await pool.close()
+
+
+async def test_reconciliation_removes_only_confirmed_missing_database_receipt(db, monkeypatch, tmp_path):
+    c = db[0]
+    identifier, _, s3, _ = await fixture(c, tmp_path, monkeypatch)
+    s3.missing = True
+    await c.execute("INSERT INTO cloud_backup_receipts(kind,object_key,sha256,byte_count) VALUES('image','fixture-image','sha',123)")
+    async with make(monkeypatch, c) as api:
+        response = await api.post('/api/admin/backups/reconcile', headers=H, json={'ids':[identifier, identifier]})
+        assert response.status_code == 200
+        assert response.json()['items'] == [{'id':identifier, 'status':'removed'}]
+        assert (await api.get('/api/admin/backups', headers=H)).json()['total'] == 0
+        assert await c.fetchval("SELECT count(*) FROM cloud_backup_receipts WHERE kind='image'") == 1
+        assert s3.listings == 1 and s3.deletions == 0 and s3.downloads == 0
+
+
+@pytest.mark.parametrize('failure', ['forbidden', 'missing-bucket', 'listed', 'invalid-metadata'])
+async def test_reconciliation_keeps_receipt_when_absence_is_uncertain(db, monkeypatch, tmp_path, failure):
+    c = db[0]
+    identifier, _, s3, _ = await fixture(c, tmp_path, monkeypatch)
+    if failure in {'forbidden', 'missing-bucket'}:
+        code = '403' if failure == 'forbidden' else 'NoSuchBucket'
+        def fail(**_kwargs):
+            raise ClientError({'Error':{'Code':code}}, 'HeadObject')
+        monkeypatch.setattr(s3, 'head_object', fail)
+    elif failure == 'listed':
+        # The HEAD result is ambiguous if the exact key still exists in the list.
+        def fail(**_kwargs):
+            raise ClientError({'Error':{'Code':'404'}}, 'HeadObject')
+        monkeypatch.setattr(s3, 'head_object', fail)
+    else:
+        await c.execute("UPDATE cloud_backup_receipts SET sha256=$2 WHERE id=$1", identifier, '0'*64)
+    async with make(monkeypatch, c) as api:
+        response = await api.post('/api/admin/backups/reconcile', headers=H, json={'ids':[identifier]})
+        assert response.json()['items'] == [{'id':identifier, 'status':'invalid' if failure == 'invalid-metadata' else 'unavailable'}]
+        assert await c.fetchval('SELECT count(*) FROM cloud_backup_receipts') == 1
+        assert s3.deletions == 0
+
+
+async def test_delete_checks_current_etag_and_removes_only_the_selected_receipt(db, monkeypatch, tmp_path):
+    c = db[0]
+    identifier, _, s3, _ = await fixture(c, tmp_path, monkeypatch)
+    async with make(monkeypatch, c) as api:
+        response = await api.delete(f'/api/admin/backups/{identifier}', headers=H)
+        assert response.status_code == 200 and response.json() == {'id':identifier, 'status':'removed'}
+        assert await c.fetchval('SELECT count(*) FROM cloud_backup_receipts') == 0
+        assert (await api.delete(f'/api/admin/backups/{identifier}', headers=H)).status_code == 404
+        assert s3.deletions == 1 and s3.listings == 1
+
+
+@pytest.mark.parametrize(('code','status'), [('AccessDenied',403), ('PreconditionFailed',409)])
+async def test_failed_cloud_delete_keeps_receipt(db, monkeypatch, tmp_path, code, status):
+    c = db[0]
+    identifier, _, s3, _ = await fixture(c, tmp_path, monkeypatch)
+    def deny(**_kwargs):
+        raise ClientError({'Error':{'Code':code, 'Message':'fixture-secret'}}, 'DeleteObject')
+    monkeypatch.setattr(s3, 'delete_object', deny)
+    async with make(monkeypatch, c) as api:
+        response = await api.delete(f'/api/admin/backups/{identifier}', headers=H)
+        assert response.status_code == status
+        assert 'fixture-secret' not in response.text
+        assert await c.fetchval('SELECT count(*) FROM cloud_backup_receipts') == 1
+        assert not s3.missing

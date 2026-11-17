@@ -112,12 +112,10 @@ export const readResponses = {
     proxies: [{ id: 1, name: 'NL-1', scheme: 'socks5', host: 'nl1.example.net', is_enabled: true, last_test_ok: true, last_test_error: '', last_test_at: ago(50) }],
     strategies: ['failover', 'auto', 'round_robin'], secrets_ready: true,
   },
-  '/backups': { total: 2, limit: 30, offset: 0, download_enabled: true, items: [
+  '/backups': { total: 2, limit: 30, offset: 0, download_enabled: true, storage_enabled: true, items: [
     { id: 2, filename: 'biblebot-2026-10-16.dump.age', created_at: ago(600), verified_at: ago(590), size_bytes: 48_500_000 },
     { id: 1, filename: 'biblebot-2026-10-15.dump.age', created_at: ago(2000), verified_at: ago(1990), size_bytes: 48_100_000 },
   ] },
-  '/backups/1/availability': { id: 1, status: 'missing' },
-  '/backups/2/availability': { id: 2, status: 'available' },
   '/settings': { support_section: true, support_source: 'panel' },
 };
 
@@ -159,5 +157,8 @@ export const writeResponses = [
     { route: 'direct', label: 'Напрямую', ok: false, status: 0, ms: 5000, error: 'ConnectTimeout' }] },
   { method: 'POST', path: /^\/backups\/\d+\/download$/, file: Buffer.from('PGDMP'),
     headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="biblebot-2026-10-16.dump"' } },
+  { method: 'POST', path: /^\/backups\/reconcile$/, reply: { items: [
+    { id: 2, status: 'available' }, { id: 1, status: 'unavailable' },
+  ] } },
   { method: 'PUT', path: /^\/settings$/, reply: { support_section: false, support_source: 'panel' } },
 ];
