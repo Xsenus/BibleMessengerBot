@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import time
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramNetworkError
 
 from app.net.router import DIRECT, ROUTER, Route, Router
+from app.net.services import telegram_proxy_url as proxy_url
 
 try:
     import aiohttp
@@ -18,18 +18,6 @@ except ImportError:  # pragma: no cover
 
 # Методы, безопасные для повтора после любой сетевой ошибки (ничего не меняют на стороне Telegram).
 READ_ONLY = {'getUpdates', 'getMe', 'getFile', 'getChat', 'getChatMember', 'getWebhookInfo', 'getMyCommands'}
-
-
-def proxy_url(url: str | None) -> str | None:
-    """aiogram uses remote DNS for SOCKS5; HTTPS proxy connectors are unsupported."""
-    if url is None:
-        return None
-    parts = urlsplit(url)
-    if parts.scheme == 'socks5h':
-        return urlunsplit(parts._replace(scheme='socks5'))
-    if parts.scheme not in {'http', 'socks5'}:
-        raise ValueError('unsupported_telegram_proxy_scheme')
-    return url
 
 
 class RoutedSession(AiohttpSession):

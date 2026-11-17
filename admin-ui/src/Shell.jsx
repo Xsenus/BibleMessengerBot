@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { BookOpen, LogOut, Menu, Monitor, Moon, Sun, X } from 'lucide-react';
 import { GROUPS } from './sections.js';
-import { api } from './api.js';
 import { useTheme } from './hooks.js';
+import { useData } from './ui.jsx';
 
 const THEME_LABELS = { system: ['Тема: как в системе', Monitor], light: ['Тема: светлая', Sun], dark: ['Тема: тёмная', Moon] };
 
@@ -15,28 +15,21 @@ function Brand() {
   );
 }
 
-/** Число доставок, требующих решения, для метки в меню. Обновляется раз в минуту; ошибки не мешают работе. */
-function useAttention() {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    const load = () => api('/overview').then((data) => { if (alive) setCount(data.queue.attention || 0); }).catch(() => {});
-    load();
-    const timer = setInterval(load, 60000);
-    return () => { alive = false; clearInterval(timer); };
-  }, []);
-  return count;
-}
-
 /** Каркас панели: боковое меню с группами (на телефоне — выдвижное), шапка и область раздела. */
-export default function Shell({ current, onLogout, children }) {
+export default function Shell({ current, onLogout }) {
   const [open, setOpen] = useState(false);
   const [theme, nextTheme] = useTheme();
   const menuButton = useRef(null);
   const sidebar = useRef(null);
   const [themeLabel, ThemeIcon] = THEME_LABELS[theme];
-  const attention = useAttention();
-  const badges = { deliveries: attention };
+  const overview = useData('/overview');
+  const { reload } = overview;
+  const badges = { deliveries: overview.data?.queue.attention || 0 };
+  const Page = current.page;
+  useEffect(() => {
+    const timer = setInterval(() => { if (!document.hidden) reload(); }, 60000);
+    return () => clearInterval(timer);
+  }, [reload]);
 
   const firstRoute = useRef(true);
   useEffect(() => {
@@ -93,7 +86,9 @@ export default function Shell({ current, onLogout, children }) {
           </button>
         </div>
       </aside>
-      <main className="content" id="content">{children}</main>
+      <main className="content" id="content">
+        {current.id === 'overview' ? <Page key={current.id} overview={overview} /> : <Page key={current.id} />}
+      </main>
     </div>
   );
 }

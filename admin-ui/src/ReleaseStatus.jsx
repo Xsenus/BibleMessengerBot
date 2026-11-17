@@ -119,7 +119,7 @@ export default function ReleaseStatus({ refreshKey = 0 }) {
       finally { busy = false; }
     };
     load();
-    const timer = setInterval(load, 30000);
+    const timer = setInterval(() => { if (!document.hidden) load(); }, 30000);
     return () => { controller.abort(); clearInterval(timer); };
   }, [refreshKey]);
   const latest = data?.server.last_attempt;

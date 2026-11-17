@@ -1,5 +1,6 @@
 """Внешние сервисы, для которых настраиваются маршруты."""
 from __future__ import annotations
+from urllib.parse import urlsplit, urlunsplit
 
 # ключ -> (название, адрес для проверки доступности; любой HTTP-ответ означает, что путь работает)
 SERVICES: dict[str, tuple[str, str]] = {
@@ -31,3 +32,15 @@ def service_for_host(host: str) -> str:
         if any(host == s or host.endswith('.' + s) for s in suffixes):
             return service
     return 'sources'
+
+
+def telegram_proxy_url(url: str | None) -> str | None:
+    """Привести адрес к схеме, которую поддерживает сессия Telegram."""
+    if url is None:
+        return None
+    parts = urlsplit(url)
+    if parts.scheme == 'socks5h':
+        return urlunsplit(parts._replace(scheme='socks5'))
+    if parts.scheme not in {'http', 'socks5'}:
+        raise ValueError('unsupported_telegram_proxy_scheme')
+    return url

@@ -36,18 +36,26 @@ export function explain(error) {
   return MESSAGES[text] || (error.status === 401 ? 'Неверный ключ' : text || 'Ошибка');
 }
 
-/** Загрузка списка с обновлением и показом ошибки. Ответ на устаревший запрос (например, при быстром вводе
- * в поиске) отбрасывается: на экране всегда результат последнего запроса. */
+/** Загрузка списка с обновлением и показом ошибки. Устаревший запрос отменяется. */
 export function useData(path) {
   const [state, setState] = useState({ data: null, error: '', loading: true });
-  const latest = useRef(0);
+  const active = useRef(null);
   const load = useCallback(async () => {
-    const id = ++latest.current;
-    try { const data = await api(path); if (id === latest.current) setState({ data, error: '', loading: false }); }
-    catch (e) { if (id === latest.current) setState((s) => ({ ...s, error: explain(e), loading: false })); }
+    active.current?.abort();
+    const controller = new AbortController();
+    active.current = controller;
+    setState((s) => ({ ...s, error: '', loading: s.data === null }));
+    try {
+      const data = await api(path, { signal: controller.signal });
+      if (!controller.signal.aborted) setState({ data, error: '', loading: false });
+    } catch (error) {
+      if (!controller.signal.aborted) setState((s) => ({ ...s, error: explain(error), loading: false }));
+    }
   }, [path]);
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => () => { latest.current += 1; }, []);
+  useEffect(() => {
+    load();
+    return () => active.current?.abort();
+  }, [load]);
   return { ...state, reload: load };
 }
 
