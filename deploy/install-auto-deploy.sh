@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Установить отдельного SSH-пользователя и root-сценарий; принимает только файл публичного Ed25519-ключа.
 set -Eeuo pipefail
-[[ "$(id -u)" == 0 && $# == 1 ]] || { echo 'Usage: sudo bash deploy/install-auto-deploy.sh PUBLIC_KEY_FILE' >&2; exit 64; }
+[[ "$(id -u)" == 0 && ( $# == 1 || ( $# == 2 && "$2" == --systemd ) ) ]] \
+  || { echo 'Usage: sudo bash deploy/install-auto-deploy.sh PUBLIC_KEY_FILE [--systemd]' >&2; exit 64; }
 source_dir="$(dirname "$(readlink -f "$0")")"
 public_key="$(awk 'NR==1 {print $1 " " $2}' "$1")"
 [[ "$public_key" =~ ^ssh-ed25519\ [A-Za-z0-9+/=]+$ ]]
@@ -9,7 +10,13 @@ ssh-keygen -lf "$1" >/dev/null
 id bibledeploy >/dev/null 2>&1 || useradd --create-home --home-dir /var/lib/bible-deploy --shell /bin/bash bibledeploy
 install -d -m 755 /usr/local/libexec
 install -m 755 "$source_dir/ssh-deploy.sh" /usr/local/libexec/bible-deploy-ssh
-install -m 755 "$source_dir/auto-deploy.sh" /usr/local/sbin/bible-auto-deploy
+if [[ "${2:-}" == --systemd ]]; then
+  install -m 755 "$source_dir/auto-deploy-systemd.sh" /usr/local/sbin/bible-auto-deploy
+  install -m 755 "$source_dir/release-python.sh" /usr/local/libexec/bible-release-python
+  install -m 644 "$source_dir/systemd-ops.py" /usr/local/libexec/bible-systemd-ops
+else
+  install -m 755 "$source_dir/auto-deploy.sh" /usr/local/sbin/bible-auto-deploy
+fi
 install -m 755 "$source_dir/write-deployment-status.py" /usr/local/libexec/bible-deploy-status
 install -m 755 "$source_dir/notify-deployment.py" /usr/local/libexec/bible-deploy-notify
 install -d -m 755 /usr/local/share/bible-messenger-bot

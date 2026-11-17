@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 import time
 from collections import deque
@@ -15,7 +16,7 @@ import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILD_FILE = ROOT / 'BUILD-METADATA.json'
-STATUS_FILE = ROOT / 'deploy-status' / 'status.json'
+STATUS_FILE = Path(os.getenv('BIBLE_DEPLOY_STATUS_FILE', str(ROOT / 'deploy-status' / 'status.json')))
 REPOSITORY = 'https://github.com/Xsenus/BibleMessengerBot'
 SERVICES = {'worker', 'composer', 'bot', 'admin', 'max-web', 'maxbot', 'vkbot', 'illustrator', 'speaker'}
 STATES = {'running', 'succeeded', 'failed', 'rolled_back', 'manual_intervention', 'skipped'}

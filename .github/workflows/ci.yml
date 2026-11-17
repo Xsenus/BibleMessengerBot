@@ -54,6 +54,15 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Panel smoke tests
         run: npm test --prefix admin-ui
+      - name: Package the production panel
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: tar -czf "$RUNNER_TEMP/panel.tar.gz" -C app/web/static/panel .
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: production-panel
+          path: ${{ runner.temp }}/panel.tar.gz
+          if-no-files-found: error
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
