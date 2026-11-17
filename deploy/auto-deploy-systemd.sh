@@ -86,12 +86,24 @@ check_unit() {
 }
 
 web_ready() {
-    local url=$1
-    for _ in {1..20}; do
-        if curl -fsS --max-time 2 -o /dev/null "$url"; then return 0; fi
+    local url=$1 deadline=$((SECONDS + 90))
+    while (( SECONDS < deadline )); do
+        if curl -fs --max-time 2 -o /dev/null "$url"; then return 0; fi
         sleep 1
     done
+    printf 'Readiness timed out: %s\n' "$url" >&2
     return 1
+}
+
+restart_unit() {
+    local item=$1 directory=$2
+    systemctl restart "bible-messenger-$item" && check_unit "$item" "$directory" || return 1
+    # Web imports can take over 30 seconds cold on a small VPS. Let them finish
+    # before the bot and worker processes compete for CPU and memory.
+    case "$item" in
+        admin) web_ready http://127.0.0.1:8420/ready ;;
+        max-web) web_ready http://127.0.0.1:8421/ready ;;
+    esac
 }
 
 finish() {
@@ -112,7 +124,7 @@ finish() {
                 status running "$stage" || true
                 switch_release "$old" || restored=false
                 for item in "${units[@]}"; do
-                    systemctl restart "bible-messenger-$item" && check_unit "$item" "$old" || restored=false
+                    restart_unit "$item" "$old" || restored=false
                 done
                 if [[ $restored == true ]]; then outcome=rolled_back; fi
             else
@@ -228,8 +240,7 @@ status running "$stage"
 activated=true
 switch_release "$release"
 for service in "${units[@]}"; do
-    systemctl restart "bible-messenger-$service"
-    check_unit "$service" "$release"
+    restart_unit "$service" "$release"
 done
 
 stage=verifying
