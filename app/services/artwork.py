@@ -513,12 +513,25 @@ SUBSCRIPTION_AND_REQUEST_TARGETS = """
 
 
 async def queue_counts(connection):
-    """Посчитать незаконченные задания с получателями и историю, используя те же цели, что и воркер."""
-    rows = await connection.fetch(f"""WITH targets AS ({SUBSCRIPTION_AND_REQUEST_TARGETS})
-        SELECT j.state, j.state<>'ready' AND (
-            EXISTS(SELECT 1 FROM targets WHERE targets.id=j.id)
-            OR (j.admin_requested AND j.state IN ('queued','retry','running'))
-        ) AS is_current, count(*) AS n
+    """Отделить работу и свежие сбои от истории, сохранив видимость сбоев предстоящих рассылок."""
+    rows = await connection.fetch(f"""WITH targets AS ({SUBSCRIPTION_AND_REQUEST_TARGETS}),
+        upcoming AS (
+            SELECT r.image_id
+            FROM scheduled_readings r JOIN delivery_log d ON d.id=r.delivery_id
+            JOIN subscriptions s ON s.id=d.subscription_id
+            JOIN telegram_chats c ON c.telegram_chat_id=d.telegram_chat_id
+            WHERE r.deadline_at>now() AND r.state IN ('preparing','ready')
+              AND d.status IN ('pending','retry','sending')
+              AND s.is_enabled AND NOT s.completed AND c.is_active
+              AND d.subscription_revision=s.revision AND d.chat_revision=c.revision
+        )
+        SELECT j.state, CASE
+            WHEN j.state='ready' THEN false
+            WHEN j.state IN ('failed','uncertain') THEN
+                j.updated_at>=now()-interval '24 hours'
+                OR EXISTS(SELECT 1 FROM upcoming WHERE upcoming.image_id=j.image_id)
+            ELSE j.admin_requested OR EXISTS(SELECT 1 FROM targets WHERE targets.id=j.id)
+        END AS is_current, count(*) AS n
         FROM image_generation_jobs j GROUP BY 1,2 ORDER BY 1,2""")
     result: dict[str, dict[str, int]] = {'current': {}, 'history': {}}
     for row in rows:

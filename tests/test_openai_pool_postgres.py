@@ -1,6 +1,7 @@
 import asyncio
 import os
 from dataclasses import replace
+from datetime import time, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -32,10 +33,17 @@ async def second_job(c):
 
 async def test_admin_openai_readiness_uses_current_keys_and_separates_queue_history(db, monkeypatch):
     from tests.test_admin_api_postgres import H, make
+    from app.services.subscriptions import create_or_update_subscription
+    from app.worker.delivery import insert_payload
 
     c, _, archived = await job(db)
     current = await second_job(c)
-    await c.execute("UPDATE image_generation_jobs SET state='failed',error_code='quality_unavailable' WHERE id=$1", archived)
+    await c.execute("""UPDATE image_generation_jobs SET state='failed',error_code='quality_unavailable',
+        updated_at=now()-interval '7 days' WHERE id=$1""", archived)
+    image = await c.fetchrow('SELECT i.* FROM verse_illustrations i JOIN image_generation_jobs j ON j.image_id=i.id WHERE j.id=$1', archived)
+    chat = await c.fetchrow('SELECT * FROM telegram_chats WHERE telegram_chat_id=101')
+    await c.execute("""INSERT INTO illustration_requests(telegram_chat_id,image_id,request_key,caption,chat_revision,telegram_message_id)
+        VALUES(101,$1,'waiting-card','Fixture',$2,456)""", image['id'], chat['revision'])
     await c.execute("UPDATE image_generation_jobs SET admin_requested=true WHERE id=$1", current)
     await c.execute("INSERT INTO service_heartbeats(service) VALUES('illustrator')")
     key = 'active-fixture'
@@ -65,6 +73,17 @@ async def test_admin_openai_readiness_uses_current_keys_and_separates_queue_hist
         assert data['builtin'][0]['configured'] and data['builtin'][0]['blocked_until'] is None
         assert data['queue'] == {'current': {'queued': 1}, 'history': {'failed': 1}}
         assert key not in response.text and active not in response.text
+        await c.execute('UPDATE image_generation_jobs SET updated_at=now() WHERE id=$1', archived)
+        assert (await artwork.queue_counts(c))['current']['failed'] == 1
+        await c.execute("UPDATE image_generation_jobs SET updated_at=now()-interval '7 days' WHERE id=$1", archived)
+        edition = await bible.find_translation(c, image['translation_id'])
+        subscription = await create_or_update_subscription(c, chat_id=101, created_by=101,
+            translation_id=edition['id'], mode='verse_of_day', send_time=time(14), timezone_name=chat['timezone'])
+        delivery = await insert_payload(c, chat, edition, 'Fixture', 'scheduled-test', 'verse_of_day', {},
+            subscription=subscription, frozen_chunks=[{'kind': 'text', 'text': 'Fixture'}])
+        await c.execute('INSERT INTO scheduled_readings(delivery_id,image_id,deadline_at) VALUES($1,$2,$3)',
+            delivery, image['id'], subscription['next_run_at']+timedelta(minutes=30))
+        assert (await artwork.queue_counts(c)) == {'current': {'failed': 1, 'queued': 1}, 'history': {}}
         await c.execute("""INSERT INTO image_provider_health(provider,key_fingerprint,blocked_until,error_code)
             VALUES('openai',$1,now()+interval '1 hour','quota')""", active)
         blocked = (await client.get('/api/admin/image-providers', headers=H)).json()['openai_readiness']

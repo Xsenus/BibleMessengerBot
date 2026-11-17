@@ -257,7 +257,7 @@ export default function ImageProviders() {
               <div className="stat">
                 <span className="stat-label">История заданий</span>
                 <JobCounts counts={data.queue.history} />
-                <span className="muted">Завершённые задания и задания без активных запросов.</span>
+                <span className="muted">Завершённые задания, старые ошибки без связи с ближайшей рассылкой и задачи без получателей.</span>
               </div>
             </div>
           </div>
