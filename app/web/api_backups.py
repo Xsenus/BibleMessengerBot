@@ -112,19 +112,13 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
         async with pool.acquire() as conn:
             rows = await conn.fetch("SELECT * FROM cloud_backup_receipts WHERE kind='database' AND id=ANY($1::bigint[])", ids)
 
-        async def check(record: Any) -> str:
-            """Отличить подтверждённое отсутствие от ошибки доступа, сети или метаданных."""
+        statuses: dict[int, str] = {}
+        if rows:
             try:
                 async with probe_slots:
-                    absent = await run_in_threadpool(admin_backups.reconcile, record, settings)
-                return 'missing' if absent else 'available'
-            except ValueError:
-                return 'invalid'
+                    statuses = await run_in_threadpool(admin_backups.reconcile_catalog, rows, settings)
             except Exception:
-                return 'unavailable'
-
-        checked = await asyncio.gather(*(check(row) for row in rows))
-        statuses = dict(zip((row['id'] for row in rows), checked, strict=True))
+                statuses = {row['id']: 'unavailable' for row in rows}
         absent = [row for row in rows if statuses[row['id']] == 'missing']
         if absent:
             async with pool.acquire() as conn:

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from boto3.s3.transfer import TransferConfig
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from app.services import cloud_backup
 
@@ -97,6 +97,39 @@ def reconcile(record: Any, settings: cloud_backup.CloudSettings, *, delete: bool
         if current_object(client, settings, record, key, size) is not None:
             raise RuntimeError('backup_remains_available')
         return True
+    finally:
+        client.close()
+
+
+def reconcile_catalog(records: list[Any], settings: cloud_backup.CloudSettings) -> dict[int, str]:
+    """Проверить страницу через один S3-клиент. Полный список ключей подтверждает отсутствие без отдельных HEAD."""
+    prefix = cloud_backup.PREFIX + 'database/'
+    statuses = {record['id']: 'unavailable' for record in records}
+    client = settings.client(metadata_only=True)
+    try:
+        result = client.list_objects_v2(Bucket=settings.bucket, Prefix=prefix)
+        contents = result.get('Contents') or []
+        if (result.get('Name') != settings.bucket or result.get('Prefix') != prefix
+                or result.get('KeyCount') != len(contents) or type(result.get('IsTruncated')) is not bool):
+            return statuses
+        keys = {item['Key'] for item in contents}
+        if len(keys) != len(contents) or any(not key.startswith(prefix) for key in keys):
+            return statuses
+        complete = not result['IsTruncated']
+        for record in records:
+            try:
+                key, size = details(record, settings, decrypt=False)
+                if complete and key not in keys:
+                    statuses[record['id']] = 'missing'
+                else:
+                    statuses[record['id']] = 'missing' if current_object(client, settings, record, key, size) is None else 'available'
+            except ValueError:
+                statuses[record['id']] = 'invalid'
+            except (ClientError, RuntimeError):
+                continue
+            except (BotoCoreError, OSError):
+                break
+        return statuses
     finally:
         client.close()
 
