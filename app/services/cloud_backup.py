@@ -61,8 +61,8 @@ class CloudSettings:
         """Облачное копирование включено, если заданы адрес и корзина."""
         return bool(self.endpoint and self.bucket)
 
-    def client(self):
-        """Создать клиент S3 с отдельной Session для безопасной работы в параллельных потоках, SigV4, повторами и тайм-аутами."""
+    def client(self, *, metadata_only=False):
+        """Создать отдельный S3-клиент. Проверки каталога используют короткие тайм-ауты."""
         return boto3.session.Session().client(
             "s3",
             endpoint_url=self.endpoint,
@@ -72,9 +72,10 @@ class CloudSettings:
             config=Config(
                 signature_version="s3v4",
                 s3={"addressing_style": "path"},
-                retries={"mode": "standard", "max_attempts": 3},
-                connect_timeout=15,
-                read_timeout=120,
+                retries={"mode": "standard", "total_max_attempts": 1} if metadata_only else
+                        {"mode": "standard", "max_attempts": 3},
+                connect_timeout=5 if metadata_only else 15,
+                read_timeout=8 if metadata_only else 120,
                 request_checksum_calculation="when_required",
                 response_checksum_validation="when_required",
             ),
