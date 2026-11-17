@@ -122,7 +122,26 @@ def bots(project):
     return result
 
 
-def message(receipt, project, runtime, reasons):
+def systemd_bots(project):
+    """Получить версии работающих ботов по каталогам их процессов systemd."""
+    result = []
+    for service, name in [('bot', 'Telegram'), ('maxbot', 'MAX')]:
+        item = {'name': name, 'state': 'unknown', 'commit': None}
+        pid = command(['systemctl', 'show', f'bible-messenger-{service}', '-p', 'MainPID', '--value'])
+        if pid and pid.strip().isdigit():
+            if int(pid) == 0:
+                item['state'] = 'absent'
+            else:
+                cwd = command(['readlink', '-e', '/proc/' + pid.strip() + '/cwd'])
+                if cwd:
+                    release = Path(cwd.strip())
+                    if (release.parent == project.parent and re.fullmatch('[0-9a-f]{40}', release.name)):
+                        item.update(state='healthy', commit=release.name)
+        result.append(item)
+    return result
+
+
+def message(receipt, project, runtime, reasons, *, systemd=False):
     """Сформировать текст из разрешённых полей: итог, фактическая версия, healthcheck и исходная причина отказа."""
     sha = receipt.get('commit')
     status = receipt.get('status')
@@ -140,7 +159,8 @@ def message(receipt, project, runtime, reasons):
     names = {'healthy': 'работает', 'unhealthy': 'не прошёл healthcheck', 'absent': 'не запущен', 'unknown': 'проверить не удалось'}
     for item in runtime:
         lines.append(item['name'] + ': ' + names[item['state']] + (' · ' + item['commit'][:8] if item['commit'] else ''))
-    lines.append('Проверка ботов: состояние процессов Docker, без тестовой рассылки.')
+    process_manager = 'systemd' if systemd else 'Docker'
+    lines.append(f'Проверка ботов: состояние процессов {process_manager}, без тестовой рассылки.')
     failure = receipt.get('failure')
     if isinstance(failure, dict) and isinstance(failure.get('code'), str) and failure['code'] in reasons:
         lines.append('Причина: ' + reasons[failure['code']])
@@ -183,10 +203,12 @@ def send(token, chat_id, text, opener=None):
         return {'state': 'unknown'}
 
 
-def notify(project, state, config, reasons):
+def notify(project, state, config, reasons, *, systemd=False):
     """Зафиксировать отправку до запроса; повторный вызов не дублирует даже неоднозначно отправленное сообщение."""
     receipt = read(state / 'public-attempt.json')
-    text = message(receipt, project, bots(project), reasons)
+    runtime = systemd_bots(project) if systemd else bots(project)
+    repository = project.parent.parent / 'source.git' if systemd else project
+    text = message(receipt, repository, runtime, reasons, systemd=systemd)
     print('BIBLE_DEPLOY_REPORT=' + base64.b64encode(json.dumps({'text': text}).encode()).decode(), flush=True)
     saved = state / 'telegram-notification.json'
     previous = read(saved)
@@ -226,11 +248,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('project', type=Path)
     parser.add_argument('state', type=Path)
+    parser.add_argument('--systemd', action='store_true')
     parser.add_argument('--config', type=Path, default=Path(os.getenv('BIBLE_DEPLOY_NOTIFY_CONFIG', '/etc/bible-deploy-notify.json')))
     parser.add_argument('--messages', type=Path, default=Path(os.getenv('BIBLE_DEPLOY_NOTIFY_MESSAGES', '/usr/local/share/bible-messenger-bot/deployment-failures.json')))
     args = parser.parse_args()
     try:
-        notify(args.project, args.state, read(args.config), read(args.messages))
+        notify(args.project, args.state, read(args.config), read(args.messages), systemd=args.systemd)
     except Exception:
         # Не показывать URL Bot API, traceback и токен; сбой уведомления не откатывает исправный бот.
         print('BIBLE_DEPLOY_NOTICE=unavailable', flush=True)

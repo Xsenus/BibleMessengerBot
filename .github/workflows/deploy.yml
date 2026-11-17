@@ -11,6 +11,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
+    permissions:
+      actions: read
+      contents: read
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
@@ -26,7 +29,14 @@ jobs:
       report: ${{ steps.install.outputs.report }}
       ssh_exit: ${{ steps.install.outputs.ssh_exit }}
     steps:
-      # No checkout, downloaded artifacts, or PR code in this privileged workflow.
+      # Static output from the successful main CI run. No checkout or execution of artifact code.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        if: vars.VPS_DEPLOY_RUNTIME == 'systemd'
+        with:
+          name: production-panel
+          path: ${{ runner.temp }}/production-panel
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
       - name: Deploy the exact commit checked by CI
         id: install
         env:
@@ -34,6 +44,7 @@ jobs:
           VPS_HOST: ${{ vars.VPS_HOST }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          VPS_DEPLOY_RUNTIME: ${{ vars.VPS_DEPLOY_RUNTIME }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -55,11 +66,16 @@ jobs:
           trap finish EXIT
           printf '%s\n' "$VPS_SSH_KEY" > "$ssh_dir/id_ed25519"
           printf '%s\n' "$VPS_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          bundle=/dev/null
+          if [[ "$VPS_DEPLOY_RUNTIME" == systemd ]]; then
+            bundle="$RUNNER_TEMP/production-panel/panel.tar.gz"
+            test -s "$bundle"
+          fi
           ssh -T -i "$ssh_dir/id_ed25519" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
             -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 \
-            "bibledeploy@$VPS_HOST" "$DEPLOY_SHA" | tee "$ssh_dir/result.log"
+            "bibledeploy@$VPS_HOST" "$DEPLOY_SHA" < "$bundle" | tee "$ssh_dir/result.log"
 
   notify-fallback:
     needs: deploy

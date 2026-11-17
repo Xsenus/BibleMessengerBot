@@ -66,8 +66,11 @@ def collect_changes(public_dir, previous, target):
     notifier = Path(__file__).with_name('notify-deployment.py')
     if not notifier.is_file():
         notifier = Path(__file__).with_name('bible-deploy-notify')
+    project = public_dir.parent.parent
+    if (project / 'source.git').is_dir() and (project / 'current').is_symlink():
+        project = project / 'source.git'
     try:
-        result = subprocess.run([sys.executable, str(notifier), '--changes-json', str(public_dir.parent.parent), previous or '', target],
+        result = subprocess.run([sys.executable, str(notifier), '--changes-json', str(project), previous or '', target],
                                 capture_output=True, text=True, encoding='utf-8', check=True, timeout=20)
         details = change_details(json.loads(result.stdout)) if len(result.stdout) <= 16384 else None
         if details:
