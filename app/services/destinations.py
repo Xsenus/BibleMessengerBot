@@ -6,12 +6,12 @@ from app.services.errors import UserError
 from app.services.i18n import available_ui
 from app.services.locks import chat_lock
 from app.services.plans import validate_plan
-from app.services.scheduling import next_reading, validate_timezone
+from app.services.scheduling import next_occurrence, next_reading, validate_timezone
 
 
 async def ensure_resolved(connection: Any, chat_id: int) -> None:
     """Не менять настройки, пока есть неопределённые или частично доставленные задания: `pending_review` (нужно решение оператора) или `busy` (идёт доставка)."""
-    if await connection.fetchval("SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND mode<>'illustration_edit' AND (status IN ('uncertain','sending') OR (status='failed' AND next_chunk>0)))",chat_id):
+    if await connection.fetchval("SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND mode NOT IN ('illustration_edit','reading_offer') AND (status IN ('uncertain','sending') OR (status='failed' AND next_chunk>0)))",chat_id):
         raise UserError('pending_review')
     if await connection.fetchval("SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND mode<>'illustration_edit' AND status IN ('pending','retry') AND next_chunk>0)",chat_id):
         raise UserError('busy')
@@ -55,6 +55,10 @@ async def configure_chat(connection: Any, chat_id: int, *, actor_id: int | None,
             revision=revision+1,updated_at=now() WHERE telegram_chat_id=$1 RETURNING *''',
             chat_id,ui_language,translation_id,translation['language_code'] if translation else None,
             timezone_name,set_thread,message_thread_id)
+        if timezone_name is not None and timezone_name != old['timezone']:
+            from app.services.reading_defaults import OFFER_TIME
+            await connection.execute('''UPDATE reading_schedule_preferences SET offer_at=$2
+                WHERE telegram_chat_id=$1 AND offer_at IS NOT NULL''', chat_id, next_occurrence(OFFER_TIME, timezone_name))
         await connection.execute('''UPDATE subscriptions SET translation_id=COALESCE($2,translation_id),
             timezone=COALESCE($3,timezone),revision=revision+1,retry_at=NULL,
             current_book_code=CASE WHEN $4 THEN NULL ELSE current_book_code END,

@@ -19,7 +19,6 @@ from app.services.errors import UserError
 from app.services.formatting import escape
 from app.services.i18n import initial_ui,native_ui_name,tr,ui_for_language
 from app.services.locks import chat_lock
-from app.services.scheduling import parse_hhmm
 from app.services.subscriptions import create_or_update_subscription,pause_unavailable,resume_paused,resumed_notice,set_enabled
 from app.bot.common import authorize,button,destination,enum_value,register_context,reply  # noqa: F401
 from app.bot.branding import commands_for
@@ -154,6 +153,9 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
         locale = initial_ui(callback.from_user.language_code)
         try:
             action,chat_id,value = decode_callback(callback.data or '')
+            from app.services import reading_defaults
+            if action in {'readingon','readingno'} and chat_id != callback.message.chat.id:
+                raise UserError('forbidden')
             await register_context(connection,callback.from_user,callback.message.chat,settings)
             chat = await destination(connection,bot,callback.message.chat,callback.from_user.id,chat_id,settings)
             locale = chat['ui_language']
@@ -177,13 +179,18 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
             elif action in {'pause','resume'}:
                 await set_enabled(connection,chat_id,action=='resume')
                 text,markup = tr(locale,'saved'),settings_keyboard(chat)
+            elif action in {'readingon','readingno'}:
+                text = await reading_defaults.answer_offer(connection, chat, callback.from_user.id,
+                    callback.message.message_id, int(value), action=='readingon')
+                markup = None
             elif action in {'mode','plan'}:
                 edition = await bible.chat_translation(connection,chat_id)
                 if not edition:
                     raise UserError('not_ready')
+                mode = mode_name(value) if action=='mode' else 'reading_plan'
                 await create_or_update_subscription(connection,chat_id=chat_id,created_by=callback.from_user.id,
-                    translation_id=edition['id'],mode=mode_name(value) if action=='mode' else 'reading_plan',
-                    send_time=parse_hhmm(settings.default_send_time),timezone_name=chat['timezone'],
+                    translation_id=edition['id'],mode=mode,
+                    send_time=reading_defaults.default_time(chat, mode, settings.default_send_time),timezone_name=chat['timezone'],
                     plan_code=value if action=='plan' else None)
                 text,markup = tr(locale,'saved'),settings_keyboard(chat)
             elif action=='plans':
@@ -209,7 +216,7 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
                     raise UserError('not_ready')
                 sub = await create_or_update_subscription(connection,chat_id=chat_id,created_by=callback.from_user.id,
                     translation_id=edition['id'],mode='verse_of_day',
-                    send_time=parse_hhmm(settings.default_send_time),timezone_name=chat['timezone'])
+                    send_time=reading_defaults.default_time(chat, 'verse_of_day', settings.default_send_time),timezone_name=chat['timezone'])
                 text,markup = daily_confirmation(sub,locale),settings_keyboard(chat)
             elif action=='zones':
                 from app.bot.timezones import menu
@@ -219,7 +226,7 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
                 text,markup=await settings_text(connection,chat),settings_keyboard(chat)
             elif action=='timehelp':
                 suffix = await command_target_suffix(connection,chat)
-                text,markup = f"{tr(locale,'time')}: <code>/time 09:00 {escape(chat['timezone'])}{suffix}</code>",None
+                text,markup = f"{tr(locale,'time')}: <code>/time 14:00 {escape(chat['timezone'])}{suffix}</code>",None
             elif action=='settings':
                 text,markup = await settings_text(connection,chat),settings_keyboard(chat)
             elif action=='pb':

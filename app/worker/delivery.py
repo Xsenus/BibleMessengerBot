@@ -285,6 +285,11 @@ async def process_delivery(connection: Any, delivery_id: int, sender: Any) -> st
             return 'stale'
         if row['scheduled_for']>datetime.now(UTC):
             return 'not_due'
+        if row['mode']=='reading_offer':
+            from app.services.reading_defaults import valid_offer
+            if not await valid_offer(connection, row):
+                await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='reading_offer_inactive',updated_at=now() WHERE id=$1",delivery_id)
+                return 'stale'
         from app.services import scheduled_media, prayers
         if row['mode']=='prayer' and datetime.now(UTC)>row['scheduled_for']+timedelta(minutes=3):
             await connection.execute("UPDATE delivery_log SET status='skipped',error_code='prayer_expired',updated_at=now() WHERE id=$1",delivery_id)

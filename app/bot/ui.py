@@ -104,7 +104,7 @@ def welcome_text(locale: str, edition_title: str | None = None) -> str:
             'Читайте в своём темпе, находите нужные слова и возвращайтесь к чтению.\n\n'
             '📖 <b>Читать дальше</b> — следующая глава с сохранением прогресса.\n'
             '🌅 <b>Стих дня</b> — отрывок на сегодня по нажатию.\n'
-            '🔔 <b>Стих каждый день</b> — включить ежедневную доставку.\n'
+            '🔔 <b>Ежедневное расписание</b> — чтения в 09:00, 14:00 и 21:00, молитвы в 09:38 и 21:13 по времени чата. /pause — приостановить.\n'
             '⚙️ <b>Настройки</b> — перевод, язык и ежедневная рассылка.\n\n'
             'Выберите действие на клавиатуре внизу ↓'
         )
@@ -114,7 +114,7 @@ def welcome_text(locale: str, edition_title: str | None = None) -> str:
             'Read at your own pace, find a passage, and continue where you left off.\n\n'
             '📖 <b>Continue reading</b> — the next chapter, with progress saved.\n'
             '🌅 <b>Verse of the day</b> — today’s passage on request.\n'
-            '🔔 <b>Daily verse</b> — turn on daily delivery.\n'
+            '🔔 <b>Daily schedule</b> — readings at 09:00, 14:00 and 21:00, prayer at 09:38 and 21:13 in your chat time zone. Use /pause to pause.\n'
             '⚙️ <b>Settings</b> — edition, language, and daily deliveries.\n\n'
             'Choose an action on the keyboard below ↓'
         )

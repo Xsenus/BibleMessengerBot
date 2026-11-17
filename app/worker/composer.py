@@ -6,7 +6,7 @@ import logging
 from app.config import Settings
 from app.db import acquire_runtime_guard, close_pool, create_pool, wait_for_database
 from app.net import store as net_store
-from app.services import announcements, prayers
+from app.services import announcements, prayers, reading_defaults
 from app.services import loops as loops_module
 from app.services.locks import lock_key
 
@@ -52,7 +52,8 @@ async def worker():
             # Независимые циклы: медленный опрос видео не задерживает объявления и молитвы; итоги проходов пишутся в loop_stats.
             loops = [asyncio.create_task(loops_module.run_forever(pool, name, step, interval))
                      for name, step, interval in (('prayers', prayers.prepare_due, 10), ('announcements', announcements.run_due, 10),
-                                                  ('videos', run_video_watch, 30), ('delivery_recovery', recover_delivery, 10))]
+                                                  ('videos', run_video_watch, 30), ('delivery_recovery', recover_delivery, 10),
+                                                  ('reading_defaults', reading_defaults.prepare_due, 10))]
             try:
                 await asyncio.gather(*loops)
             finally:

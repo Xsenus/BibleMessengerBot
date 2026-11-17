@@ -143,6 +143,7 @@ async def test_daily_devotions_timezone_pause_resume_and_search(max_context):
     rows=await c.fetch('SELECT * FROM subscriptions WHERE telegram_chat_id=$1',chat)
     assert {r['mode'] for r in rows}=={'verse_of_day','morning_verse','evening_verse'}
     assert all(r['is_enabled'] and r['timezone']=='Europe/Moscow' for r in rows)
+    assert next(r['send_time'] for r in rows if r['mode']=='verse_of_day').strftime('%H:%M') == '14:00'
     assert {r['send_time'].strftime('%H:%M') for r in rows if r['mode']!='verse_of_day'}=={'09:38','21:13'}
     assert len(sent)>=len(commands)
     assert any('SYNTHETIC' in (body.get('text') or '') for _,body in sent)
@@ -210,7 +211,7 @@ async def test_time_help_uses_copyable_max_destination_for_command_and_button(ma
         await command(max_context,'/time'+suffix,index+1)
         await drain(max_context)
         zone=await c.fetchval('SELECT timezone FROM telegram_chats WHERE telegram_chat_id=$1',target)
-        expected=f'<code>/time 09:00 {zone}{suffix}</code>'
+        expected=f'<code>/time 14:00 {zone}{suffix}</code>'
         assert expected in sent[-1][1]['text']
         assert str(target) not in sent[-1][1]['text']
         event={'update_type':'message_callback','timestamp':456,'user_locale':'en','message':original,

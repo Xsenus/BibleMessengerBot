@@ -139,11 +139,11 @@ async def test_photo_timeout_remains_uncertain_and_is_not_automatically_replayed
 
 
 async def test_daily_command_creates_explicit_schedule_in_destination_timezone(monkeypatch):
-    chat = {"telegram_chat_id": 101, "ui_language": "ru", "timezone": "Asia/Novosibirsk"}
+    chat = {"telegram_chat_id": 101, "ui_language": "ru", "timezone": "Asia/Novosibirsk", "chat_type": "private"}
     patch_bot(monkeypatch, "destination", AsyncMock(return_value=chat))
     monkeypatch.setattr(handlers.bible, "chat_translation", AsyncMock(return_value={"id": 2}))
     create = AsyncMock(
-        return_value={"send_time": __import__("datetime").time(9), "timezone": "Asia/Novosibirsk"}
+        return_value={"send_time": __import__("datetime").time(14), "timezone": "Asia/Novosibirsk"}
     )
     patch_bot(monkeypatch, "create_or_update_subscription", create)
     from app.bot.commands import parse_command
@@ -157,4 +157,5 @@ async def test_daily_command_creates_explicit_schedule_in_destination_timezone(m
     )
     assert create.await_args.kwargs["mode"] == "verse_of_day"
     assert create.await_args.kwargs["timezone_name"] == "Asia/Novosibirsk"
-    assert "09:00" in text and "/daily off" in text
+    assert create.await_args.kwargs["send_time"] == __import__("datetime").time(14)
+    assert "14:00" in text and "/daily off" in text

@@ -11,7 +11,7 @@ from app.services.errors import UserError
 from app.services.formatting import escape
 from app.services.i18n import available_ui,native_ui_name,tr,ui_for_language
 from app.services.locks import chat_lock
-from app.services.scheduling import parse_hhmm
+from app.services.reading_defaults import DEFAULT_TIMES
 from app.services.subscriptions import create_or_update_subscription,list_subscriptions
 from app.bot.common import button
 
@@ -68,9 +68,9 @@ async def enable_devotions(connection: Any,chat: Any,actor_id:int) -> str:
     edition=await bible.chat_translation(connection,chat['telegram_chat_id'])
     if not edition:raise UserError('not_ready')
     async with chat_lock(connection,chat['telegram_chat_id']),connection.transaction():
-        for mode,clock in [('morning_verse','09:38'),('evening_verse','21:13')]:
+        for mode in ('morning_verse','evening_verse'):
             await create_or_update_subscription(connection,chat_id=chat['telegram_chat_id'],created_by=actor_id,
-                translation_id=edition['id'],mode=mode,send_time=parse_hhmm(clock),timezone_name=chat['timezone'])
+                translation_id=edition['id'],mode=mode,send_time=DEFAULT_TIMES[mode],timezone_name=chat['timezone'])
     if chat['ui_language']=='ru':
         return f"🌅 <b>Утро и вечер включены</b>\nЧтение: 09:00 и 21:00\n🕊 Молитва: 09:38 и 21:13 · {escape(chat['timezone'])}\nКартинка и все доступные озвучки готовятся заранее.\nОтключить: /devotions off"
     return f"🌅 <b>Morning and evening enabled</b>\nReading: 09:00 and 21:00\n🕊 Prayer: 09:38 and 21:13 · {escape(chat['timezone'])}\nArtwork and all available narrations are prepared in advance.\nTurn off: /devotions off"

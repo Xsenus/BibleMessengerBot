@@ -66,6 +66,8 @@ async def create_or_update_subscription(connection: Any, *, chat_id: int, create
             chat_id,created_by,translation_id,mode,send_time,timezone_name,plan_code,next_run,reset)
         # The chat owns the schedule timezone used by manual /today as well.
         await connection.execute('UPDATE telegram_chats SET timezone=$2,default_translation_id=$3,updated_at=now() WHERE telegram_chat_id=$1',chat_id,timezone_name,translation_id)
+        from app.services.reading_defaults import remember_choice
+        await remember_choice(connection, chat_id, mode, 'enable')
     return row
 
 
@@ -74,22 +76,30 @@ async def set_enabled(connection: Any, chat_id: int, enabled: bool, mode: str | 
     if mode is not None and mode not in VALID_MODES:
         raise UserError('invalid')
     async with chat_lock(connection,chat_id), connection.transaction():
-        if enabled and await connection.fetchval("SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND (status IN ('sending','uncertain') OR (status='failed' AND next_chunk>0)))",chat_id):
+        if enabled and await connection.fetchval(REVIEW_PENDING,chat_id):
             raise UserError('pending_review')
         rows = await connection.fetch('SELECT * FROM subscriptions WHERE telegram_chat_id=$1 AND ($2::text IS NULL OR mode=$2)',chat_id,mode)
+        from app.services.reading_defaults import DEFAULT_TIMES, remember_choice
         count = 0
         for row in rows:
             if enabled and row['completed']:
                 continue
+            if enabled and not row['is_enabled'] and row['mode'] in DEFAULT_TIMES:
+                await connection.execute("""UPDATE delivery_log SET status='skipped',error_code='stale_after_pause',updated_at=now()
+                    WHERE subscription_id=$1 AND status IN ('pending','retry') AND next_chunk=0 AND scheduled_for<now()""", row['id'])
             next_run = next_reading(row['mode'],row['send_time'],row['timezone'],list(row['days_of_week'])) if enabled else None
             await connection.execute('''UPDATE subscriptions SET is_enabled=$2,next_run_at=$3,paused_reason=NULL,
                 updated_at=now() WHERE id=$1''',row['id'],enabled,next_run)
+            if enabled:
+                await remember_choice(connection, chat_id, row['mode'], 'enable')
             count += 1
+        if not enabled:
+            await remember_choice(connection, chat_id, mode, 'pause')
     return count
 
 
 BOT_UNAVAILABLE = 'bot_unavailable'
-REVIEW_PENDING = "SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND (status IN ('sending','uncertain') OR (status='failed' AND next_chunk>0)))"
+REVIEW_PENDING = "SELECT EXISTS(SELECT 1 FROM delivery_log WHERE telegram_chat_id=$1 AND mode<>'reading_offer' AND (status IN ('sending','uncertain') OR (status='failed' AND next_chunk>0)))"
 
 
 async def pause_unavailable(connection: Any, chat_id: int, cause: str) -> int:
@@ -145,6 +155,8 @@ async def delete_subscriptions(connection: Any, chat_id: int, mode: str | None =
         if mode is None:
             await connection.execute("UPDATE delivery_log SET status='cancelled',error_code='unsubscribed',updated_at=now() WHERE telegram_chat_id=$1 AND mode='manual' AND status IN ('pending','retry','failed','uncertain')",chat_id)
         result = await connection.execute('DELETE FROM subscriptions WHERE telegram_chat_id=$1 AND ($2::text IS NULL OR mode=$2)',chat_id,mode)
+        from app.services.reading_defaults import remember_choice
+        await remember_choice(connection, chat_id, mode, 'unsubscribe')
     return int(result.split()[-1])
 
 
