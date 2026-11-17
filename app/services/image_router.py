@@ -141,6 +141,61 @@ async def budget_usage(connection):
         GROUP BY provider,key_fingerprint""")
 
 
+def daily_usage(records):
+    """Суммировать попытки за день по провайдерам и сохранить счётчики отдельных ключей."""
+    providers_used: dict[str, int] = {}
+    key_usage = {}
+    for record in records:
+        name = record['provider']
+        providers_used[name] = providers_used.get(name, 0) + record['daily']
+        key_usage[name, record['key_fingerprint']] = record['daily']
+    return providers_used, key_usage
+
+
+def daily_count(settings, identifier, providers_used, key_usage):
+    """Применить к ключу общий или индивидуальный суточный лимит."""
+    name, _ = identifier
+    if name == 'openai' and settings.openai_daily_scope == 'key':
+        return key_usage.get(identifier, 0) + key_usage.get(('openai', None), 0)
+    return providers_used.get(name, 0)
+
+
+async def openai_readiness(connection, settings, usage):
+    """Показать доступность текущих ключей и последнюю успешную генерацию без запроса к OpenAI."""
+    from app.services.openai_credentials import image_keys
+
+    name = 'openai'
+    fingerprints = [fingerprint(api.Provider(name, key)) for key in image_keys(settings.key, settings.openai_keys)]
+    now = datetime.now(UTC)
+    health = await connection.fetch("""SELECT key_fingerprint,blocked_until,error_code
+        FROM image_provider_health WHERE provider='openai' AND key_fingerprint=ANY($1::text[]) AND blocked_until>$2""",
+        fingerprints, now)
+    blocked = {row['key_fingerprint'] for row in health}
+    providers_used, key_usage = daily_usage(usage)
+    unblocked = [key for key in fingerprints if key not in blocked]
+    available = sum(daily_count(settings, (name, key), providers_used, key_usage) < settings.daily_requests for key in unblocked)
+    worker_ready = await connection.fetchval("""SELECT EXISTS(SELECT 1 FROM service_heartbeats
+        WHERE service='illustrator' AND last_seen>now()-interval '180 seconds')""")
+    last_success = await connection.fetchval("""SELECT max(created_at) FROM image_generation_attempts
+        WHERE provider='openai' AND state='succeeded' AND error_code IS NULL AND key_fingerprint=ANY($1::text[])""", fingerprints)
+    next_unblock = None
+    if not fingerprints:
+        status = 'missing_key'
+    elif not unblocked:
+        status = 'blocked'
+        next_unblock = min(health, key=lambda row: row['blocked_until'])
+    elif not available:
+        status = 'daily_limit'
+    elif sum(row['monthly'] for row in usage) + api.RESERVES[name] > settings.monthly_usd:
+        status = 'monthly_budget'
+    else:
+        status = 'available'
+    return dict(status=status, configured_keys=len(fingerprints), worker_ready=worker_ready,
+                blocked_until=next_unblock['blocked_until'].isoformat() if next_unblock else None,
+                error_code=next_unblock['error_code'] if next_unblock else None,
+                last_success_at=last_success.isoformat() if last_success else None)
+
+
 async def reserve_test(connection, provider, settings):
     """Reserve a panel probe before submission; unknown prices are rejected."""
     amount = provider.reservation_usd
@@ -178,11 +233,7 @@ async def reserve(connection, job_id, settings):
         }
         usage = await budget_usage(connection)
         monthly_reserved = sum(r["monthly"] for r in usage)
-        daily_used = {}
-        credential_used = {}
-        for record in usage:
-            daily_used[record['provider']] = daily_used.get(record['provider'], 0) + record['daily']
-            credential_used[(record['provider'], record['key_fingerprint'])] = record['daily']
+        daily_used, credential_used = daily_usage(usage)
         candidates = []
         blocked = False
         daily_exhausted = False
@@ -197,10 +248,8 @@ async def reserve(connection, job_id, settings):
             ):
                 continue
             identifier = (provider.name, fingerprint(provider))
-            daily_count = (credential_used.get(identifier, 0) + credential_used.get(('openai', None), 0) if provider.name == 'openai'
-                           and settings.openai_daily_scope == 'key' else daily_used.get(provider.name, 0))
             limit = provider.custom['daily_limit'] if provider.custom is not None else settings.daily_requests
-            if daily_count >= limit:
+            if daily_count(settings, identifier, daily_used, credential_used) >= limit:
                 daily_exhausted = True
                 continue
             state = health.get(identifier)

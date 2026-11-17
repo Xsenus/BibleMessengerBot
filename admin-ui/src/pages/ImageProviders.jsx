@@ -14,7 +14,17 @@ const BILLING = {
   metered: 'Платный API / бесплатные кредиты аккаунта',
   free_only: 'Анонимный Horde / Pollinations без ключа',
 };
-const JOBS = { queued: 'в очереди', running: 'выполняется', done: 'готово', failed: 'ошибки', stopped: 'остановлено' };
+const JOBS = {
+  queued: 'в очереди', running: 'выполняется', retry: 'ждут повтора',
+  failed: 'с ошибкой', uncertain: 'исход неизвестен', ready: 'готово',
+};
+const OPENAI_STATUS = {
+  available: 'Можно запустить генерацию',
+  missing_key: 'Ключ OpenAI не задан',
+  blocked: 'Все ключи OpenAI временно недоступны',
+  daily_limit: 'Дневной лимит запросов исчерпан',
+  monthly_budget: 'В месячном бюджете мало средств для следующей генерации',
+};
 const EMPTY = { slug: '', label: '', adapter: 'openai_compatible', base_url: '', model: '', api_key: '', account_id: '',
   width: 1216, height: 832, steps: '', priority: 500, daily_limit: 20, is_enabled: true,
   billing_mode: 'unknown', reservation_usd: '0' };
@@ -23,6 +33,31 @@ const EMPTY = { slug: '', label: '', adapter: 'openai_compatible', base_url: '',
 function Check({ ok, warn, children }) {
   const [Icon, tone] = warn ? [TriangleAlert, 'warning'] : ok === true ? [CircleCheck, 'ok'] : ok === false ? [CircleX, 'danger'] : [CircleHelp, 'muted'];
   return <li className={`check-item check-${tone}`}><Icon size={17} aria-hidden="true" /><span>{children}</span></li>;
+}
+
+function OpenAIReadiness({ data }) {
+  const { status, configured_keys, worker_ready, blocked_until, error_code, last_success_at } = data;
+  return (
+    <ul className="check-list">
+      <Check ok={worker_ready}>{worker_ready ? 'Служба иллюстраций работает' : 'Служба иллюстраций давно не подавала сигнал'}</Check>
+      <Check ok={status === 'available'}>
+        {OPENAI_STATUS[status] || 'Состояние OpenAI неизвестно'}
+        {configured_keys > 0 && <> · ключей {formatNumber(configured_keys)}</>}
+        {blocked_until && <> · ближайшее снятие паузы {when(blocked_until)}</>}
+        {error_code && <> · <code>{error_code}</code></>}
+      </Check>
+      <Check ok={last_success_at ? true : null}>
+        {last_success_at ? <>Последняя успешная генерация <TimeAgo value={last_success_at} /></> : 'На текущих ключах успешных генераций пока нет'}
+      </Check>
+    </ul>
+  );
+}
+
+function JobCounts({ counts }) {
+  const jobs = Object.entries(counts);
+  return <span className="job-list">{jobs.length
+    ? jobs.map(([state, count]) => <span key={state}><b>{formatNumber(count)}</b> {JOBS[state] || state}</span>)
+    : <span className="muted">пусто</span>}</span>;
 }
 
 function AddForm({ templates, onCreated, secretsReady }) {
@@ -180,11 +215,13 @@ function Custom({ item, reload }) {
 export default function ImageProviders() {
   const { data, error, loading, reload } = useData('/image-providers');
   const { run, message, busy } = useAction(reload);
-  const jobs = data ? Object.entries(data.jobs) : [];
+  const openai = data?.openai_readiness;
   return (
     <section>
-      <PageHeader title="Генераторы картинок" description="Бот пробует генераторы по приоритету или по статистике. Всем платным запросам, включая проверки, нужен резерв в общем месячном бюджете; при неизвестной цене запуск запрещён." />
-      <Help title="Как это работает и что нужно для запуска">
+      <PageHeader title="Генераторы картинок" description="Платные запросы, включая проверки, расходуют общий месячный бюджет." />
+      {openai ? <Help title="Как проверяется готовность OpenAI">
+        <p>Панель проверяет состояние службы иллюстраций, настройки ключей, лимиты и журнал генераций. Открытие страницы не отправляет запрос в OpenAI.</p>
+      </Help> : <Help title="Как это работает и что нужно для запуска">
         <p>У бесплатных уровней аккаунтов возможны платные превышения квоты: для таких сервисов задайте максимальную цену запроса с запасом и ограничение расходов в кабинете провайдера. Нулевой резерв разрешён только анонимным Horde/Pollinations на стандартном адресе без ключа. При смене модели или размера обновите верхнюю границу стоимости.</p>
         <p>Каждой картинке нужен генератор. Бот пробует их по очереди: сначала добавленные здесь (по приоритету — меньшее число раньше), потом платные из <code>.env</code>. Если генератор вернул ошибку или исчерпал дневной лимит, берётся следующий.</p>
         <ol>
@@ -194,28 +231,33 @@ export default function ImageProviders() {
           <li><b>Настройте порядок и лимит</b>: «Приоритет» (меньше — раньше) и «В сутки, не более». Самые надёжные ставьте первыми, медленные (AI Horde) — последними.</li>
         </ol>
         <p>Коды ошибок: <code>auth</code> — неверный ключ или Account ID; <code>rate_limited</code> — квота исчерпана, подождите или снизьте лимит; <code>response_invalid</code>/<code>no_image</code> — неверный адрес или модель; <code>remote_timeout</code> — сервис перегружен; <code>scene_unavailable</code> — не запущена локальная нейросеть.</p>
-      </Help>
+      </Help>}
       <Status error={error} loading={loading} />
       {data && (
         <>
           <div className="split">
-            <Panel title="Готовность">
-              <ul className="check-list">
+            <Panel title={openai ? 'Готовность OpenAI' : 'Готовность'}>
+              {openai ? <OpenAIReadiness data={openai} /> : <ul className="check-list">
                 <Check ok={data.secrets_ready}>Шифрование ключей {data.secrets_ready ? 'настроено' : <>не настроено: задайте <code>SECRETS_KEY</code> или <code>ADMIN_API_KEY</code> (24+ символа) и пересоздайте службу admin</>}</Check>
                 {data.secrets_ready && !data.secrets_dedicated && <Check warn>Ключи шифруются ключом <code>ADMIN_API_KEY</code>: при его смене все сохранённые ключи генераторов придётся ввести заново. Задайте отдельный <code>SECRETS_KEY</code> в <code>.env</code> (и больше не меняйте его).</Check>}
                 <Check ok={data.planner_ready}>Локальная нейросеть описания сцен {data.planner_ready === true ? 'работает' : data.planner_ready === false ? <>не отвечает: без неё бесплатные генераторы пропускаются. Запустите <code>docker compose --profile prayers up -d</code></> : 'не проверена'}</Check>
                 <Check ok={data.custom.some((c) => c.is_enabled)}>Включён хотя бы один добавленный генератор</Check>
                 <Check ok={data.custom.some((c) => c.last_test_ok) || null}>Успешная проверка выполнена</Check>
-              </ul>
+              </ul>}
             </Panel>
             <div className="stat-stack">
               <Stat label="Режим" value={data.mode} hint="ILLUSTRATION_PROVIDER" />
               <Stat label="Месячный бюджет" value={`$${data.monthly_budget_usd}`} hint="на платные запросы" />
               <div className="stat">
-                <span className="stat-label">Очередь заданий</span>
-                <span className="job-list">{jobs.length ? jobs.map(([k, v]) => <span key={k}><b>{formatNumber(v)}</b> {JOBS[k] || k}</span>) : <span className="muted">пусто</span>}</span>
+                <span className="stat-label">Текущие задания</span>
+                <JobCounts counts={data.queue.current} />
                 <button className="small" disabled={busy} onClick={() => run(() => api('/image-queue/retry', { method: 'POST' }), 'Задания возвращены в очередь')}><RotateCcw size={14} aria-hidden="true" />Повторить остановленные</button>
                 {message && <span className="form-message" role="alert">{message}</span>}
+              </div>
+              <div className="stat">
+                <span className="stat-label">История заданий</span>
+                <JobCounts counts={data.queue.history} />
+                <span className="muted">Завершённые задания и задания без активных запросов.</span>
               </div>
             </div>
           </div>
@@ -226,13 +268,14 @@ export default function ImageProviders() {
           <AddForm templates={data.templates} onCreated={reload} secretsReady={data.secrets_ready} />
           <Panel title="Платные (из настроек сервера)">
             <Help title="Как включить платные генераторы">
-              <p>Ключи задаются только в файле <code>.env</code> на сервере (панель их не меняет): <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>BFL_API_KEY</code>, <code>IDEOGRAM_API_KEY</code>, <code>STABILITY_API_KEY</code>. После правки пересоздайте службу: <code>docker compose up -d --no-deps --force-recreate illustrator</code>. Режим <code>ILLUSTRATION_PROVIDER=auto</code> включает перебор всех ключей, <code>manual</code> — работают только генераторы из панели.</p>
+              <p>Ключи задаются в окружении служб панели и иллюстраций. Для OpenAI используются <code>OPENAI_API_KEY</code> и <code>OPENAI_API_KEYS</code>, для других встроенных провайдеров — <code>GEMINI_API_KEY</code>, <code>BFL_API_KEY</code>, <code>IDEOGRAM_API_KEY</code> и <code>STABILITY_API_KEY</code>. После правки перезапустите обе службы. Режим <code>ILLUSTRATION_PROVIDER=auto</code> включает перебор всех ключей, <code>manual</code> использует генераторы из панели.</p>
             </Help>
             <DataTable caption="Платные генераторы" rows={data.builtin} rowKey={(b) => b.name} stack columns={[
               { key: 'name', header: 'Сервис', render: (b) => <code>{b.name}</code> },
               { key: 'model', header: 'Модель' },
               { key: 'key', header: 'Ключ', render: (b) => <StatusBadge tone={b.configured ? 'ok' : 'off'}>{b.configured ? 'задан' : 'нет'}</StatusBadge> },
-              { key: 'today', header: 'Сегодня', render: (b) => `${b.daily_used} из ${b.daily_limit}` },
+              { key: 'today', header: 'Сегодня', render: (b) => b.daily_scope === 'key'
+                ? `${b.daily_used} · до ${b.daily_limit} на ключ` : `${b.daily_used} из ${b.daily_limit}` },
               { key: 'pause', header: 'Пауза', render: (b) => (b.blocked_until ? <>{when(b.blocked_until)} <code>{b.error_code}</code></> : '—') },
             ]} />
           </Panel>
