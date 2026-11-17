@@ -169,6 +169,7 @@ fi
 panel=$(mktemp -d "$base/.static.XXXXXXXX")
 python3 "$runtime" panel "$bundle" "$panel"
 if [[ ! -s $release/app/web/static/panel/index.html ]]; then
+    install -d -m 755 "$release/app/web/static"
     mv -T "$panel" "$release/app/web/static/panel"
     panel=''
 fi
