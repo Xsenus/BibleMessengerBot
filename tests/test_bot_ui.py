@@ -90,7 +90,7 @@ async def test_bot_messages_cannot_activate_keyboard_actions(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('command,expected', [('/search', '/search любовь'), ('/time', '/time 09:00 UTC')])
+@pytest.mark.parametrize('command,expected', [('/search', '/search любовь'), ('/time', '/time 14:00 UTC')])
 async def test_prompt_commands_work_without_telegram_requests(monkeypatch, command, expected):
     chat = {'telegram_chat_id': 101, 'ui_language': 'ru', 'timezone': 'UTC'}
     connection = SimpleNamespace(execute=AsyncMock(), fetchrow=AsyncMock(return_value=chat))

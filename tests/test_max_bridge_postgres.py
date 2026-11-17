@@ -210,7 +210,7 @@ async def test_time_help_uses_copyable_max_destination_for_command_and_button(ma
         await command(max_context,'/time'+suffix,index+1)
         await drain(max_context)
         zone=await c.fetchval('SELECT timezone FROM telegram_chats WHERE telegram_chat_id=$1',target)
-        expected=f'<code>/time 09:00 {zone}{suffix}</code>'
+        expected=f'<code>/time 14:00 {zone}{suffix}</code>'
         assert expected in sent[-1][1]['text']
         assert str(target) not in sent[-1][1]['text']
         event={'update_type':'message_callback','timestamp':456,'user_locale':'en','message':original,
