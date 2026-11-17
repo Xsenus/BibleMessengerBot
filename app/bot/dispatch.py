@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from aiogram.types import Message,ReplyKeyboardRemove
 from app.bot.commands import mode_name
 from app.bot.ui import main_keyboard,welcome_text,menu_hint,search_prompt
-from app.services import bible, broadcast
+from app.services import bible, broadcast, reading_defaults
 from app.services.platforms import is_bridged
 from app.services import passage,illustrations,readings
 from app.services import audit
@@ -61,6 +61,8 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
                 'Buttons hidden. Restore them with /menu. Commands remain available in Menu.'),ReplyKeyboardRemove()
     # /start в личном чате — приветствие и главная клавиатура
     if name=='start' and enum_value(message.chat.type)=='private':
+        if connection is not None and 'chat_type' in chat and reading_defaults.supported(chat):
+            await reading_defaults.initialize(connection, chat['telegram_chat_id'])
         if not is_bridged(getattr(bot,'platform',None)) and connection is not None:
             await connection.execute('UPDATE telegram_chats SET keyboard_hidden=false WHERE telegram_chat_id=$1',message.chat.id)
         edition = await bible.chat_translation(connection,chat['telegram_chat_id'])
@@ -101,7 +103,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             raise UserError('not_ready')
         sub = await create_or_update_subscription(connection,chat_id=chat['telegram_chat_id'],created_by=user.id,
             translation_id=edition['id'],mode='verse_of_day',
-            send_time=parse_hhmm(args[0] if args else settings.default_send_time),
+            send_time=parse_hhmm(args[0]) if args else reading_defaults.DEFAULT_TIMES['verse_of_day'],
             timezone_name=args[1] if len(args)>1 else chat['timezone'])
         return daily_confirmation(sub,locale),settings_keyboard(chat)
     # /claim КОД — стать владельцем бота (один раз, только в личном чате)
@@ -237,7 +239,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
     if name=='time':
         if not args:
             target = await command_target_suffix(connection,chat)
-            return f"{tr(locale,'time')}: <code>/time 09:00 {escape(chat['timezone'])}{target}</code>",None
+            return f"{tr(locale,'time')}: <code>/time 14:00 {escape(chat['timezone'])}{target}</code>",None
         if not 1<=len(args)<=2:
             raise UserError('invalid')
         clock,tz = parse_hhmm(args[0]),args[1] if len(args)==2 else chat['timezone']
@@ -260,7 +262,8 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
         if not edition:
             raise UserError('not_ready')
         await create_or_update_subscription(connection,chat_id=chat['telegram_chat_id'],created_by=user.id,
-            translation_id=edition['id'],mode=mode,send_time=parse_hhmm(args[1] if len(args)>1 else settings.default_send_time),
+            translation_id=edition['id'],mode=mode,
+            send_time=(parse_hhmm(args[1]) if len(args)>1 else reading_defaults.DEFAULT_TIMES.get(mode, parse_hhmm(settings.default_send_time))),
             timezone_name=args[2] if len(args)>2 else chat['timezone'],plan_code=args[3] if len(args)>3 else None)
         return tr(locale,'saved'),settings_keyboard(chat)
     # /reset confirm — сбросить прогресс и отключить подписки
@@ -274,6 +277,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             await connection.execute('''UPDATE subscriptions SET current_book_code=NULL,current_chapter=NULL,current_verse=NULL,
                 plan_day=0,completed=false,is_enabled=false,next_run_at=NULL,paused_reason=NULL,revision=revision+1 WHERE telegram_chat_id=$1''',chat['telegram_chat_id'])
             await connection.execute("INSERT INTO operator_events(actor_id,chat_id,action) VALUES($1,$2,'reset_progress')",user.id,chat['telegram_chat_id'])
+            await reading_defaults.remember_choice(connection, chat['telegram_chat_id'], None, 'unsubscribe')
         return tr(locale,'saved')+'\n/resume',settings_keyboard(chat)
     # /resolve ID действие — решение оператора по неопределённой доставке
     if name=='resolve':

@@ -15,6 +15,7 @@ from aiogram.exceptions import (
     TelegramServerError,
 )
 from aiogram.types import (
+    InlineKeyboardMarkup,
     BufferedInputFile,
     InputMediaPhoto,
     InputMediaAudio,
@@ -54,7 +55,13 @@ class TelegramSender:
                 if text.get('kind') == 'photo':
                     from app.services.illustrations import without_quarantined_image
                     text = await without_quarantined_image(self.connection, text)
-                if text.get("kind") in {"rich", "rich_edit"}:
+                if text.get("kind") == "reading_offer":
+                    message = await self.bot.send_message(
+                        chat_id, text["text"], parse_mode="HTML",
+                        reply_markup=InlineKeyboardMarkup.model_validate(text["inline_keyboard"]),
+                        link_preview_options={"is_disabled": True},
+                    )
+                elif text.get("kind") in {"rich", "rich_edit"}:
                     message = await self._rich(chat_id, text, thread_id, reply_markup)
                 elif text.get("kind") == "asset_photo":
                     message = await self._asset_photo(chat_id, text, thread_id, reply_markup)
