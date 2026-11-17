@@ -143,6 +143,7 @@ async def test_daily_devotions_timezone_pause_resume_and_search(max_context):
     rows=await c.fetch('SELECT * FROM subscriptions WHERE telegram_chat_id=$1',chat)
     assert {r['mode'] for r in rows}=={'verse_of_day','morning_verse','evening_verse'}
     assert all(r['is_enabled'] and r['timezone']=='Europe/Moscow' for r in rows)
+    assert next(r['send_time'] for r in rows if r['mode']=='verse_of_day').strftime('%H:%M') == '14:00'
     assert {r['send_time'].strftime('%H:%M') for r in rows if r['mode']!='verse_of_day'}=={'09:38','21:13'}
     assert len(sent)>=len(commands)
     assert any('SYNTHETIC' in (body.get('text') or '') for _,body in sent)

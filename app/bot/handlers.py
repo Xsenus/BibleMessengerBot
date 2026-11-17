@@ -19,7 +19,6 @@ from app.services.errors import UserError
 from app.services.formatting import escape
 from app.services.i18n import initial_ui,native_ui_name,tr,ui_for_language
 from app.services.locks import chat_lock
-from app.services.scheduling import parse_hhmm
 from app.services.subscriptions import create_or_update_subscription,pause_unavailable,resume_paused,resumed_notice,set_enabled
 from app.bot.common import authorize,button,destination,enum_value,register_context,reply  # noqa: F401
 from app.bot.branding import commands_for
@@ -191,7 +190,7 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
                 mode = mode_name(value) if action=='mode' else 'reading_plan'
                 await create_or_update_subscription(connection,chat_id=chat_id,created_by=callback.from_user.id,
                     translation_id=edition['id'],mode=mode,
-                    send_time=reading_defaults.DEFAULT_TIMES.get(mode, parse_hhmm(settings.default_send_time)),timezone_name=chat['timezone'],
+                    send_time=reading_defaults.default_time(chat, mode, settings.default_send_time),timezone_name=chat['timezone'],
                     plan_code=value if action=='plan' else None)
                 text,markup = tr(locale,'saved'),settings_keyboard(chat)
             elif action=='plans':
@@ -217,7 +216,7 @@ async def callback_handler(callback: CallbackQuery,bot: Any,db_pool: Any,setting
                     raise UserError('not_ready')
                 sub = await create_or_update_subscription(connection,chat_id=chat_id,created_by=callback.from_user.id,
                     translation_id=edition['id'],mode='verse_of_day',
-                    send_time=reading_defaults.DEFAULT_TIMES['verse_of_day'],timezone_name=chat['timezone'])
+                    send_time=reading_defaults.default_time(chat, 'verse_of_day', settings.default_send_time),timezone_name=chat['timezone'])
                 text,markup = daily_confirmation(sub,locale),settings_keyboard(chat)
             elif action=='zones':
                 from app.bot.timezones import menu

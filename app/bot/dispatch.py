@@ -61,7 +61,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
                 'Buttons hidden. Restore them with /menu. Commands remain available in Menu.'),ReplyKeyboardRemove()
     # /start в личном чате — приветствие и главная клавиатура
     if name=='start' and enum_value(message.chat.type)=='private':
-        if connection is not None and 'chat_type' in chat and reading_defaults.supported(chat):
+        if connection is not None and reading_defaults.supported(chat):
             await reading_defaults.initialize(connection, chat['telegram_chat_id'])
         if not is_bridged(getattr(bot,'platform',None)) and connection is not None:
             await connection.execute('UPDATE telegram_chats SET keyboard_hidden=false WHERE telegram_chat_id=$1',message.chat.id)
@@ -103,7 +103,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             raise UserError('not_ready')
         sub = await create_or_update_subscription(connection,chat_id=chat['telegram_chat_id'],created_by=user.id,
             translation_id=edition['id'],mode='verse_of_day',
-            send_time=parse_hhmm(args[0]) if args else reading_defaults.DEFAULT_TIMES['verse_of_day'],
+            send_time=parse_hhmm(args[0]) if args else reading_defaults.default_time(chat, 'verse_of_day', settings.default_send_time),
             timezone_name=args[1] if len(args)>1 else chat['timezone'])
         return daily_confirmation(sub,locale),settings_keyboard(chat)
     # /claim КОД — стать владельцем бота (один раз, только в личном чате)
@@ -263,7 +263,7 @@ async def run_command(connection: Any, bot: Any, settings: Any, message: Message
             raise UserError('not_ready')
         await create_or_update_subscription(connection,chat_id=chat['telegram_chat_id'],created_by=user.id,
             translation_id=edition['id'],mode=mode,
-            send_time=(parse_hhmm(args[1]) if len(args)>1 else reading_defaults.DEFAULT_TIMES.get(mode, parse_hhmm(settings.default_send_time))),
+            send_time=(parse_hhmm(args[1]) if len(args)>1 else reading_defaults.default_time(chat, mode, settings.default_send_time)),
             timezone_name=args[2] if len(args)>2 else chat['timezone'],plan_code=args[3] if len(args)>3 else None)
         return tr(locale,'saved'),settings_keyboard(chat)
     # /reset confirm — сбросить прогресс и отключить подписки

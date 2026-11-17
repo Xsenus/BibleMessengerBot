@@ -12,7 +12,7 @@ from app.services import bible
 from app.services.errors import UserError
 from app.services.formatting import split_message
 from app.services.locks import chat_lock
-from app.services.scheduling import next_occurrence, next_reading, on_date
+from app.services.scheduling import next_occurrence, next_reading, on_date, parse_hhmm
 
 DEFAULT_TIMES = {'morning_verse': time(9, 38), 'verse_of_day': time(14), 'evening_verse': time(21, 13)}
 OFFER_TIME = time(20)
@@ -23,7 +23,14 @@ ELIGIBLE = """c.is_active AND c.chat_type='private' AND c.platform IN ('telegram
 
 def supported(chat: Any) -> bool:
     """Стандарт по умолчанию применяется к личным чатам Telegram и MAX."""
-    return chat['chat_type'] == 'private' and chat.get('platform', 'telegram') in {'telegram', 'max'}
+    return chat.get('chat_type') == 'private' and chat.get('platform', 'telegram') in {'telegram', 'max'}
+
+
+def default_time(chat: Any, mode: str, fallback: str) -> time:
+    """Выбрать стандартный час в личном чате, сохранив настройку для прочих режимов и чатов."""
+    if supported(chat) and mode in DEFAULT_TIMES:
+        return DEFAULT_TIMES[mode]
+    return parse_hhmm(fallback)
 
 
 async def _preferences(connection: Any, chat_id: int) -> Any:
