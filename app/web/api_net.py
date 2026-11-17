@@ -11,8 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.net import store
 from app.net.router import STRATEGIES
-from app.net.services import SERVICES
-from app.net.telegram import proxy_url as telegram_proxy_url
+from app.net.services import SERVICES, telegram_proxy_url
 from app.services import secrets_box
 
 

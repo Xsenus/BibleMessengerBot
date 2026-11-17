@@ -55,11 +55,8 @@ function Panel() {
     return () => window.removeEventListener('admin:unauthorized', expired);
   }, [authed]);
   if (!authed) return <Login notice={notice} onDone={() => { setNotice(''); setAuthed(true); }} />;
-  const Page = current.page;
   return (
-    <Shell current={current} onLogout={() => { setKey(''); setNotice(''); setAuthed(false); }}>
-      <Page key={current.id} />
-    </Shell>
+    <Shell current={current} onLogout={() => { setKey(''); setNotice(''); setAuthed(false); }} />
   );
 }
 

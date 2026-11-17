@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Clock, RefreshCw, Send, TriangleAlert } from 'lucide-react';
-import { Status, useData } from '../ui.jsx';
+import { Status } from '../ui.jsx';
 import { PageHeader, Panel, Stat, StatusBadge, TimeAgo, formatNumber } from '../components.jsx';
 import { PLATFORMS, SERVICES, label } from '../labels.js';
 import ReleaseStatus from '../ReleaseStatus.jsx';
@@ -11,8 +11,8 @@ const isFresh = (lastSeen) => {
   return age >= -10000 && age < 180000;
 };
 
-export default function Overview() {
-  const { data, error, loading, reload } = useData('/overview');
+export default function Overview({ overview }) {
+  const { data, error, loading, reload } = overview;
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = () => { reload(); setRefreshKey((value) => value + 1); };
   const totalChats = data ? data.platforms.reduce((sum, p) => sum + p.count, 0) : 0;

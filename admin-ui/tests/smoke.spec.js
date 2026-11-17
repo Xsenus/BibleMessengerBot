@@ -1,5 +1,5 @@
 // Каждый раздел открывается, показывает данные из API и не пишет ошибок в консоль.
-import { test, expect, login, openSection } from './support.js';
+import { KEY, test, expect, login, openSection } from './support.js';
 import { SECTIONS } from './sections.js';
 
 // Заголовок раздела: имя может включать кнопки рядом с ним («Состояние Обновить»).
@@ -42,6 +42,28 @@ test('ошибка API показывается в разделе, а не ло�
   await openSection(page, 'Настройки');
   await expect(page.getByRole('heading', { name: 'Настройки' })).toBeVisible();
   api.problems = api.problems.filter((p) => !p.includes('status of 500'));
+});
+
+test('зависшая сводка показывает тайм-аут и загружается после обновления', async ({ page, api }) => {
+  await page.clock.install();
+  await page.addInitScript((key) => sessionStorage.setItem('biblebot-admin-key', key), KEY);
+  let finish;
+  const slow = new Promise((resolve) => { finish = resolve; });
+  api.on('GET', '/overview', () => slow);
+  try {
+    await page.goto('./#/overview');
+    await expect.poll(() => api.requests.filter((r) => r.path === '/overview').length).toBe(1);
+    await expect(page.getByText('Загрузка…', { exact: true })).toBeVisible();
+    await page.clock.fastForward(15100);
+    await expect(page.getByRole('alert').filter({ hasText: 'Сервер не ответил за 15 секунд' })).toBeVisible();
+    api.on('GET', '/overview', api.data['/overview']);
+    await page.getByRole('button', { name: 'Обновить', exact: true }).click();
+    await expect(page.getByText('Отправлено за сутки')).toBeVisible();
+    await expect(page.getByText('Сервер не ответил за 15 секунд', { exact: false })).toHaveCount(0);
+    expect(api.requests.filter((r) => r.path === '/overview')).toHaveLength(2);
+  } finally {
+    finish(api.data['/overview']);
+  }
 });
 
 test('на телефоне все разделы доступны', async ({ page, api }) => {
