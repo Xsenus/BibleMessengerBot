@@ -120,29 +120,35 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             art = artwork.ArtSettings.from_env()
         except ValueError:
             raise HTTPException(500, 'invalid_image_settings') from None
-        usage: dict[str, int] = {}
-        for record in await image_router.budget_usage(conn):
-            usage[record['provider']] = usage.get(record['provider'], 0) + record['daily']
+        budget_usage = await image_router.budget_usage(conn)
+        usage, _ = image_router.daily_usage(budget_usage)
+        openai = await image_router.openai_readiness(conn, art, budget_usage) if art.provider == 'openai' else None
         health = {r['provider']: r for r in await conn.fetch(
             'SELECT provider,max(blocked_until) AS blocked_until,max(error_code) AS error_code FROM image_provider_health GROUP BY provider')}
-        keys = {'openai': art.key, **art.extra_keys}
         builtin = []
         for name in art.provider_order:
             state = health.get(name)
-            builtin.append(dict(name=name, model=MODELS[name], configured=bool(keys.get(name)), daily_used=usage.get(name, 0),
-                                daily_limit=art.daily_requests,
-                                blocked_until=state['blocked_until'].isoformat() if state and state['blocked_until'] else None,
-                                error_code=state['error_code'] if state else None))
+            configured = bool(art.openai_keys) if name == 'openai' else bool(art.extra_keys.get(name))
+            pause = dict(blocked_until=state['blocked_until'].isoformat() if state and state['blocked_until'] else None,
+                         error_code=state['error_code'] if state else None)
+            if name == 'openai' and openai is not None:
+                pause = {key: openai[key] for key in pause}
+            builtin.append(dict(name=name, model=MODELS[name], configured=configured, daily_used=usage.get(name, 0),
+                                daily_limit=art.daily_requests, daily_scope=art.openai_daily_scope if name == 'openai' else 'provider',
+                                **pause))
         custom = []
         for row in await conn.fetch('SELECT * FROM image_custom_providers ORDER BY priority,id'):
             item = public(row)
             item['daily_used'] = usage.get('x-' + row['slug'], 0)
             item['host'] = free_image_providers.host_of(dict(row))
             custom.append(item)
-        jobs = {r['state']: r['n'] for r in await conn.fetch('SELECT state,count(*) AS n FROM image_generation_jobs GROUP BY state')}
+        queue = await artwork.queue_counts(conn)
+        jobs = {state: queue['history'].get(state, 0) + queue['current'].get(state, 0)
+                for state in queue['history'].keys() | queue['current'].keys()}
         return dict(mode=art.provider, monthly_budget_usd=str(art.monthly_usd), builtin=builtin, custom=custom, jobs=jobs,
                     templates=free_image_providers.TEMPLATES, secrets_ready=_secrets_ready(), secrets_dedicated=bool(os.getenv('SECRETS_KEY', '').strip()),
-                    planner_ready=await _planner_ready())
+                    planner_ready=await _planner_ready() if openai is None or any(c['is_enabled'] for c in custom) else None,
+                    openai_readiness=openai, queue=queue)
 
     class ImageTuning(BaseModel):
         ranking: str | None = Field(None, pattern='^(priority|auto)$')

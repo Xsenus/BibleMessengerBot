@@ -3,6 +3,28 @@ import { test, expect, login, openSection, answerDialog } from './support.js';
 
 test.beforeEach(async ({ page, api }) => { void api; await login(page); });
 
+test('режим OpenAI показывает готовность и отделяет историю ошибок', async ({ page, api }) => {
+  const prior = api.data['/image-providers'];
+  api.on('GET', '/image-providers', {
+    ...prior, mode: 'openai', custom: [], planner_ready: false,
+    openai_readiness: {
+      status: 'available', configured_keys: 1, worker_ready: true,
+      blocked_until: null, error_code: null, last_success_at: '2026-10-01T12:00:00Z',
+    },
+    queue: { current: { running: 1 }, history: { queued: 2, failed: 9 } },
+  });
+  await openSection(page, 'Генераторы картинок');
+  await expect(page.getByRole('heading', { name: 'Готовность OpenAI' })).toBeVisible();
+  await expect(page.getByText('Последняя успешная генерация')).toBeVisible();
+  await expect(page.getByText('Служба иллюстраций работает')).toBeVisible();
+  await expect(page.getByText(/Локальная нейросеть описания сцен/)).toHaveCount(0);
+  const current = page.locator('.stat').filter({ hasText: 'Текущие задания' });
+  const history = page.locator('.stat').filter({ hasText: 'История заданий' });
+  await expect(current).toContainText('1 выполняется');
+  await expect(current).not.toContainText('9 с ошибкой');
+  await expect(history).toContainText('9 с ошибкой');
+});
+
 test('объявление: создание по дням недели', async ({ page, api }) => {
   await openSection(page, 'Объявления');
   await page.getByPlaceholder('Заголовок (необязательно)').fill('Субботнее чтение');

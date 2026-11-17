@@ -491,9 +491,7 @@ async def reserve(connection, job_id, settings: ArtSettings):
         return identifier
 
 
-async def due_jobs(connection, maximum=6, *, max_attempts=3):
-    """Задания, которым пора генерироваться: нужны активным подпискам на будущие даты или ожидающим карточкам (по приоритету и сроку), включая продолжение принятых удалённых задач."""
-    return await connection.fetch("""WITH eligible AS (
+SUBSCRIPTION_AND_REQUEST_TARGETS = """
         SELECT j.id,min(t.scheduled_for) AS needed_at,0 AS priority
         FROM image_generation_jobs j
         JOIN image_generation_targets t ON t.image_id=j.image_id
@@ -511,7 +509,26 @@ async def due_jobs(connection, maximum=6, *, max_attempts=3):
         JOIN illustration_requests r ON r.image_id=j.image_id
         JOIN telegram_chats c ON c.telegram_chat_id=r.telegram_chat_id
         WHERE r.state='waiting' AND r.telegram_message_id IS NOT NULL AND c.is_active
-        GROUP BY j.id
+        GROUP BY j.id"""
+
+
+async def queue_counts(connection):
+    """Посчитать незаконченные задания с получателями и историю, используя те же цели, что и воркер."""
+    rows = await connection.fetch(f"""WITH targets AS ({SUBSCRIPTION_AND_REQUEST_TARGETS})
+        SELECT j.state, j.state<>'ready' AND (
+            EXISTS(SELECT 1 FROM targets WHERE targets.id=j.id)
+            OR (j.admin_requested AND j.state IN ('queued','retry','running'))
+        ) AS is_current, count(*) AS n
+        FROM image_generation_jobs j GROUP BY 1,2 ORDER BY 1,2""")
+    result: dict[str, dict[str, int]] = {'current': {}, 'history': {}}
+    for row in rows:
+        result['current' if row['is_current'] else 'history'][row['state']] = row['n']
+    return result
+
+
+async def due_jobs(connection, maximum=6, *, max_attempts=3):
+    """Задания, которым пора генерироваться: нужны активным подпискам на будущие даты или ожидающим карточкам (по приоритету и сроку), включая продолжение принятых удалённых задач."""
+    return await connection.fetch(f"""WITH eligible AS ({SUBSCRIPTION_AND_REQUEST_TARGETS}
         UNION ALL
         SELECT j.id,j.created_at,2 FROM image_generation_jobs j WHERE j.admin_requested)
         SELECT j.id FROM eligible e JOIN image_generation_jobs j ON j.id=e.id

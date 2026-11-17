@@ -72,7 +72,8 @@ export const readResponses = {
   '/image-providers': {
     mode: 'auto', monthly_budget_usd: '10',
     builtin: [{ name: 'openai', model: 'gpt-image-1', configured: false, daily_used: 0, daily_limit: 10, blocked_until: null, error_code: null }],
-    custom: [provider], jobs: { queued: 4, done: 210, failed: 2 },
+    custom: [provider], jobs: { queued: 4, ready: 210, failed: 2 },
+    openai_readiness: null, queue: { current: { queued: 4 }, history: { ready: 210, failed: 2 } },
     templates: [{ id: 'cloudflare-flux', label: 'Cloudflare Workers AI (FLUX)', adapter: 'cloudflare', model: '@cf/black-forest-labs/flux-1-schnell', needs_key: true, needs_account: true, steps: null, width: 1216, height: 832, signup: 'https://dash.cloudflare.com/', free: 'Бесплатно до 10 000 нейронов в сутки.', howto: ['Зарегистрируйтесь', 'Создайте токен Workers AI'] }],
     secrets_ready: true, secrets_dedicated: false, planner_ready: true,
   },

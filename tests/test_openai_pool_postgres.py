@@ -30,6 +30,47 @@ async def second_job(c):
     return await c.fetchval('SELECT max(id) FROM image_generation_jobs')
 
 
+async def test_admin_openai_readiness_uses_current_keys_and_separates_queue_history(db, monkeypatch):
+    from tests.test_admin_api_postgres import H, make
+
+    c, _, archived = await job(db)
+    current = await second_job(c)
+    await c.execute("UPDATE image_generation_jobs SET state='failed',error_code='quality_unavailable' WHERE id=$1", archived)
+    await c.execute("UPDATE image_generation_jobs SET admin_requested=true WHERE id=$1", current)
+    await c.execute("INSERT INTO service_heartbeats(service) VALUES('illustrator')")
+    key = 'active-fixture'
+    active = router.fingerprint(api.Provider('openai', key))
+    expired = router.fingerprint(api.Provider('openai', 'old-fixture'))
+    await c.execute("""INSERT INTO image_provider_health(provider,key_fingerprint,blocked_until,error_code)
+        VALUES('openai',$1,now()+interval '1 day','auth')""", expired)
+    success = await c.fetchval("""INSERT INTO image_generation_attempts
+        (job_id,reserved_usd,provider,key_fingerprint,state,created_at)
+        VALUES($1,0.10,'openai',$2,'succeeded',now()-interval '3 minutes') RETURNING created_at""", archived, active)
+    await c.execute("""INSERT INTO image_generation_attempts
+        (job_id,reserved_usd,provider,key_fingerprint,state,error_code)
+        VALUES($1,0.10,'openai',$2,'succeeded','quality_unavailable')""", current, active)
+    monkeypatch.setenv('ILLUSTRATION_PROVIDER', 'openai')
+    monkeypatch.setenv('OPENAI_API_KEY', '')
+    monkeypatch.setenv('OPENAI_API_KEYS', key)
+    monkeypatch.setenv('IMAGE_MONTHLY_BUDGET_USD', '10')
+    monkeypatch.setenv('IMAGE_DAILY_MAX_REQUESTS', '6')
+    async with make(monkeypatch, c) as client:
+        response = await client.get('/api/admin/image-providers', headers=H)
+        assert response.status_code == 200
+        data = response.json()
+        assert data['openai_readiness'] == {
+            'status': 'available', 'configured_keys': 1, 'worker_ready': True,
+            'blocked_until': None, 'error_code': None, 'last_success_at': success.isoformat(),
+        }
+        assert data['builtin'][0]['configured'] and data['builtin'][0]['blocked_until'] is None
+        assert data['queue'] == {'current': {'queued': 1}, 'history': {'failed': 1}}
+        assert key not in response.text and active not in response.text
+        await c.execute("""INSERT INTO image_provider_health(provider,key_fingerprint,blocked_until,error_code)
+            VALUES('openai',$1,now()+interval '1 hour','quota')""", active)
+        blocked = (await client.get('/api/admin/image-providers', headers=H)).json()['openai_readiness']
+        assert blocked['status'] == 'blocked' and blocked['error_code'] == 'quota' and blocked['blocked_until']
+
+
 async def test_bad_key_does_not_block_good_key_and_restart_preserves_breakers(db):
     c, _, identifier = await job(db)
     settings = pool()
