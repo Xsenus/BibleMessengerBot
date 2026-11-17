@@ -235,7 +235,35 @@ test('резервные копии: скачивание файла', async ({ 
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Скачать .dump biblebot-2026-10-16.dump.age' }).click();
   expect((await download).suggestedFilename()).toBe('biblebot-2026-10-16.dump');
-  expect(api.writes()).toMatchObject([{ method: 'POST', path: '/backups/2/download' }]);
+  expect(api.writes().filter((r) => r.path !== '/backups/reconcile')).toMatchObject([{ method: 'POST', path: '/backups/2/download' }]);
+});
+
+test('резервные копии: отсутствующая запись исчезает, файл удаляется после подтверждения', async ({ page, api }) => {
+  const catalog = api.data['/backups'];
+  let items = catalog.items;
+  api.on('GET', /^\/backups\?/, () => ({ ...catalog, items, total: items.length }));
+  api.on('POST', '/backups/reconcile', ({ body }) => {
+    items = items.filter(({ id }) => id !== 1);
+    return { items: body.ids.map((id) => ({ id, status: id === 1 ? 'removed' : 'available' })) };
+  });
+  api.on('DELETE', '/backups/2', () => {
+    items = [];
+    return { status: 200, json: { id: 2, status: 'removed' } };
+  });
+
+  await openSection(page, 'Резервные копии');
+  await expect(page.getByRole('heading', { name: 'Копии (1)' })).toBeVisible();
+  await expect(page.getByText('biblebot-2026-10-15.dump.age')).toHaveCount(0);
+  const remove = page.getByRole('button', { name: 'Удалить biblebot-2026-10-16.dump.age' });
+  await remove.click();
+  await expect(page.getByRole('dialog').getByText(/biblebot-2026-10-16\.dump\.age/)).toBeVisible();
+  await answerDialog(page, { accept: false });
+  expect(api.writes().filter((r) => r.method === 'DELETE')).toHaveLength(0);
+  await remove.click();
+  await answerDialog(page);
+  await expect(page.getByText('Резервная копия удалена.')).toBeVisible();
+  await expect(page.getByText('Проверенных копий пока нет')).toBeVisible();
+  expect(api.writes().filter((r) => r.method === 'DELETE')).toMatchObject([{ path: '/backups/2' }]);
 });
 
 test('настройки: скрытие раздела поддержки', async ({ page, api }) => {

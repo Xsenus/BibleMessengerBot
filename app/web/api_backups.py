@@ -1,18 +1,25 @@
-"""Защищённый список резервных копий и скачивание проверенного расшифрованного dump из S3."""
+"""Защищённый каталог, сверка, удаление и скачивание резервных копий БД из S3."""
 from __future__ import annotations
 
 import asyncio
 import tempfile
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Annotated, Any
 
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Path as ApiPath
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import FileResponse
 from starlette.types import Receive, Scope, Send
 
 from app.services import admin_backups, cloud_backup
+
+
+class ReconcileIn(BaseModel):
+    """Идентификаторы одной видимой страницы каталога."""
+
+    ids: list[Annotated[int, Field(ge=1, le=9223372036854775807)]] = Field(min_length=1, max_length=30)
 
 
 class BackupResponse(FileResponse):
@@ -37,7 +44,7 @@ class BackupResponse(FileResponse):
 
 
 def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable[Any]]) -> APIRouter:
-    """Подключить каталог и скачивание только с X-Admin-Key; одна загрузка за раз ограничивает место на диске."""
+    """Подключить каталог только с X-Admin-Key и сериализовать скачивание и ручное удаление."""
     router = APIRouter(prefix='/api/admin/backups', dependencies=[Depends(auth)])
     download_lock = asyncio.Lock()
     probe_slots = asyncio.Semaphore(3)
@@ -59,16 +66,25 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             raise HTTPException(404, 'Резервная копия не найдена')
         return dict(record)
 
-    def cloud_settings() -> cloud_backup.CloudSettings:
-        """Не запускать проверки или скачивание без S3 и корректного ключа шифрования."""
+    def cloud_settings(*, decrypt: bool = True) -> cloud_backup.CloudSettings:
+        """Проверить настройку S3 и, если нужен dump, ключ расшифровки."""
         try:
             settings = cloud_backup.CloudSettings.from_env()
             if not settings.enabled:
                 raise ValueError('disabled')
-            cloud_backup.encryption_bytes(settings.encryption_key)
+            if decrypt:
+                cloud_backup.encryption_bytes(settings.encryption_key)
             return settings
         except ValueError:
-            raise HTTPException(503, 'Облачное хранилище или ключ расшифровки не настроены') from None
+            raise HTTPException(503, 'Облачное хранилище или ключ расшифровки не настроены' if decrypt
+                                else 'Облачное хранилище не настроено') from None
+
+    async def forget(conn: Any, record: Any) -> bool:
+        """Удалить именно проверенную квитанцию, сохранив запись при конкурентном обновлении."""
+        deleted = await conn.fetchval('''DELETE FROM cloud_backup_receipts WHERE id=$1 AND kind='database'
+            AND object_key=$2 AND sha256=$3 AND byte_count=$4 AND verified_at=$5 RETURNING id''',
+            record['id'], record['object_key'], record['sha256'], record['byte_count'], record['verified_at'])
+        return deleted is not None
 
     @router.get('/{identifier}/availability')
     async def availability(identifier: int = ApiPath(ge=1, le=9223372036854775807)) -> dict:
@@ -80,39 +96,98 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
             async with probe_slots:
                 await run_in_threadpool(admin_backups.probe, record, settings)
         except ClientError as error:
-            status = 'missing' if error.response.get('Error', {}).get('Code') in {'404','NoSuchKey','NotFound'} else 'unavailable'
+            status = 'missing' if admin_backups.missing(error) else 'unavailable'
         except ValueError:
             status = 'invalid'
         except Exception:
             status = 'unavailable'
         return {'id': identifier, 'status': status}
 
+    @router.post('/reconcile')
+    async def reconcile(payload: ReconcileIn) -> dict:
+        """Сверить страницу каталога и убрать только квитанции с подтверждённо отсутствующим объектом."""
+        settings = cloud_settings(decrypt=False)
+        pool = await pool_factory()
+        ids = list(dict.fromkeys(payload.ids))
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT * FROM cloud_backup_receipts WHERE kind='database' AND id=ANY($1::bigint[])", ids)
+
+        async def check(record: Any) -> str:
+            """Отличить подтверждённое отсутствие от ошибки доступа, сети или метаданных."""
+            try:
+                async with probe_slots:
+                    absent = await run_in_threadpool(admin_backups.reconcile, record, settings)
+                return 'missing' if absent else 'available'
+            except ValueError:
+                return 'invalid'
+            except Exception:
+                return 'unavailable'
+
+        checked = await asyncio.gather(*(check(row) for row in rows))
+        statuses = dict(zip((row['id'] for row in rows), checked, strict=True))
+        absent = [row for row in rows if statuses[row['id']] == 'missing']
+        if absent:
+            async with pool.acquire() as conn:
+                for row in absent:
+                    statuses[row['id']] = 'removed' if await forget(conn, row) else 'unavailable'
+        return {'items': [{'id': identifier, 'status': statuses.get(identifier, 'removed')} for identifier in ids]}
+
     @router.get('')
     async def backups(limit: int = Query(30, ge=1, le=100), offset: int = Query(0, ge=0, le=1000000),
                       conn: Any = Conn) -> dict:
         """Вернуть страницу квитанций БД, дату снимка и проверки, размер и доступность облачного скачивания."""
+        storage_enabled = False
         try:
             settings = cloud_backup.CloudSettings.from_env()
-            configured = settings.enabled
-            if configured:
+            storage_enabled = settings.enabled
+            configured = storage_enabled
+            if storage_enabled:
                 cloud_backup.encryption_bytes(settings.encryption_key)
         except ValueError:
             configured = False
         rows = await conn.fetch("SELECT * FROM cloud_backup_receipts WHERE kind='database' ORDER BY id DESC LIMIT $1 OFFSET $2", limit, offset)
         total = await conn.fetchval("SELECT count(*) FROM cloud_backup_receipts WHERE kind='database'")
         return {'items': [admin_backups.public(r) for r in rows], 'total': total,
-                'limit': limit, 'offset': offset, 'download_enabled': configured}
+                'limit': limit, 'offset': offset, 'download_enabled': configured, 'storage_enabled': storage_enabled}
+
+    @router.delete('/{identifier}')
+    async def remove(identifier: int = ApiPath(ge=1, le=9223372036854775807)) -> dict:
+        """Удалить объект ровно одной квитанции из S3, затем убрать её из каталога."""
+        if download_lock.locked():
+            raise HTTPException(409, 'Дождитесь окончания текущей операции с резервной копией.')
+        async with download_lock:
+            record = await receipt(identifier)
+            settings = cloud_settings(decrypt=False)
+            try:
+                async with probe_slots:
+                    await run_in_threadpool(admin_backups.reconcile, record, settings, delete=True)
+            except ValueError:
+                raise HTTPException(409, 'Метаданные копии изменились. Обновите список и проверьте копию.') from None
+            except ClientError as error:
+                code = error.response.get('Error', {}).get('Code')
+                if code in {'412', 'PreconditionFailed'}:
+                    raise HTTPException(409, 'Копия в S3 изменилась. Обновите список.') from None
+                if code in {'403', 'AccessDenied', 'Forbidden'}:
+                    raise HTTPException(403, 'Хранилище S3 не разрешило операцию с этой копией.') from None
+                raise HTTPException(502, 'S3 не подтвердило удаление файла. Обновите список и повторите.') from None
+            except Exception:
+                raise HTTPException(502, 'S3 не подтвердило удаление файла. Обновите список и повторите.') from None
+            pool = await pool_factory()
+            async with pool.acquire() as conn:
+                if not await forget(conn, record):
+                    raise HTTPException(409, 'Запись уже изменилась. Обновите список.')
+        return {'id': identifier, 'status': 'removed'}
 
     @router.post('/{identifier}/download')
     async def download(identifier: int = ApiPath(ge=1, le=9223372036854775807)) -> BackupResponse:
         """Проверить квитанцию и архив, затем передать .dump. Никогда не восстанавливать рабочую БД и не раскрывать подписанные URL/ключи при ошибках."""
-        record = await receipt(identifier)
-        settings = cloud_settings()
         if download_lock.locked():
             raise HTTPException(409, 'Другая копия уже скачивается. Дождитесь завершения и повторите.')
         await download_lock.acquire()
         temporary = None
         try:
+            record = await receipt(identifier)
+            settings = cloud_settings()
             temporary = tempfile.TemporaryDirectory(prefix='biblebot-admin-backup-')
             from pathlib import Path
             path = await run_in_threadpool(admin_backups.prepare, dict(record), Path(temporary.name), settings)
@@ -123,7 +198,9 @@ def build_router(auth: Callable[..., None], pool_factory: Callable[[], Awaitable
                     temporary.cleanup()
             finally:
                 download_lock.release()
-            if isinstance(error, ClientError) and error.response.get('Error', {}).get('Code') in {'404', 'NoSuchKey', 'NotFound'}:
+            if isinstance(error, HTTPException):
+                raise
+            if isinstance(error, ClientError) and admin_backups.missing(error):
                 raise HTTPException(404, 'Файл резервной копии отсутствует в хранилище') from None
             if isinstance(error, Exception):
                 raise HTTPException(502, 'Не удалось скачать или проверить архив. Файл не выдан; попробуйте позже.') from None
