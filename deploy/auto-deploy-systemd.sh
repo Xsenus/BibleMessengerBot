@@ -48,6 +48,7 @@ outcome=''
 activated=false
 schema_before=''
 panel=''
+metadata=''
 venv_tmp=''
 
 status() {
@@ -98,6 +99,7 @@ finish() {
     trap - EXIT TERM INT
     rm -f -- "$bundle" "$base/.current.$$"
     if [[ -n $panel && -d $panel ]]; then rm -rf -- "$panel"; fi
+    if [[ -n $metadata ]]; then rm -f -- "$metadata"; fi
     if [[ -n $venv_tmp && -d $venv_tmp ]]; then rm -rf -- "$venv_tmp"; fi
     if (( code != 0 )); then
         outcome=failed
@@ -169,6 +171,13 @@ python3 "$runtime" panel "$bundle" "$panel"
 if [[ ! -s $release/app/web/static/panel/index.html ]]; then
     mv -T "$panel" "$release/app/web/static/panel"
     panel=''
+fi
+if [[ ! -s $release/BUILD-METADATA.json ]]; then
+    metadata=$(mktemp "$base/.build-metadata.XXXXXXXX")
+    printf '{"commit":"%s","built_at":"%s"}\n' "$target" "$(date -u +%FT%TZ)" > "$metadata"
+    chmod 644 "$metadata"
+    mv -T "$metadata" "$release/BUILD-METADATA.json"
+    metadata=''
 fi
 
 # Use immutable environments per dependency set. Existing units resolve the physical release at startup.
