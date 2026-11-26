@@ -1,0 +1,17 @@
+[Unit]
+Description=BibleMessengerBot native PostgreSQL and encrypted S3 backup
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/bible-messenger-bot/runtime.env
+EnvironmentFile=/etc/bible-messenger-bot/s3.env
+ExecStart=/usr/bin/bash /usr/local/sbin/bible-backup
+UMask=0077
+Nice=19
+IOSchedulingClass=idle
+CPUQuota=35%
+MemoryHigh=128M
+MemoryMax=192M
+TimeoutStartSec=2h
