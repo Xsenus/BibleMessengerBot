@@ -29,7 +29,21 @@ docker compose --profile maintenance run --rm -T --no-deps backup python -m app.
 
 Отдельные картинки восстанавливаются через манифест и `app.illustrations_admin add`, проверяющий текущий текст стиха; полный dump восстанавливает их автоматически. Секреты `.env` в dump не входят: нужны отдельные приватные копии конфигурации, ключа шифрования и сведения о commit приложения.
 
-На действующем VPS ежедневный systemd timer запускает `backup.sh` в 01:30–01:35 Asia/Novosibirsk. Для новой установки скопируйте units из `deploy/` по [operations.md](operations.md); путь проекта и часовой пояс можно изменить в копии units. Проверяйте `systemctl list-timers --all bible-messenger-backup.timer` и журнал соответствующей service. Наличие timer не заменяет периодическую пробу восстановления; фактические результаты приведены в текущем аудите.
+Для установки Docker ежедневный `bible-messenger-backup.timer` запускает `backup.sh` в 01:30–01:35 Asia/Novosibirsk. Скопируйте units из `deploy/` по [operations.md](operations.md), задав путь проекта и часовой пояс. Проверяйте `systemctl list-timers --all bible-messenger-backup.timer` и журнал соответствующей service. Наличие timer не заменяет периодическую пробу восстановления.
+
+Для нативной установки systemd с PostgreSQL на хосте установите отдельную службу. Она использует действующий выпуск и его Python-окружение, параметры подключения из `runtime.env`, ключи S3 из `s3.env` и существующий `bible-systemd-ops`. Дамп создаётся однопоточно от роли приложения. Общая блокировка с автодеплоем исключает смену выпуска во время резервирования. Локальная ротация выполняется после подтверждённой загрузки и полного чтения архива обратно из S3. Лимиты службы ограничивают CPU и память на малом VPS.
+
+```bash
+sudo install -m 0755 deploy/backup-systemd.sh /usr/local/sbin/bible-backup
+sudo install -m 0644 deploy/bible-messenger-backup-native.service deploy/bible-messenger-backup-native.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now bible-messenger-backup-native.timer
+sudo systemctl start --no-block bible-messenger-backup-native.service
+sudo systemctl list-timers --all bible-messenger-backup-native.timer
+sudo journalctl -u bible-messenger-backup-native.service
+```
+
+Расписание нативного таймера — ежедневно в 01:30–01:35 по Новосибирску с выполнением пропущенного запуска после простоя. Успешный запуск должен завершиться строками `"status": "verified"` и `Backup complete`. Копии находятся вне каталогов выпусков, в `/opt/bible-messenger-bot/backups/`, и доступны через обычный каталог резервных копий панели.
 
 Успешный локальный `Database backup: ...` ещё не подтверждает выгрузку в S3: в журнале должны присутствовать `status: verified` и успешное завершение service. Файлы на VPS находятся в `/opt/bible-messenger-bot/backups/`, облачные дампы — под префиксом `bible-messenger/v1/database/`. Облачные квитанции доступны в разделе «Резервные копии» панели и через `backup_admin status`. Если после сборки из checkout с `umask 077` возникает `PermissionError` при импорте `backup_admin`, пересоберите образ с актуальным Dockerfile: права исходного кода нормализуются при сборке, секреты и сами dump остаются приватными.
 
